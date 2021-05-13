@@ -1,4 +1,4 @@
-create table testje ( id int not null );
+create table testje ( id int not null, id2 int );
 
 insert into testje (id) VALUES (5), (6), ($1);
 

@@ -6,5 +6,5 @@ select id
   from testje
  where
    id = 5
-  -- and id = $1
+  and id = $1
                             ;

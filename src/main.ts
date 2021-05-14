@@ -20,27 +20,24 @@ import {
   SelectedColumn,
   ExprParameter,
   ExprRef,
+  ExprBinary,
 } from "pgsql-ast-parser";
 import * as fs from "fs/promises";
 
 go();
 
-type ScalarT = {
-  kind: "scalar";
+type Type = SimpleT | SetT | UnifVar;
+type SimpleT = {
+  kind: "simple";
   name: QName;
-  nullable: boolean;
+  typevar: null | SimpleT | UnifVar;
 };
 type UnknownT = {
   kind: "unknown";
 };
-type ArrayT = {
-  kind: "array";
-  inner: ScalarT | ArrayT;
-  nullable: boolean;
-};
 type Field = {
   name: Name | null;
-  type: ScalarT | ArrayT | UnifVar;
+  type: SimpleT | UnifVar;
 };
 type SetT = {
   kind: "set";
@@ -51,18 +48,31 @@ type UnifVar = {
   index: number; // eg: "$1" -> 1
 };
 
-const BuiltinTypes: { [name: string]: ScalarT } = {
+const BuiltinTypes = {
   Boolean: {
-    kind: "scalar",
+    kind: "simple",
     name: { name: "bool", schema: "pg_catalog" },
-    nullable: false,
+    typevar: null,
   },
   Integer: {
-    kind: "scalar",
-    name: { name: "int8", schema: "pg_catalog" },
-    nullable: false,
+    kind: "simple",
+    name: { name: "integer", schema: "pg_catalog" },
+    typevar: null,
   },
-};
+} as const;
+
+const BuiltinTypeConstructors = {
+  Nullable: (t: SimpleT): SimpleT => ({
+    kind: "simple",
+    name: { name: "nullable", schema: "" },
+    typevar: t,
+  }),
+  Array: (t: SimpleT): SimpleT => ({
+    kind: "simple",
+    name: { name: "array", schema: "pg_catalog" },
+    typevar: t,
+  }),
+} as const;
 
 type Global = {
   readonly tables: ReadonlyArray<{
@@ -79,7 +89,7 @@ type Global = {
 // "Global" scoping: per function call or prepared statement
 type Parameter = {
   index: number;
-  type: ScalarT | ArrayT | UnknownT;
+  type: SimpleT | UnknownT;
   unificatedExpressions: Expr[];
 };
 // In UrWeb, unification variables are implemented as ref's. This is I think because you can introduce these anywhere, and reference them anywhere, so it becomes very hard to keep them up-to-date in the whole context. In SQL however, you cant just introduce new free variables. You can only do this at the statement level for prepared statements, or in a CREATE FUNCTION statement, and neither can be nested. So you can have a single "global" array of these free variables that always contains the most recent "judgement" of what type these parameters should be.
@@ -87,6 +97,9 @@ type Parameter = {
 // Positional parameters don't have to be declared in advance, so every step has to pass the same "conceptually mutable" array of parameters around. We do keep this immutable however, so we can more easily follow the state of this array every step of the way. It is however annoying and error-prone that every step that can influence this array has to merge it and pass it along.
 // Hmm, what if we do just keep this as a mutable array of name -> type bindings? That means that you can't "keep" an instance of the array around and refer to that current state later on (unless you explicitely clone it). In UrWeb that was annoying because these were everywhere in the "Elab"'d data structure which we wanted to cache and that was because of those ref's not possible, but this array isn't like that. It's a single almost-global array, introduced at very specific places, never nested, so it's probably useless to keep it immutable... Alright, I'm convinced, the (syntactical) overhead of keeping this immutable is not worth it. Let's keep the actual mutation of this array only in the "unification" part of things though
 // Actually, I'm gonna try and keep it immutable anyway, until it becomes really annoying
+// Hmm, what if you have :
+//   WHERE $1 = $2
+//     AND $2 = 42
 type Parameters = ReadonlyArray<Parameter>;
 
 // Lexical scoping
@@ -94,8 +107,7 @@ type Context = {
   readonly decls: ReadonlyArray<{
     readonly name: QName;
     readonly type:
-      | ScalarT // let bindings
-      | ArrayT // let bindings
+      | SimpleT // let bindings
       | SetT; // from-tables, from-views, with, (temp tables?)
   }>;
   readonly aliases: ReadonlyArray<{
@@ -105,22 +117,27 @@ type Context = {
   }>;
 };
 
-function notImplementedYet(node: PGNode): any {
+function notImplementedYet(node: PGNode | null): any {
   throw new NotImplementedYet(node);
 }
 
-function mkType(t: DataTypeDef, cs: ColumnConstraint[]): ScalarT | ArrayT {
-  const nullable = cs.some(
+function mkType(t: DataTypeDef, cs: ColumnConstraint[]): SimpleT {
+  const mapTypenames: { [n: string]: SimpleT } = {
+    int: BuiltinTypes.Integer,
+  };
+  const t_: SimpleT =
+    t.kind === "array"
+      ? BuiltinTypeConstructors.Array(mkType(t.arrayOf, [{ type: "not null" }]))
+      : mapTypenames[t.name] || {
+          kind: "simple",
+          name: t,
+          typevar: null,
+        };
+
+  const notnullable = cs.some(
     (c) => c.type === "not null" || c.type === "primary key"
   );
-
-  return t.kind === "array"
-    ? {
-        kind: "array",
-        inner: mkType(t.arrayOf, [{ type: "not null" }]),
-        nullable,
-      }
-    : { kind: "scalar", name: t, nullable };
+  return notnullable ? t_ : BuiltinTypeConstructors.Nullable(t_);
 }
 
 function doCreateTable(g: Global, s: CreateTableStatement): Global {
@@ -259,7 +276,7 @@ function showLocation(loc: NodeLocation | undefined): string {
 }
 
 class NotImplementedYet extends Error {
-  constructor(node: PGNode) {
+  constructor(node: PGNode | null) {
     const m = node
       ? `: \n
 ${JSON.stringify(node)} @ ${node._location}`
@@ -292,11 +309,7 @@ class AmbiguousIdentifier extends Error {
   }
 }
 class KindMismatch extends Error {
-  constructor(
-    e: Expr,
-    expected: ScalarT | ArrayT | SetT | UnifVar,
-    actual: string
-  ) {
+  constructor(e: Expr, expected: Type, actual: string) {
     super(`KindMismatch: ${e}: ${expected} vs ${actual}}`);
   }
 }
@@ -304,11 +317,21 @@ class TypeMismatch extends Error {
   constructor(
     e: Expr,
     ts: {
-      expected: ScalarT | ArrayT | SetT | UnifVar;
-      actual: ScalarT | ArrayT | SetT | UnifVar;
+      expected: Type;
+      actual: Type;
     }
   ) {
-    super(`TypeMismatch: ${e}: ${ts.expected} vs ${ts.actual}}`);
+    super(
+      `
+TypeMismatch:
+${JSON.stringify(e)}:
+
+Expected:
+${JSON.stringify(ts.expected)}
+
+Actual:
+${JSON.stringify(ts.actual)}}`
+    );
   }
 }
 
@@ -408,10 +431,7 @@ function doFroms(
   return [mergeHandledFroms(c, inFroms[0]), inFroms[1]];
 }
 
-function lookup(
-  c: Context,
-  n: QName
-): ScalarT | ArrayT | SetT | UnifVar | null {
+function lookup(c: Context, n: QName): Type | null {
   const foundAlias = c.aliases.find((a) => eqQNames(a.name, n));
   if (foundAlias) {
     return { kind: "unifvar", index: foundAlias.targetIndex };
@@ -439,7 +459,7 @@ function extractIndexFromParameter(e: ExprParameter): number {
   }
 }
 
-function lookupInSet(s: SetT, name: Name): ScalarT | ArrayT | UnifVar | null {
+function lookupInSet(s: SetT, name: Name): SimpleT | UnifVar | null {
   const found = s.fields.find((f) => f.name && f.name.name === name.name);
   if (found) {
     return found.type;
@@ -452,7 +472,7 @@ function lookupInSet(s: SetT, name: Name): ScalarT | ArrayT | UnifVar | null {
 //   retur
 // }
 
-function elabRef(c: Context, e: ExprRef): ScalarT | ArrayT | SetT | UnifVar {
+function elabRef(c: Context, e: ExprRef): Type {
   if (e.name === "*") {
     return notImplementedYet(e);
   } else {
@@ -473,7 +493,7 @@ function elabRef(c: Context, e: ExprRef): ScalarT | ArrayT | SetT | UnifVar {
       const foundFields: {
         set: QName;
         field: Name;
-        type: ScalarT | ArrayT | UnifVar;
+        type: SimpleT | UnifVar;
       }[] = mapPartial(c.decls, (t) => {
         if (t.type.kind === "set") {
           const foundfield = lookupInSet(t.type, e);
@@ -497,11 +517,117 @@ function elabRef(c: Context, e: ExprRef): ScalarT | ArrayT | SetT | UnifVar {
   }
 }
 
-function elabExpr(
+function unify(
+  e: Expr | null, // not actually used, just for "documentation", error handling, etc
+  ps: Parameters,
+  t1: Type,
+  t2: Type
+): [boolean, Parameters] {
+  if (t1.kind === "simple") {
+    if (t2.kind === "simple") {
+      if (!eqQNames(t1.name, t2.name)) {
+        return [false, ps];
+      }
+      if (t1.typevar) {
+        if (t2.typevar) {
+          return unify(e, ps, t1.typevar, t2.typevar);
+        } else {
+          return [false, ps];
+        }
+      } else {
+        if (t2.typevar) {
+          return [false, ps];
+        } else {
+          return [true, ps];
+        }
+      }
+    } else if (t2.kind === "unifvar") {
+      const existing = ps.find((p) => p.index === t2.index);
+      if (existing) {
+        if (existing.type.kind === "unknown") {
+          return [
+            true,
+            ps
+              .filter((p) => p.index === t2.index)
+              .concat({
+                ...existing,
+                type: t1,
+                unificatedExpressions: e
+                  ? existing.unificatedExpressions.concat(e)
+                  : existing.unificatedExpressions,
+              }),
+          ];
+        } else {
+          return unify(e, ps, existing.type, t2);
+        }
+      } else {
+        return [
+          true,
+          ps.concat({
+            index: t2.index,
+            type: t1,
+            unificatedExpressions: e ? [e] : [],
+          }),
+        ];
+      }
+    } else {
+      return [false, ps];
+    }
+  } else if (t1.kind === "set") {
+    return notImplementedYet(e);
+  } else if (t1.kind === "unifvar") {
+    if (t2.kind === "unifvar") {
+      throw notImplementedYet(e);
+      // const existingT1 = ps.find((p) => p.index === t1.index);
+      // const existingT2 = ps.find((p) => p.index === t2.index);
+      // Hmm, what if you have :
+      //   WHERE $1 = $2
+      //     AND $2 = 42
+    } else {
+      return unify(e, ps, t2, t1);
+    }
+  } else {
+    return expectNever(t1);
+  }
+}
+
+function elabBinary(
   c: Context,
   p: Parameters,
-  e: Expr
-): [ScalarT | ArrayT | SetT | UnifVar, Parameters] {
+  e: ExprBinary
+): [Type, Parameters] {
+  const [t1, p1] = elabExpr(c, p, e.left);
+  const [t2, p2] = elabExpr(c, p1, e.right);
+
+  if (e.op === "=") {
+    const [unifies, p3] = unify(e, p2, t1, t2);
+    if (!unifies) {
+      throw new TypeMismatch(e, { expected: t1, actual: t2 });
+    } else {
+      return [BuiltinTypes.Boolean, p3];
+    }
+  } else if (e.op === "AND") {
+    const [unifies1, p3] = unify(e, p2, t1, BuiltinTypes.Boolean);
+    if (!unifies1) {
+      throw new TypeMismatch(e, { expected: BuiltinTypes.Boolean, actual: t1 });
+    } else {
+      const [unifies2, p4] = unify(e, p3, t2, BuiltinTypes.Boolean);
+      if (!unifies2) {
+        throw new TypeMismatch(e, {
+          expected: BuiltinTypes.Boolean,
+          actual: t1,
+        });
+      } else {
+        return [BuiltinTypes.Boolean, p4];
+      }
+    }
+  } else {
+    return notImplementedYet(e);
+  }
+  // TODO support custom operators
+}
+
+function elabExpr(c: Context, p: Parameters, e: Expr): [Type, Parameters] {
   if (e.type === "ref") {
     const t = elabRef(c, e);
     return [t, p];
@@ -511,6 +637,8 @@ function elabExpr(
     return [BuiltinTypes.Integer, p];
   } else if (e.type === "boolean") {
     return [BuiltinTypes.Boolean, p];
+  } else if (e.type === "binary") {
+    return elabBinary(c, p, e);
   } else {
     return notImplementedYet(e);
   }
@@ -572,7 +700,8 @@ async function go() {
   ast.forEach(function (st) {
     if (st.type === "select") {
       const elab = doSelectFrom(g, { decls: [], aliases: [] }, [], st);
-      console.log("Select: ", JSON.stringify(elab));
+      console.log("Select returns: ", JSON.stringify(elab[0]));
+      console.log("Select params: ", JSON.stringify(elab[1]));
     } else if (st.type === "union" || st.type === "union all") {
       return notImplementedYet(st);
     } else if (st.type === "with") {

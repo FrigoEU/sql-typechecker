@@ -1,5 +1,6 @@
 import {
   parse,
+  toSql,
   Statement,
   // astVisitor,
   NodeLocation,
@@ -48,12 +49,17 @@ export type UnifVar = {
 const BuiltinTypes = {
   Boolean: {
     kind: "simple",
-    name: { name: "bool", schema: "pg_catalog" },
+    name: { name: "bool" },
     typevar: null,
   },
   Integer: {
     kind: "simple",
-    name: { name: "integer", schema: "pg_catalog" },
+    name: { name: "integer" },
+    typevar: null,
+  },
+  String: {
+    kind: "simple",
+    name: { name: "text" },
     typevar: null,
   },
 } as const;
@@ -142,7 +148,7 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
     // Reusing the columns is not hard (see LIKE TABLE)
     // but subsequent alters to the parent table(s) also alter the children
     // so that's a bit more work. Not a huge amount though, just didnt do it yet
-    throw new Error("INHERITS is not supported yet");
+    return notImplementedYet(s);
   }
   const [fields, defaults] = s.columns.reduce(
     function (acc: [Field[], Name[]], c) {
@@ -321,13 +327,14 @@ class TypeMismatch extends Error {
     super(
       `
 TypeMismatch:
-${JSON.stringify(e)}:
+${toSql.expr(e)}
 
 Expected:
 ${JSON.stringify(ts.expected)}
 
 Actual:
-${JSON.stringify(ts.actual)}}`
+${JSON.stringify(ts.actual)}}
+`
     );
   }
 }
@@ -522,17 +529,39 @@ function unify(
 ): [boolean, Parameters] {
   if (t1.kind === "simple") {
     if (t2.kind === "simple") {
+      // Eliminate nullable first: This is the only union type and sql and makes stuff complicated otherwise
+      if (
+        t1.typevar &&
+        eqQNames(t1.name, { name: "nullable", schema: "" }) &&
+        !eqQNames(t2.name, { name: "nullable", schema: "" })
+      ) {
+        return unify(e, ps, t1.typevar, t2);
+      }
+      if (
+        t2.typevar &&
+        eqQNames(t2.name, { name: "nullable", schema: "" }) &&
+        !eqQNames(t1.name, { name: "nullable", schema: "" })
+      ) {
+        return unify(e, ps, t1, t2.typevar);
+      }
+
       if (!eqQNames(t1.name, t2.name)) {
         return [false, ps];
       }
       if (t1.typevar) {
         if (t2.typevar) {
-          return unify(e, ps, t1.typevar, t2.typevar);
+          if (eqQNames(t1.name, t2.name)) {
+            return unify(e, ps, t1.typevar, t2.typevar);
+          } else {
+            return [false, ps];
+          }
         } else {
+          // One is generic, the other isn't (and no nullable union type) -> not the same
           return [false, ps];
         }
       } else {
         if (t2.typevar) {
+          // One is generic, the other isn't (and no nullable union type) -> not the same
           return [false, ps];
         } else {
           return [true, ps];
@@ -555,7 +584,24 @@ function unify(
               }),
           ];
         } else {
-          return unify(e, ps, existing.type, t2);
+          const res = unify(e, ps, existing.type, t1);
+          if (
+            res[0] === true &&
+            eqQNames(t1.name, { name: "nullable", schema: "" }) &&
+            !eqQNames(existing.type.name, { name: "nullable", schema: "" })
+          ) {
+            // "Widen" T to T | null
+            const newPs = ps
+              .filter((p) => p.index === t2.index)
+              .concat({
+                ...existing,
+                type: BuiltinTypeConstructors.Nullable(existing.type),
+                unificatedExpressions: e
+                  ? existing.unificatedExpressions.concat(e)
+                  : existing.unificatedExpressions,
+              });
+            return [true, newPs];
+          }
         }
       } else {
         return [
@@ -580,6 +626,7 @@ function unify(
       // Hmm, what if you have :
       //   WHERE $1 = $2
       //     AND $2 = 42
+      // ALSO, think about widening nullable's
     } else {
       return unify(e, ps, t2, t1);
     }
@@ -634,6 +681,8 @@ function elabExpr(c: Context, p: Parameters, e: Expr): [Type, Parameters] {
     return [BuiltinTypes.Integer, p];
   } else if (e.type === "boolean") {
     return [BuiltinTypes.Boolean, p];
+  } else if (e.type === "string") {
+    return [BuiltinTypes.String, p];
   } else if (e.type === "binary") {
     return elabBinary(c, p, e);
   } else {

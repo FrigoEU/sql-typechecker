@@ -3,18 +3,13 @@ function mymainfunc() {
   const pg = await connect(connectionoptions);
   const res = safesql<A, B>(
     `
-select id
+select id, name
 from testje
 where id = $1
+and name = 'abc'
 `,
     [7]
   );
-
-  const res2 = safesql(`
-select id
-from testje
-where id = 5
-`);
 }
 
 mymainfunc();

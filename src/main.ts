@@ -78,8 +78,12 @@ async function go() {
     const st = ast[0];
     if (st.type === "select") {
       const elab = doSelectFrom(g, { decls: [], aliases: [] }, [], st);
-      console.log("Select returns: ", JSON.stringify(elab[0]));
-      console.log("Select params: ", JSON.stringify(elab[1]));
+      console.log("Select returns: ", printSetAsTypescript(elab[1], elab[0]));
+      elab[1].forEach(function (p) {
+        console.log(
+          `Select param ${p.index}: ${printSimpleAsTypescript(elab[1], p.type)}`
+        );
+      });
       return (
         "<" +
         printSetAsTypescript(elab[1], elab[0]) +

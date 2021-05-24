@@ -22,6 +22,7 @@ import {
   ExprParameter,
   ExprRef,
   ExprBinary,
+  ExprNull,
 } from "pgsql-ast-parser";
 
 export type Type = SimpleT | SetT | UnifVar;
@@ -52,9 +53,19 @@ const BuiltinTypes = {
     name: { name: "bool" },
     typevar: null,
   },
+  Smallint: {
+    kind: "simple",
+    name: { name: "smallint" },
+    typevar: null,
+  },
   Integer: {
     kind: "simple",
     name: { name: "integer" },
+    typevar: null,
+  },
+  Bigint: {
+    kind: "simple",
+    name: { name: "bigint" },
     typevar: null,
   },
   String: {
@@ -62,6 +73,11 @@ const BuiltinTypes = {
     name: { name: "text" },
     typevar: null,
   },
+  // Any: {
+  //   kind: "simple",
+  //   name: { name: "any" },
+  //   typevar: null,
+  // },
 } as const;
 
 const BuiltinTypeConstructors = {
@@ -521,100 +537,178 @@ function elabRef(c: Context, e: ExprRef): Type {
   }
 }
 
+function unifySimplesOrUnifVars(
+  e: Expr | null,
+  ps: Parameters,
+  source: SimpleT | UnifVar,
+  target: SimpleT | UnifVar,
+  type: CastType
+): null | [SimpleT, Parameters] {
+  if (source.kind === "simple") {
+    if (target.kind === "simple") {
+      return unifySimples(e, ps, source, target, type);
+    } else {
+      return unifyUnificationVar(e, ps, source, target, type);
+    }
+  } else {
+    if (target.kind === "simple") {
+      return unifyUnificationVar(e, ps, target, source, type);
+    } else {
+      return notImplementedYet(e);
+    }
+  }
+}
+
+//www.postgresql.org/docs/current/sql-createcast.html
+// If they "fit into" eachother, you get the "biggest" type back
+// otherwise, you get null
+// eg: smallint fits into integer
+//
+// https://www.postgresql.org/docs/7.3/typeconv.html
+// https://www.postgresql.org/docs/current/sql-createcast.html
+//
+// 3 kinds of casts:
+// * Implicit: can happen anywhere
+// * In Assignment: (Only) in insert/update statements, when trying to "fit" data into table columns
+// * Explicit: can happen when explicitely calling the CAST function
+//
+// Casting to a "nullable" type is not part of PostgreSQL, but it is the same idea
+type CastType = "implicit" | "assignment" | "explicit";
+function unifySimples(
+  e: Expr | null,
+  ps: Parameters,
+  source: SimpleT,
+  target: SimpleT,
+  type: CastType
+): null | [SimpleT, Parameters] {
+  // list casts = \dC+
+  const casts: { source: SimpleT; target: SimpleT; type: CastType }[] = [
+    {
+      source: BuiltinTypes.Smallint,
+      target: BuiltinTypes.Integer,
+      type: "implicit",
+    },
+    {
+      source: BuiltinTypes.Integer,
+      target: BuiltinTypes.Bigint,
+      type: "implicit",
+    },
+  ];
+
+  // T -> Nullable<T> is a universal cast
+  if (
+    target.typevar &&
+    eqQNames(target.name, {
+      name: "nullable",
+      schema: "",
+    }) &&
+    !eqQNames(source.name, {
+      name: "nullable",
+      schema: "",
+    })
+  ) {
+    if (target.typevar.kind === "simple") {
+      return unifySimples(e, ps, source, target.typevar, type);
+    } else {
+      return unifyUnificationVar(e, ps, source, target.typevar, type);
+    }
+  }
+
+  if (source.typevar) {
+    if (target.typevar) {
+      if (eqQNames(source.name, target.name)) {
+        const res = unifySimplesOrUnifVars(e, ps, source, target, type);
+        if (res) {
+          return [{ ...source, typevar: res[0] }, ps];
+        } else {
+          return null;
+        }
+      } else {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  } else {
+    if (target.typevar) {
+      return null;
+    } else {
+      // No typevars in either side
+      const matchingCast = casts.find(
+        (c) =>
+          eqQNames(c.source.name, source.name) &&
+          eqQNames(c.target.name, target.name)
+      );
+      if (matchingCast) {
+        return [matchingCast.target, ps];
+      } else {
+        return null;
+      }
+    }
+  }
+}
+
+function unifyUnificationVar(
+  e: Expr | null, // not actually used, just for "documentation", error handling, etc
+  ps: Parameters,
+  t1: SimpleT,
+  t2: UnifVar,
+  type: CastType
+): null | [SimpleT, Parameters] {
+  const existing = ps.find((p) => p.index === t2.index);
+  if (existing) {
+    if (existing.type.kind === "unknown") {
+      return [
+        t1,
+        ps
+          .filter((p) => p.index === t2.index)
+          .concat({
+            ...existing,
+            type: t1,
+            unificatedExpressions: e
+              ? existing.unificatedExpressions.concat(e)
+              : existing.unificatedExpressions,
+          }),
+      ];
+    } else {
+      const res = unifySimples(e, ps, existing.type, t1, type);
+      if (res) {
+        // "Widen" T to T | null
+        const newPs = ps
+          .filter((p) => p.index === t2.index)
+          .concat({
+            ...existing,
+            type: res[0],
+            unificatedExpressions: e
+              ? existing.unificatedExpressions.concat(e)
+              : existing.unificatedExpressions,
+          });
+        return [res[0], newPs];
+      } else {
+        return null;
+      }
+    }
+  } else {
+    throw new Error(
+      `Typechecker error: Unknown unification var: ${JSON.stringify(t2)}`
+    );
+  }
+}
+
 function unify(
   e: Expr | null, // not actually used, just for "documentation", error handling, etc
   ps: Parameters,
   t1: Type,
-  t2: Type
-): [boolean, Parameters] {
+  t2: Type,
+  type: CastType
+): null | [Type, Parameters] {
   if (t1.kind === "simple") {
     if (t2.kind === "simple") {
-      // Eliminate nullable first: This is the only union type and sql and makes stuff complicated otherwise
-      if (
-        t1.typevar &&
-        eqQNames(t1.name, { name: "nullable", schema: "" }) &&
-        !eqQNames(t2.name, { name: "nullable", schema: "" })
-      ) {
-        return unify(e, ps, t1.typevar, t2);
-      }
-      if (
-        t2.typevar &&
-        eqQNames(t2.name, { name: "nullable", schema: "" }) &&
-        !eqQNames(t1.name, { name: "nullable", schema: "" })
-      ) {
-        return unify(e, ps, t1, t2.typevar);
-      }
-
-      if (!eqQNames(t1.name, t2.name)) {
-        return [false, ps];
-      }
-      if (t1.typevar) {
-        if (t2.typevar) {
-          if (eqQNames(t1.name, t2.name)) {
-            return unify(e, ps, t1.typevar, t2.typevar);
-          } else {
-            return [false, ps];
-          }
-        } else {
-          // One is generic, the other isn't (and no nullable union type) -> not the same
-          return [false, ps];
-        }
-      } else {
-        if (t2.typevar) {
-          // One is generic, the other isn't (and no nullable union type) -> not the same
-          return [false, ps];
-        } else {
-          return [true, ps];
-        }
-      }
+      return unifySimples(e, ps, t1, t2, type);
     } else if (t2.kind === "unifvar") {
-      const existing = ps.find((p) => p.index === t2.index);
-      if (existing) {
-        if (existing.type.kind === "unknown") {
-          return [
-            true,
-            ps
-              .filter((p) => p.index === t2.index)
-              .concat({
-                ...existing,
-                type: t1,
-                unificatedExpressions: e
-                  ? existing.unificatedExpressions.concat(e)
-                  : existing.unificatedExpressions,
-              }),
-          ];
-        } else {
-          const res = unify(e, ps, existing.type, t1);
-          if (
-            res[0] === true &&
-            eqQNames(t1.name, { name: "nullable", schema: "" }) &&
-            !eqQNames(existing.type.name, { name: "nullable", schema: "" })
-          ) {
-            // "Widen" T to T | null
-            const newPs = ps
-              .filter((p) => p.index === t2.index)
-              .concat({
-                ...existing,
-                type: BuiltinTypeConstructors.Nullable(existing.type),
-                unificatedExpressions: e
-                  ? existing.unificatedExpressions.concat(e)
-                  : existing.unificatedExpressions,
-              });
-            return [true, newPs];
-          }
-        }
-      } else {
-        return [
-          true,
-          ps.concat({
-            index: t2.index,
-            type: t1,
-            unificatedExpressions: e ? [e] : [],
-          }),
-        ];
-      }
+      return unifyUnificationVar(e, ps, t1, t2, type);
     } else {
-      return [false, ps];
+      return null;
     }
   } else if (t1.kind === "set") {
     return notImplementedYet(e);
@@ -627,8 +721,10 @@ function unify(
       //   WHERE $1 = $2
       //     AND $2 = 42
       // ALSO, think about widening nullable's
+    } else if (t2.kind === "set") {
+      return null;
     } else {
-      return unify(e, ps, t2, t1);
+      return unifyUnificationVar(e, ps, t2, t1, type);
     }
   } else {
     return expectNever(t1);
@@ -644,25 +740,31 @@ function elabBinary(
   const [t2, p2] = elabExpr(c, p1, e.right);
 
   if (e.op === "=") {
-    const [unifies, p3] = unify(e, p2, t1, t2);
+    const unifies = unify(e, p2, t1, t2, "implicit");
     if (!unifies) {
       throw new TypeMismatch(e, { expected: t1, actual: t2 });
     } else {
-      return [BuiltinTypes.Boolean, p3];
+      return [BuiltinTypes.Boolean, unifies[1]];
     }
   } else if (e.op === "AND") {
-    const [unifies1, p3] = unify(e, p2, t1, BuiltinTypes.Boolean);
+    const unifies1 = unify(e, p2, t1, BuiltinTypes.Boolean, "implicit");
     if (!unifies1) {
       throw new TypeMismatch(e, { expected: BuiltinTypes.Boolean, actual: t1 });
     } else {
-      const [unifies2, p4] = unify(e, p3, t2, BuiltinTypes.Boolean);
+      const unifies2 = unify(
+        e,
+        unifies1[1],
+        t2,
+        BuiltinTypes.Boolean,
+        "implicit"
+      );
       if (!unifies2) {
         throw new TypeMismatch(e, {
           expected: BuiltinTypes.Boolean,
           actual: t1,
         });
       } else {
-        return [BuiltinTypes.Boolean, p4];
+        return [BuiltinTypes.Boolean, unifies2[1]];
       }
     }
   } else {

@@ -559,10 +559,20 @@ function unifySimplesOrUnifVars(
   }
 }
 
+function isNullable(s: SimpleT): boolean {
+  return (
+    s.typevar !== null &&
+    eqQNames(s.name, {
+      name: "nullable",
+      schema: "",
+    })
+  );
+}
+
 //www.postgresql.org/docs/current/sql-createcast.html
 // If they "fit into" eachother, you get the "biggest" type back
-// otherwise, you get null
 // eg: smallint fits into integer
+// otherwise, this function will return null = does not unify
 //
 // https://www.postgresql.org/docs/7.3/typeconv.html
 // https://www.postgresql.org/docs/current/sql-createcast.html
@@ -581,6 +591,7 @@ function unifySimples(
   target: SimpleT,
   type: CastType
 ): null | [SimpleT, Parameters] {
+  debugger;
   // list casts = \dC+
   const casts: { source: SimpleT; target: SimpleT; type: CastType }[] = [
     {
@@ -595,22 +606,35 @@ function unifySimples(
     },
   ];
 
+  function wrapResInNullable(
+    res: null | [SimpleT, Parameters]
+  ): null | [SimpleT, Parameters] {
+    return res === null
+      ? null
+      : [BuiltinTypeConstructors.Nullable(res[0]), res[1]];
+  }
+
   // T -> Nullable<T> is a universal cast
-  if (
-    target.typevar &&
-    eqQNames(target.name, {
-      name: "nullable",
-      schema: "",
-    }) &&
-    !eqQNames(source.name, {
-      name: "nullable",
-      schema: "",
-    })
-  ) {
+  if (target.typevar && isNullable(target) && !isNullable(source)) {
     if (target.typevar.kind === "simple") {
-      return unifySimples(e, ps, source, target.typevar, type);
+      return wrapResInNullable(
+        unifySimples(e, ps, source, target.typevar, type)
+      );
     } else {
-      return unifyUnificationVar(e, ps, source, target.typevar, type);
+      return wrapResInNullable(
+        unifyUnificationVar(e, ps, source, target.typevar, type)
+      );
+    }
+  }
+  if (source.typevar && isNullable(source) && !isNullable(target)) {
+    if (source.typevar.kind === "simple") {
+      return wrapResInNullable(
+        unifySimples(e, ps, target, source.typevar, type)
+      );
+    } else {
+      return wrapResInNullable(
+        unifyUnificationVar(e, ps, target, source.typevar, type)
+      );
     }
   }
 
@@ -634,15 +658,19 @@ function unifySimples(
       return null;
     } else {
       // No typevars in either side
-      const matchingCast = casts.find(
-        (c) =>
-          eqQNames(c.source.name, source.name) &&
-          eqQNames(c.target.name, target.name)
-      );
-      if (matchingCast) {
-        return [matchingCast.target, ps];
+      if (eqQNames(source.name, target.name)) {
+        return [source, ps];
       } else {
-        return null;
+        const matchingCast = casts.find(
+          (c) =>
+            eqQNames(c.source.name, source.name) &&
+            eqQNames(c.target.name, target.name)
+        );
+        if (matchingCast) {
+          return [matchingCast.target, ps];
+        } else {
+          return null;
+        }
       }
     }
   }
@@ -655,13 +683,14 @@ function unifyUnificationVar(
   t2: UnifVar,
   type: CastType
 ): null | [SimpleT, Parameters] {
+  debugger;
   const existing = ps.find((p) => p.index === t2.index);
   if (existing) {
     if (existing.type.kind === "unknown") {
       return [
         t1,
         ps
-          .filter((p) => p.index === t2.index)
+          .filter((p) => p.index !== t2.index)
           .concat({
             ...existing,
             type: t1,
@@ -673,9 +702,8 @@ function unifyUnificationVar(
     } else {
       const res = unifySimples(e, ps, existing.type, t1, type);
       if (res) {
-        // "Widen" T to T | null
         const newPs = ps
-          .filter((p) => p.index === t2.index)
+          .filter((p) => p.index !== t2.index)
           .concat({
             ...existing,
             type: res[0],
@@ -736,6 +764,7 @@ function elabBinary(
   p: Parameters,
   e: ExprBinary
 ): [Type, Parameters] {
+  debugger;
   const [t1, p1] = elabExpr(c, p, e.left);
   const [t2, p2] = elabExpr(c, p1, e.right);
 
@@ -778,7 +807,18 @@ function elabExpr(c: Context, p: Parameters, e: Expr): [Type, Parameters] {
     const t = elabRef(c, e);
     return [t, p];
   } else if (e.type === "parameter") {
-    return [{ kind: "unifvar", index: extractIndexFromParameter(e) }, p];
+    const index = extractIndexFromParameter(e);
+    debugger;
+    return [
+      { kind: "unifvar", index: index },
+      p.some((p) => p.index === index)
+        ? p
+        : p.concat({
+            index: index,
+            type: { kind: "unknown" },
+            unificatedExpressions: [],
+          }),
+    ];
   } else if (e.type === "integer") {
     return [BuiltinTypes.Integer, p];
   } else if (e.type === "boolean") {

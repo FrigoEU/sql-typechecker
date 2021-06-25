@@ -7,6 +7,7 @@ select id, name
 from testje
 where id = $1
 and name = 'abc'
+and name = $2
 `,
     [7]
   );

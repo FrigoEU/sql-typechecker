@@ -47,9 +47,15 @@ function printSimpleAsTypescript(
 }
 function printSetAsTypescript(ps: Parameters, s: SetT): string {
   return (
-    "[" +
-    s.fields.map((f) => printSimpleAsTypescript(ps, f.type)).join(", ") +
-    "]"
+    "{" +
+    s.fields
+      .map(
+        (f) =>
+          (f.name === null ? "?" : `"${f.name.name}": `) +
+          printSimpleAsTypescript(ps, f.type)
+      )
+      .join(", ") +
+    "}"
   );
 }
 
@@ -58,11 +64,11 @@ async function go() {
 
   const ast: Statement[] = parse(f);
 
-  console.log(JSON.stringify(ast));
+  // console.log("Parsed AST:\n", JSON.stringify(ast, null, 2), "\n");
 
   const g = parseSetupScripts(ast);
 
-  console.log("Global", g);
+  // console.log("Global:\n", JSON.stringify(g, null, 2), "\n");
 
   const f2 = await fs.readFile("./test.ts", "utf-8");
 
@@ -78,10 +84,14 @@ async function go() {
     const st = ast[0];
     if (st.type === "select") {
       const elab = doSelectFrom(g, { decls: [], aliases: [] }, [], st);
-      console.log("Select returns: ", printSetAsTypescript(elab[1], elab[0]));
+      console.log("Select:\n", sqlstr, "\n");
+
+      console.log("Returns:\n", printSetAsTypescript(elab[1], elab[0]), "\n");
       elab[1].forEach(function (p) {
         console.log(
-          `Select param ${p.index}: ${printSimpleAsTypescript(elab[1], p.type)}`
+          `Select param \$${p.index}:
+${printSimpleAsTypescript(elab[1], p.type)}`,
+          "\n"
         );
       });
       return (

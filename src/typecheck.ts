@@ -565,6 +565,20 @@ function elabRef(c: Context, ps: Parameters, e: ExprRef): Type {
   }
 }
 
+function unify(
+  e: Expr | null, // not actually used, just for "documentation", error handling, etc
+  us: UnifVars,
+  t1: Type,
+  t2: Type,
+  type: CastType
+): null | [Type, UnifVars] {
+  if (t1.kind === "set" || t2.kind === "set") {
+    throw notImplementedYet(e);
+  } else {
+    return unifySimplesOrUnifVars(e, us, t1, t2, type);
+  }
+}
+
 function unifySimplesOrUnifVars(
   e: Expr | null,
   us: UnifVars,
@@ -576,14 +590,67 @@ function unifySimplesOrUnifVars(
     if (target.kind === "simple") {
       return unifySimples(e, us, source, target, type);
     } else {
-      return unifyUnificationVar(e, us, source, target, type);
+      return unifyUnificationVarWithSimple(e, us, source, target, type);
     }
   } else {
     if (target.kind === "simple") {
-      return unifyUnificationVar(e, us, target, source, type);
+      return unifyUnificationVarWithSimple(e, us, target, source, type);
     } else {
       return notImplementedYet(e);
+      // const existingT1 = ps.find((p) => p.index === t1.index);
+      // const existingT2 = ps.find((p) => p.index === t2.index);
+      // Hmm, what if you have :
+      //   WHERE $1 = $2
+      //     AND $2 = 42
     }
+  }
+}
+
+function unifyUnificationVarWithSimple(
+  e: Expr | null, // not actually used, just for "documentation", error handling, etc
+  us: UnifVars,
+  t1: SimpleT,
+  t2: UnifVar,
+  type: CastType
+): null | [SimpleT, UnifVars] {
+  const existing = us[t2.id];
+  if (existing) {
+    if (existing.type.kind === "unknown") {
+      const newUs = {
+        ...us,
+        ...{
+          [t2.id]: {
+            type: t1,
+            unificatedExpressions: e
+              ? existing.unificatedExpressions.concat(e)
+              : existing.unificatedExpressions,
+          },
+        },
+      };
+      return [t1, newUs];
+    } else {
+      const res = unifySimples(e, us, existing.type, t1, type);
+      if (res) {
+        const newUs = {
+          ...us,
+          ...{
+            [t2.id]: {
+              type: res[0],
+              unificatedExpressions: e
+                ? existing.unificatedExpressions.concat(e)
+                : existing.unificatedExpressions,
+            },
+          },
+        };
+        return [res[0], newUs];
+      } else {
+        return null;
+      }
+    }
+  } else {
+    throw new Error(
+      `Typechecker error: Unknown unification var: ${JSON.stringify(t2)}`
+    );
   }
 }
 
@@ -650,7 +717,7 @@ function unifySimples(
       );
     } else {
       return wrapResInNullable(
-        unifyUnificationVar(e, us, source, target.typevar, type)
+        unifyUnificationVarWithSimple(e, us, source, target.typevar, type)
       );
     }
   }
@@ -661,7 +728,7 @@ function unifySimples(
       );
     } else {
       return wrapResInNullable(
-        unifyUnificationVar(e, us, target, source.typevar, type)
+        unifyUnificationVarWithSimple(e, us, target, source.typevar, type)
       );
     }
   }
@@ -701,90 +768,6 @@ function unifySimples(
         }
       }
     }
-  }
-}
-
-function unifyUnificationVar(
-  e: Expr | null, // not actually used, just for "documentation", error handling, etc
-  us: UnifVars,
-  t1: SimpleT,
-  t2: UnifVar,
-  type: CastType
-): null | [SimpleT, UnifVars] {
-  const existing = us[t2.id];
-  if (existing) {
-    if (existing.type.kind === "unknown") {
-      const newUs = {
-        ...us,
-        ...{
-          [t2.id]: {
-            type: t1,
-            unificatedExpressions: e
-              ? existing.unificatedExpressions.concat(e)
-              : existing.unificatedExpressions,
-          },
-        },
-      };
-      return [t1, newUs];
-    } else {
-      const res = unifySimples(e, us, existing.type, t1, type);
-      if (res) {
-        const newUs = {
-          ...us,
-          ...{
-            [t2.id]: {
-              type: res[0],
-              unificatedExpressions: e
-                ? existing.unificatedExpressions.concat(e)
-                : existing.unificatedExpressions,
-            },
-          },
-        };
-        return [res[0], newUs];
-      } else {
-        return null;
-      }
-    }
-  } else {
-    throw new Error(
-      `Typechecker error: Unknown unification var: ${JSON.stringify(t2)}`
-    );
-  }
-}
-
-function unify(
-  e: Expr | null, // not actually used, just for "documentation", error handling, etc
-  us: UnifVars,
-  t1: Type,
-  t2: Type,
-  type: CastType
-): null | [Type, UnifVars] {
-  if (t1.kind === "simple") {
-    if (t2.kind === "simple") {
-      return unifySimples(e, us, t1, t2, type);
-    } else if (t2.kind === "unifvar") {
-      return unifyUnificationVar(e, us, t1, t2, type);
-    } else {
-      return null;
-    }
-  } else if (t1.kind === "set") {
-    return notImplementedYet(e);
-  } else if (t1.kind === "unifvar") {
-    if (t2.kind === "unifvar") {
-      throw notImplementedYet(e);
-      // const existingT1 = ps.find((p) => p.index === t1.index);
-      // const existingT2 = ps.find((p) => p.index === t2.index);
-      // Hmm, what if you have :
-      //   WHERE $1 = $2
-      //     AND $2 = 42
-      // ALSO, think about widening nullable's
-    } else if (t2.kind === "set") {
-      return null;
-    } else {
-      return unifyUnificationVar(e, us, t2, t1, type);
-    }
-  } else {
-    return expectNever(t1);
   }
 }
 

@@ -10,49 +10,51 @@ import {
   Parameters,
   UnifVar,
   Global,
+  UnifVars,
 } from "./typecheck";
 
 go();
 
 function printSimpleAsTypescript(
   ps: Parameters,
+  us: UnifVars,
   t: SimpleT | UnifVar | UnknownT
 ): string {
   if (t.kind === "unknown") {
     return "any";
   } else if (t.kind === "unifvar") {
-    const found = ps.find((p) => p.index === t.index);
+    const found = us[t.id];
     if (!found) {
-      throw new Error(`Parameter with index ${t.index} not found`);
+      throw new Error(`Parameter with id ${t.id} not found`);
     } else {
-      return printSimpleAsTypescript(ps, found.type);
+      return printSimpleAsTypescript(ps, us, found.type);
     }
   } else {
     if (t.name.name === "array") {
       if (!t.typevar) {
         throw new Error("Array without typevar");
       } else {
-        return "(" + printSimpleAsTypescript(ps, t.typevar) + ")" + "[]";
+        return "(" + printSimpleAsTypescript(ps, us, t.typevar) + ")" + "[]";
       }
     } else if (t.name.name === "nullable") {
       if (!t.typevar) {
         throw new Error("Nullable without typevar");
       } else {
-        return printSimpleAsTypescript(ps, t.typevar) + " | null";
+        return printSimpleAsTypescript(ps, us, t.typevar) + " | null";
       }
     } else {
       return t.name.name;
     }
   }
 }
-function printSetAsTypescript(ps: Parameters, s: SetT): string {
+function printSetAsTypescript(ps: Parameters, us: UnifVars, s: SetT): string {
   return (
     "{" +
     s.fields
       .map(
         (f) =>
           (f.name === null ? "?" : `"${f.name.name}": `) +
-          printSimpleAsTypescript(ps, f.type)
+          printSimpleAsTypescript(ps, us, f.type)
       )
       .join(", ") +
     "}"
@@ -83,24 +85,39 @@ async function go() {
     }
     const st = ast[0];
     if (st.type === "select") {
-      const elab = doSelectFrom(g, { decls: [], aliases: [] }, [], st);
+      const [returnT, ps, us] = doSelectFrom(
+        g,
+        { decls: [], aliases: [] },
+        {},
+        {},
+        st
+      );
       console.log("Select:\n", sqlstr, "\n");
 
-      console.log("Returns:\n", printSetAsTypescript(elab[1], elab[0]), "\n");
-      elab[1].forEach(function (p) {
-        console.log(
-          `Select param \$${p.index}:
-${printSimpleAsTypescript(elab[1], p.type)}`,
-          "\n"
-        );
-      });
+      const returnTypeAsString = printSetAsTypescript(ps, us, returnT);
+      console.log("Returns:\n", returnTypeAsString, "\n");
+
       return (
         "<" +
-        printSetAsTypescript(elab[1], elab[0]) +
+        returnTypeAsString +
         ", " +
         "[" +
-        elab[1]
-          .map((p) => printSimpleAsTypescript(elab[1], p.type))
+        Object.keys(ps)
+          .map((i) => parseInt(i))
+          .map((k) => {
+            const p = ps[k];
+            if (!p) {
+              throw new Error(
+                `parameter not found, key: ${k}, ps: ${JSON.stringify(ps)}`
+              );
+            } else {
+              const paramTypeAsString = printSimpleAsTypescript(ps, us, {
+                kind: "unifvar",
+                id: p.unifvarId,
+              });
+              console.log(`Param \$${k}:\n`, paramTypeAsString, "\n");
+            }
+          })
           .join(", ") +
         "]"
       );

@@ -42,9 +42,10 @@ export type SetT = {
   kind: "set";
   fields: Field[];
 };
+export type unifvarId = number;
 export type UnifVar = {
   kind: "unifvar";
-  index: number; // eg: "$1" -> 1
+  id: unifvarId;
 };
 
 const BuiltinTypes = {
@@ -105,12 +106,6 @@ export type Global = {
   }>;
 };
 
-// "Global" scoping: per function call or prepared statement
-type Parameter = {
-  index: number;
-  type: SimpleT | UnknownT;
-  unificatedExpressions: Expr[];
-};
 // In UrWeb, unification variables are implemented as ref's. This is I think because you can introduce these anywhere, and reference them anywhere, so it becomes very hard to keep them up-to-date in the whole context. In SQL however, you cant just introduce new free variables. You can only do this at the statement level for prepared statements, or in a CREATE FUNCTION statement, and neither can be nested. So you can have a single "global" array of these free variables that always contains the most recent "judgement" of what type these parameters should be.
 // Parameters are scoped differently from the context though: In the context we add things for example when going through a "FROM" using lexical scoping. Once the scope of that "SELECT" is done, these bindings are no longer present. We represent this with an immutable context object and the JS call stack. Parameters however are global: Deep in an expression somewhere a parameter can be referenced (= introduced) and / or unified. Another statement, somewhere in a completely lexical scope, can reference the same parameter. This list of parameters only gets "reset" at very specific times: At the end of a "CREATE FUNCTION" statement, or at the end of a prepared statement.
 // Positional parameters don't have to be declared in advance, so every step has to pass the same "conceptually mutable" array of parameters around. We do keep this immutable however, so we can more easily follow the state of this array every step of the way. It is however annoying and error-prone that every step that can influence this array has to merge it and pass it along.
@@ -119,7 +114,19 @@ type Parameter = {
 // Hmm, what if you have :
 //   WHERE $1 = $2
 //     AND $2 = 42
-export type Parameters = ReadonlyArray<Parameter>;
+// -> Unification variables need an identity, so we can say $1 and $2 refer to the same unification variable
+// Parameters are of a certain type. This type is initially unknown (bar function parameters with a type annotation), so we assign a unification variable to it. These are implemented as refs in UrWeb. We don't want to model it like that (see discussion), so we need to keep a mapping of unification variable -> (current) type around. Is this seperate from the mapping (indexed) parameter -> unification variable? It should be use, otherwise you can never model equivalences between two unification variables (WHERE $1 = $2)
+
+// "Global" scoping: per function call or prepared statement
+export type Parameters = Readonly<{
+  [index: number]: { unifvarId: unifvarId };
+}>;
+export type UnifVars = Readonly<{
+  [key: number]: /* unifvarId */ {
+    type: SimpleT | UnknownT;
+    unificatedExpressions: Expr[];
+  };
+}>;
 
 // Lexical scoping
 type Context = {
@@ -223,32 +230,42 @@ export function doSelectFrom(
   g: Global,
   c: Context,
   p: Parameters,
+  us: UnifVars,
   s: SelectFromStatement
-): [SetT, Parameters] {
-  const [newC, newP__]: [Context, Parameters] = doFroms(g, c, p, s.from || []);
+): [SetT, Parameters, UnifVars] {
+  const [newC, newP__, newU__]: [Context, Parameters, UnifVars] = doFroms(
+    g,
+    c,
+    p,
+    us,
+    s.from || []
+  );
 
-  const newP_ = s.where
+  const newRes = s.where
     ? (function () {
-        const [t, newP] = elabExpr(newC, newP__, s.where);
+        const [t, newP, newUs] = elabExpr(newC, newP__, newU__, s.where);
         if (t !== BuiltinTypes.Boolean) {
           throw new TypeMismatch(s.where, {
             expected: BuiltinTypes.Boolean,
             actual: t,
           });
         }
-        return newP;
+        return [newP, newUs] as const;
       })()
-    : newP__;
+    : ([newP__, newU__] as const);
 
-  if (isError(newP_)) {
-    throw newP_;
+  if (isError(newRes)) {
+    throw newRes;
   }
 
-  const [fields, newP] = (s.columns || []).reduce(
-    (acc: [Field[], Parameters], c: SelectedColumn): [Field[], Parameters] => {
+  const [fields, newP, newU] = (s.columns || []).reduce(
+    (
+      acc: [Field[], Parameters, UnifVars],
+      c: SelectedColumn
+    ): [Field[], Parameters, UnifVars] => {
       const n = c.alias ? c.alias : deriveNameFromExpr(c.expr);
 
-      const [t, newP] = elabExpr(newC, acc[1], c.expr);
+      const [t, newP, newUs] = elabExpr(newC, acc[1], acc[2], c.expr);
 
       if (t.kind === "set") {
         throw new KindMismatch(c.expr, t, "Can only be scalar or array type");
@@ -256,9 +273,9 @@ export function doSelectFrom(
 
       const field: Field = { name: n, type: t };
 
-      return [acc[0].concat(field), newP];
+      return [acc[0].concat(field), newP, newUs];
     },
-    [[], newP_]
+    [[], newRes[0], newRes[1]]
   );
   return [
     {
@@ -266,6 +283,7 @@ export function doSelectFrom(
       fields,
     },
     newP,
+    newU,
   ];
 }
 
@@ -377,9 +395,10 @@ function doSingleFrom(
   g: Global,
   c: Context,
   p: Parameters,
+  us: UnifVars,
   handledFroms: HandledFrom[],
   f: From
-): [HandledFrom[], Parameters] {
+): [HandledFrom[], Parameters, UnifVars] {
   if (f.type === "statement") {
     return notImplementedYet(f);
   } else if (f.type === "call") {
@@ -411,11 +430,12 @@ function doSingleFrom(
         ? handledFroms.map((fr) => ({ ...fr, rel: nullifySet(fr.rel) }))
         : handledFroms;
 
-    const newP = f.join?.on
+    const newRes = f.join?.on
       ? (function () {
-          const [t, newP] = elabExpr(
+          const [t, newP, newUs] = elabExpr(
             mergeHandledFroms(c, newHandledFroms),
             p,
+            us,
             f.join.on
           );
           if (t !== BuiltinTypes.Boolean) {
@@ -424,15 +444,15 @@ function doSingleFrom(
               actual: t,
             });
           } else {
-            return newP;
+            return [newP, newUs] as const;
           }
         })()
-      : p;
+      : ([p, us] as const);
 
-    if (isError(newP)) {
-      throw newP;
+    if (isError(newRes)) {
+      throw newRes;
     } else {
-      return [newHandledFroms.concat(newHandledFrom), newP];
+      return [newHandledFroms.concat(newHandledFrom), newRes[0], newRes[1]];
     }
   }
 }
@@ -440,21 +460,29 @@ function doFroms(
   g: Global,
   c: Context,
   p: Parameters,
+  us: UnifVars,
   froms: From[]
-): [Context, Parameters] {
-  const inFroms: [HandledFrom[], Parameters] = froms.reduce(
-    function (acc: [HandledFrom[], Parameters], f: From) {
-      return doSingleFrom(g, c, acc[1], acc[0], f);
+): [Context, Parameters, UnifVars] {
+  const inFroms: [HandledFrom[], Parameters, UnifVars] = froms.reduce(
+    function (acc: [HandledFrom[], Parameters, UnifVars], f: From) {
+      return doSingleFrom(g, c, acc[1], acc[2], acc[0], f);
     },
-    [[], p]
+    [[], p, us]
   );
-  return [mergeHandledFroms(c, inFroms[0]), inFroms[1]];
+  return [mergeHandledFroms(c, inFroms[0]), inFroms[1], inFroms[2]];
 }
 
-function lookup(c: Context, n: QName): Type | null {
+function lookup(c: Context, ps: Parameters, n: QName): Type | null {
   const foundAlias = c.aliases.find((a) => eqQNames(a.name, n));
   if (foundAlias) {
-    return { kind: "unifvar", index: foundAlias.targetIndex };
+    const foundP = ps[foundAlias.targetIndex];
+    if (foundP) {
+      return { kind: "unifvar", id: foundP.unifvarId };
+    } else {
+      throw new Error(
+        `Typechecker error: unknown parameter index ${foundAlias.targetIndex}`
+      );
+    }
   } else {
     const found = c.decls.find((d) => eqQNames(d.name, n));
     if (found) {
@@ -492,12 +520,12 @@ function lookupInSet(s: SetT, name: Name): SimpleT | UnifVar | null {
 //   retur
 // }
 
-function elabRef(c: Context, e: ExprRef): Type {
+function elabRef(c: Context, ps: Parameters, e: ExprRef): Type {
   if (e.name === "*") {
     return notImplementedYet(e);
   } else {
     if (e.table) {
-      const table = lookup(c, e.table);
+      const table = lookup(c, ps, e.table);
       if (!table) {
         throw new UnknownIdentifier(e.table);
       }
@@ -539,20 +567,20 @@ function elabRef(c: Context, e: ExprRef): Type {
 
 function unifySimplesOrUnifVars(
   e: Expr | null,
-  ps: Parameters,
+  us: UnifVars,
   source: SimpleT | UnifVar,
   target: SimpleT | UnifVar,
   type: CastType
-): null | [SimpleT, Parameters] {
+): null | [SimpleT, UnifVars] {
   if (source.kind === "simple") {
     if (target.kind === "simple") {
-      return unifySimples(e, ps, source, target, type);
+      return unifySimples(e, us, source, target, type);
     } else {
-      return unifyUnificationVar(e, ps, source, target, type);
+      return unifyUnificationVar(e, us, source, target, type);
     }
   } else {
     if (target.kind === "simple") {
-      return unifyUnificationVar(e, ps, target, source, type);
+      return unifyUnificationVar(e, us, target, source, type);
     } else {
       return notImplementedYet(e);
     }
@@ -586,11 +614,11 @@ function isNullable(s: SimpleT): boolean {
 type CastType = "implicit" | "assignment" | "explicit";
 function unifySimples(
   e: Expr | null,
-  ps: Parameters,
+  us: UnifVars,
   source: SimpleT,
   target: SimpleT,
   type: CastType
-): null | [SimpleT, Parameters] {
+): null | [SimpleT, UnifVars] {
   debugger;
   // list casts = \dC+
   const casts: { source: SimpleT; target: SimpleT; type: CastType }[] = [
@@ -607,8 +635,8 @@ function unifySimples(
   ];
 
   function wrapResInNullable(
-    res: null | [SimpleT, Parameters]
-  ): null | [SimpleT, Parameters] {
+    res: null | [SimpleT, UnifVars]
+  ): null | [SimpleT, UnifVars] {
     return res === null
       ? null
       : [BuiltinTypeConstructors.Nullable(res[0]), res[1]];
@@ -618,22 +646,22 @@ function unifySimples(
   if (target.typevar && isNullable(target) && !isNullable(source)) {
     if (target.typevar.kind === "simple") {
       return wrapResInNullable(
-        unifySimples(e, ps, source, target.typevar, type)
+        unifySimples(e, us, source, target.typevar, type)
       );
     } else {
       return wrapResInNullable(
-        unifyUnificationVar(e, ps, source, target.typevar, type)
+        unifyUnificationVar(e, us, source, target.typevar, type)
       );
     }
   }
   if (source.typevar && isNullable(source) && !isNullable(target)) {
     if (source.typevar.kind === "simple") {
       return wrapResInNullable(
-        unifySimples(e, ps, target, source.typevar, type)
+        unifySimples(e, us, target, source.typevar, type)
       );
     } else {
       return wrapResInNullable(
-        unifyUnificationVar(e, ps, target, source.typevar, type)
+        unifyUnificationVar(e, us, target, source.typevar, type)
       );
     }
   }
@@ -641,9 +669,9 @@ function unifySimples(
   if (source.typevar) {
     if (target.typevar) {
       if (eqQNames(source.name, target.name)) {
-        const res = unifySimplesOrUnifVars(e, ps, source, target, type);
+        const res = unifySimplesOrUnifVars(e, us, source, target, type);
         if (res) {
-          return [{ ...source, typevar: res[0] }, ps];
+          return [{ ...source, typevar: res[0] }, us];
         } else {
           return null;
         }
@@ -659,7 +687,7 @@ function unifySimples(
     } else {
       // No typevars in either side
       if (eqQNames(source.name, target.name)) {
-        return [source, ps];
+        return [source, us];
       } else {
         const matchingCast = casts.find(
           (c) =>
@@ -667,7 +695,7 @@ function unifySimples(
             eqQNames(c.target.name, target.name)
         );
         if (matchingCast) {
-          return [matchingCast.target, ps];
+          return [matchingCast.target, us];
         } else {
           return null;
         }
@@ -678,40 +706,41 @@ function unifySimples(
 
 function unifyUnificationVar(
   e: Expr | null, // not actually used, just for "documentation", error handling, etc
-  ps: Parameters,
+  us: UnifVars,
   t1: SimpleT,
   t2: UnifVar,
   type: CastType
-): null | [SimpleT, Parameters] {
-  debugger;
-  const existing = ps.find((p) => p.index === t2.index);
+): null | [SimpleT, UnifVars] {
+  const existing = us[t2.id];
   if (existing) {
     if (existing.type.kind === "unknown") {
-      return [
-        t1,
-        ps
-          .filter((p) => p.index !== t2.index)
-          .concat({
-            ...existing,
+      const newUs = {
+        ...us,
+        ...{
+          [t2.id]: {
             type: t1,
             unificatedExpressions: e
               ? existing.unificatedExpressions.concat(e)
               : existing.unificatedExpressions,
-          }),
-      ];
+          },
+        },
+      };
+      return [t1, newUs];
     } else {
-      const res = unifySimples(e, ps, existing.type, t1, type);
+      const res = unifySimples(e, us, existing.type, t1, type);
       if (res) {
-        const newPs = ps
-          .filter((p) => p.index !== t2.index)
-          .concat({
-            ...existing,
-            type: res[0],
-            unificatedExpressions: e
-              ? existing.unificatedExpressions.concat(e)
-              : existing.unificatedExpressions,
-          });
-        return [res[0], newPs];
+        const newUs = {
+          ...us,
+          ...{
+            [t2.id]: {
+              type: res[0],
+              unificatedExpressions: e
+                ? existing.unificatedExpressions.concat(e)
+                : existing.unificatedExpressions,
+            },
+          },
+        };
+        return [res[0], newUs];
       } else {
         return null;
       }
@@ -725,16 +754,16 @@ function unifyUnificationVar(
 
 function unify(
   e: Expr | null, // not actually used, just for "documentation", error handling, etc
-  ps: Parameters,
+  us: UnifVars,
   t1: Type,
   t2: Type,
   type: CastType
-): null | [Type, Parameters] {
+): null | [Type, UnifVars] {
   if (t1.kind === "simple") {
     if (t2.kind === "simple") {
-      return unifySimples(e, ps, t1, t2, type);
+      return unifySimples(e, us, t1, t2, type);
     } else if (t2.kind === "unifvar") {
-      return unifyUnificationVar(e, ps, t1, t2, type);
+      return unifyUnificationVar(e, us, t1, t2, type);
     } else {
       return null;
     }
@@ -752,7 +781,7 @@ function unify(
     } else if (t2.kind === "set") {
       return null;
     } else {
-      return unifyUnificationVar(e, ps, t2, t1, type);
+      return unifyUnificationVar(e, us, t2, t1, type);
     }
   } else {
     return expectNever(t1);
@@ -762,21 +791,22 @@ function unify(
 function elabBinary(
   c: Context,
   p: Parameters,
+  us: UnifVars,
   e: ExprBinary
-): [Type, Parameters] {
+): [Type, Parameters, UnifVars] {
   debugger;
-  const [t1, p1] = elabExpr(c, p, e.left);
-  const [t2, p2] = elabExpr(c, p1, e.right);
+  const [t1, p1, us1] = elabExpr(c, p, us, e.left);
+  const [t2, p2, us2] = elabExpr(c, p1, us1, e.right);
 
   if (e.op === "=") {
-    const unifies = unify(e, p2, t1, t2, "implicit");
+    const unifies = unify(e, us2, t1, t2, "implicit");
     if (!unifies) {
       throw new TypeMismatch(e, { expected: t1, actual: t2 });
     } else {
-      return [BuiltinTypes.Boolean, unifies[1]];
+      return [BuiltinTypes.Boolean, p2, unifies[1]];
     }
   } else if (e.op === "AND") {
-    const unifies1 = unify(e, p2, t1, BuiltinTypes.Boolean, "implicit");
+    const unifies1 = unify(e, us2, t1, BuiltinTypes.Boolean, "implicit");
     if (!unifies1) {
       throw new TypeMismatch(e, { expected: BuiltinTypes.Boolean, actual: t1 });
     } else {
@@ -793,7 +823,7 @@ function elabBinary(
           actual: t1,
         });
       } else {
-        return [BuiltinTypes.Boolean, unifies2[1]];
+        return [BuiltinTypes.Boolean, p2, unifies2[1]];
       }
     }
   } else {
@@ -802,31 +832,53 @@ function elabBinary(
   // TODO support custom operators
 }
 
-function elabExpr(c: Context, p: Parameters, e: Expr): [Type, Parameters] {
+function getNextUnifVarId(us: UnifVars): unifvarId {
+  const keys = Object.keys(us).map(parseInt);
+  if (keys.length === 0) {
+    return 9000;
+  } else {
+    return Math.max(...keys) + 1;
+  }
+}
+
+function elabExpr(
+  c: Context,
+  p: Parameters,
+  us: UnifVars,
+  e: Expr
+): [Type, Parameters, UnifVars] {
   if (e.type === "ref") {
-    const t = elabRef(c, e);
-    return [t, p];
+    const t = elabRef(c, p, e);
+    return [t, p, us];
   } else if (e.type === "parameter") {
     const index = extractIndexFromParameter(e);
-    debugger;
-    return [
-      { kind: "unifvar", index: index },
-      p.some((p) => p.index === index)
-        ? p
-        : p.concat({
-            index: index,
-            type: { kind: "unknown" },
-            unificatedExpressions: [],
-          }),
-    ];
+    const existing = p[index];
+    if (existing) {
+      return [{ kind: "unifvar", id: existing.unifvarId }, p, us];
+    } else {
+      const newUnifvarId = getNextUnifVarId(us);
+      return [
+        { kind: "unifvar", id: newUnifvarId },
+        { ...p, ...{ [index]: { unifvarId: newUnifvarId } } },
+        {
+          ...us,
+          ...{
+            [newUnifvarId]: {
+              type: { kind: "unknown" },
+              unificatedExpressions: [],
+            },
+          },
+        },
+      ];
+    }
   } else if (e.type === "integer") {
-    return [BuiltinTypes.Integer, p];
+    return [BuiltinTypes.Integer, p, us];
   } else if (e.type === "boolean") {
-    return [BuiltinTypes.Boolean, p];
+    return [BuiltinTypes.Boolean, p, us];
   } else if (e.type === "string") {
-    return [BuiltinTypes.String, p];
+    return [BuiltinTypes.String, p, us];
   } else if (e.type === "binary") {
-    return elabBinary(c, p, e);
+    return elabBinary(c, p, us, e);
   } else {
     return notImplementedYet(e);
   }

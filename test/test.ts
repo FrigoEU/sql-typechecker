@@ -12,7 +12,7 @@ import {
 
 // https://github.com/alsatian-test/alsatian/blob/master/packages/alsatian/README.md
 
-@TestFixture("whatever you'd like to call the fixture")
+@TestFixture("Typechecker")
 export class TypecheckerTests {
   @Test("Basic test")
   public basicTest() {
@@ -195,6 +195,50 @@ where $1 = $2
 
       Expect(us.lookup({ kind: "unifvar", id: 1 })[0]).toEqual(null);
       Expect(us.lookup({ kind: "unifvar", id: 2 })[0]).toEqual(null);
+    } else {
+      throw new Error("Bad test setup");
+    }
+  }
+
+  @Test("Two unifvars late unif")
+  @TestCase(`
+select id, name
+from testje
+where $1 = $2
+and $1 = id
+`)
+  @TestCase(`
+select id, name
+from testje
+where $1 = $2
+and $2 = id
+`)
+  @TestCase(`
+select id, name
+from testje
+where $1 = $2
+and $2 = $3
+and $1 = id
+`)
+  public twoUnifvarsLateUnif(queryStr: string) {
+    const setup = "create table testje ( id int not null, name text );";
+    const g = parseSetupScripts(parse(setup));
+    const query = parse(queryStr);
+    if (query[0].type === "select") {
+      const [returnT, us] = doSelectFrom(
+        g,
+        { decls: [], aliases: [] },
+        new UnifVars(0, {}),
+        query[0]
+      );
+
+      const expectedParam: SimpleT = {
+        kind: "simple",
+        name: { name: "integer" },
+      };
+      us.getKeys().forEach(function (k) {
+        Expect(us.lookup({ kind: "unifvar", id: k })[0]).toEqual(expectedParam);
+      });
     } else {
       throw new Error("Bad test setup");
     }

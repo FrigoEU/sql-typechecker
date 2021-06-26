@@ -488,7 +488,7 @@ class KindMismatch extends Error {
     super(`KindMismatch: ${e}: ${expected} vs ${actual}}`);
   }
 }
-class TypeMismatch extends Error {
+export class TypeMismatch extends Error {
   constructor(
     e: Expr,
     ts: {

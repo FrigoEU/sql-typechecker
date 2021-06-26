@@ -6,55 +6,41 @@ import {
   doSelectFrom,
   SetT,
   SimpleT,
-  UnknownT,
-  Parameters,
   UnifVar,
   Global,
   UnifVars,
+  ParametrizedT,
 } from "./typecheck";
 
 go();
 
 function printSimpleAsTypescript(
-  ps: Parameters,
   us: UnifVars,
-  t: SimpleT | UnifVar | UnknownT
+  t: SimpleT | ParametrizedT<SimpleT | UnifVar> | UnifVar | null
 ): string {
-  if (t.kind === "unknown") {
+  if (t === null) {
     return "any";
   } else if (t.kind === "unifvar") {
-    const found = us[t.id];
-    if (!found) {
-      throw new Error(`Parameter with id ${t.id} not found`);
-    } else {
-      return printSimpleAsTypescript(ps, us, found.type);
-    }
+    const [found, _exprs] = us.lookup(t);
+    return printSimpleAsTypescript(us, found);
   } else {
-    if (t.name.name === "array") {
-      if (!t.typevar) {
-        throw new Error("Array without typevar");
-      } else {
-        return "(" + printSimpleAsTypescript(ps, us, t.typevar) + ")" + "[]";
-      }
-    } else if (t.name.name === "nullable") {
-      if (!t.typevar) {
-        throw new Error("Nullable without typevar");
-      } else {
-        return printSimpleAsTypescript(ps, us, t.typevar) + " | null";
-      }
+    if (t.name === "array") {
+      return "(" + printSimpleAsTypescript(us, t.typevar) + ")" + "[]";
+    } else if (t.name === "nullable") {
+      return printSimpleAsTypescript(us, t.typevar) + " | null";
     } else {
       return t.name.name;
     }
   }
 }
-function printSetAsTypescript(ps: Parameters, us: UnifVars, s: SetT): string {
+function printSetAsTypescript(us: UnifVars, s: SetT): string {
   return (
     "{" +
     s.fields
       .map(
         (f) =>
-          (f.name === null ? "?" : `"${f.name.name}": `) +
-          printSimpleAsTypescript(ps, us, f.type)
+          (f.name === null ? `"?": ` : `"${f.name.name}": `) +
+          printSimpleAsTypescript(us, f.type)
       )
       .join(", ") +
     "}"
@@ -85,16 +71,15 @@ async function go() {
     }
     const st = ast[0];
     if (st.type === "select") {
-      const [returnT, ps, us] = doSelectFrom(
+      const [returnT, us] = doSelectFrom(
         g,
         { decls: [], aliases: [] },
-        {},
-        {},
+        new UnifVars(0, {}),
         st
       );
       console.log("Select:\n", sqlstr, "\n");
 
-      const returnTypeAsString = printSetAsTypescript(ps, us, returnT);
+      const returnTypeAsString = printSetAsTypescript(us, returnT);
       console.log("Returns:\n", returnTypeAsString, "\n");
 
       return (
@@ -102,21 +87,12 @@ async function go() {
         returnTypeAsString +
         ", " +
         "[" +
-        Object.keys(ps)
-          .map((i) => parseInt(i))
+        us
+          .getKeys()
           .map((k) => {
-            const p = ps[k];
-            if (!p) {
-              throw new Error(
-                `parameter not found, key: ${k}, ps: ${JSON.stringify(ps)}`
-              );
-            } else {
-              const paramTypeAsString = printSimpleAsTypescript(ps, us, {
-                kind: "unifvar",
-                id: p.unifvarId,
-              });
-              console.log(`Param \$${k}:\n`, paramTypeAsString, "\n");
-            }
+            const [p, _exprs] = us.lookup({ kind: "unifvar", id: k });
+            const paramTypeAsString = printSimpleAsTypescript(us, p);
+            console.log(`Param \$${k}:\n`, paramTypeAsString, "\n");
           })
           .join(", ") +
         "]"

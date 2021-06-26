@@ -93,6 +93,7 @@ async function go() {
             const [p, _exprs] = us.lookup({ kind: "unifvar", id: k });
             const paramTypeAsString = printSimpleAsTypescript(us, p);
             console.log(`Param \$${k}:\n`, paramTypeAsString, "\n");
+            return paramTypeAsString;
           })
           .join(", ") +
         "]"

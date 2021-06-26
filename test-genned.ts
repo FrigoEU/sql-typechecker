@@ -1,7 +1,7 @@
 const connectionoptions = {};
 function mymainfunc() {
   const pg = await connect(connectionoptions);
-  const res = safesql<<{"id": integer, "name": text | null, "?": text | null}, [, ]>(`
+  const res = safesql<<{"id": integer, "name": text | null, "?": text | null}, [integer, text | null]>(`
 select id, name, $2
 from testje
 where id = $1

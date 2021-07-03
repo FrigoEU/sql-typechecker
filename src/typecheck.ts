@@ -550,7 +550,8 @@ function deriveNameFromExpr(expr: Expr): Name | null {
   } else if (expr.type === "parameter") {
     return null;
   } else {
-    return notImplementedYet(expr);
+    // return notImplementedYet(expr);
+    return null;
   }
 }
 
@@ -896,6 +897,14 @@ function unify(
     }
   }
 }
+
+export type binaryOp = {
+  left: SimpleT | ParametrizedT<SimpleT>;
+  right: SimpleT | ParametrizedT<SimpleT>;
+  result: SimpleT | ParametrizedT<SimpleT>;
+  name: QName;
+  description: string;
+};
 
 function elabBinary(c: Context, us: UnifVars, e: ExprBinary): [Type, UnifVars] {
   const [t1, us1] = elabExpr(c, us, e.left);

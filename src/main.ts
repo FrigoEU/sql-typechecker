@@ -21,7 +21,7 @@ function printSimpleAsTypescript(
   if (t === null) {
     return "any";
   } else if (t.kind === "unifvar") {
-    const [found, _exprs] = us.lookup(t);
+    const [found, _exprs] = us.lookup(t.id);
     return printSimpleAsTypescript(us, found);
   } else {
     if (t.name === "array") {
@@ -74,7 +74,7 @@ async function go() {
       const [returnT, us] = doSelectFrom(
         g,
         { decls: [], aliases: [] },
-        new UnifVars(0, {}),
+        new UnifVars(0, {}, {}),
         st
       );
       console.log("Select:\n", sqlstr, "\n");
@@ -90,7 +90,7 @@ async function go() {
         us
           .getKeys()
           .map((k) => {
-            const [p, _exprs] = us.lookup({ kind: "unifvar", id: k });
+            const [p, _exprs] = us.lookup(k);
             const paramTypeAsString = printSimpleAsTypescript(us, p);
             console.log(`Param \$${k}:\n`, paramTypeAsString, "\n");
             return paramTypeAsString;

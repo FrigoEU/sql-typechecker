@@ -28,7 +28,7 @@ and $2 = name
       const [returnT, us] = doSelectFrom(
         g,
         { decls: [], aliases: [] },
-        new UnifVars(0, {}),
+        new UnifVars(0, {}, {}),
         query[0]
       );
 
@@ -57,14 +57,14 @@ and $2 = name
         kind: "simple",
         name: { name: "integer" },
       };
-      Expect(us.lookup({ kind: "unifvar", id: 1 })[0]).toEqual(expectedParam0);
+      Expect(us.lookup(1)[0]).toEqual(expectedParam0);
 
       const expectedParam1: ParametrizedT<SimpleT> = {
         kind: "parametrized",
         name: "nullable",
         typevar: { kind: "simple", name: { name: "text" } },
       };
-      Expect(us.lookup({ kind: "unifvar", id: 2 })[0]).toEqual(expectedParam1);
+      Expect(us.lookup(2)[0]).toEqual(expectedParam1);
     } else {
       throw new Error("Bad test setup");
     }
@@ -82,7 +82,7 @@ and $2 = name
         ? doSelectFrom(
             g,
             { decls: [], aliases: [] },
-            new UnifVars(0, {}),
+            new UnifVars(0, {}, {}),
             query[0]
           )
         : null
@@ -117,7 +117,7 @@ where name = id
         ? doSelectFrom(
             g,
             { decls: [], aliases: [] },
-            new UnifVars(0, {}),
+            new UnifVars(0, {}, {}),
             query[0]
           )
         : null
@@ -138,7 +138,7 @@ and $1 = $2
       const [returnT, us] = doSelectFrom(
         g,
         { decls: [], aliases: [] },
-        new UnifVars(0, {}),
+        new UnifVars(0, {}, {}),
         query[0]
       );
 
@@ -167,8 +167,8 @@ and $1 = $2
         kind: "simple",
         name: { name: "integer" },
       };
-      Expect(us.lookup({ kind: "unifvar", id: 1 })[0]).toEqual(expectedParam0);
-      Expect(us.lookup({ kind: "unifvar", id: 2 })[0]).toEqual(expectedParam0);
+      Expect(us.lookup(1)[0]).toEqual(expectedParam0);
+      Expect(us.lookup(2)[0]).toEqual(expectedParam0);
     } else {
       throw new Error("Bad test setup");
     }
@@ -187,14 +187,14 @@ where $1 = $2
       const [returnT, us] = doSelectFrom(
         g,
         { decls: [], aliases: [] },
-        new UnifVars(0, {}),
+        new UnifVars(0, {}, {}),
         query[0]
       );
 
       Expect(us.getKeys().length).toEqual(2);
 
-      Expect(us.lookup({ kind: "unifvar", id: 1 })[0]).toEqual(null);
-      Expect(us.lookup({ kind: "unifvar", id: 2 })[0]).toEqual(null);
+      Expect(us.lookup(1)[0]).toEqual(null);
+      Expect(us.lookup(2)[0]).toEqual(null);
     } else {
       throw new Error("Bad test setup");
     }
@@ -218,7 +218,7 @@ select id, name
 from testje
 where $1 = $2
 and $2 = $3
-and $1 = id
+and $1 = id 
 `)
   public twoUnifvarsLateUnif(queryStr: string) {
     const setup = "create table testje ( id int not null, name text );";
@@ -228,7 +228,7 @@ and $1 = id
       const [returnT, us] = doSelectFrom(
         g,
         { decls: [], aliases: [] },
-        new UnifVars(0, {}),
+        new UnifVars(0, {}, {}),
         query[0]
       );
 
@@ -237,7 +237,7 @@ and $1 = id
         name: { name: "integer" },
       };
       us.getKeys().forEach(function (k) {
-        Expect(us.lookup({ kind: "unifvar", id: k })[0]).toEqual(expectedParam);
+        Expect(us.lookup(k)[0]).toEqual(expectedParam);
       });
     } else {
       throw new Error("Bad test setup");

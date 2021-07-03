@@ -21,6 +21,7 @@ import {
   Statement,
   toSql,
 } from "pgsql-ast-parser";
+import { builtinoperators } from "./builtinoperators";
 
 export type Type = ParametrizedT<SimpleT | UnifVar> | SimpleT | SetT | UnifVar;
 export type ParametrizedT<T> = {
@@ -111,241 +112,192 @@ export type Global = {
 // Parameters are of a certain type. This type is initially unknown (bar function parameters with a type annotation), so we assign a unification variable to it. These are implemented as refs in UrWeb. We don't want to model it like that (see discussion), so we need to keep a mapping of unification variable -> (current) type around. Is this seperate from the mapping (indexed) parameter -> unification variable? It should be use, otherwise you can never model equivalences between two unification variables (WHERE $1 = $2)
 // Nope this is not true. Rather, we keep "equivalences" between parameters/unification variables (which are the same since one parameter always is one unification variable and there is no other way to have other unification vars) in the UnifVars data structure itself, and take it into account when looking up the type of a unifvar
 
-type unifvarValue = null | {
-  type: ParametrizedT<SimpleT | UnifVar> | SimpleT;
-  unificatedExpressions: Expr[];
+type unification = {
+  expr: Expr; // for documentation, location, etc
+  castType: CastType;
+  type: ParametrizedT<SimpleT> | SimpleT | (SimpleT | ParametrizedT<SimpleT>)[]; // | SetT
 };
+
+function allCasesHandled(_: never): any {}
 
 // "Global" scoping: per function call or prepared statement
 export class UnifVars {
   private currentI: unifvarId;
-  private values: {
-    [key: number /* unifvarId */]: unifvarValue;
-  };
-  private equivalences: {
-    [key: number /* unifvarId */]: unifvarId;
+  private unifications: {
+    [key: number /* unifvarId */]: unification[];
   };
   constructor(
     i: unifvarId,
-    equivalences: {
-      [key: number /* unifvarId */]: unifvarId;
-    },
     values: {
-      [key: number /* unifvarId */]: unifvarValue;
+      [key: number /* unifvarId */]: unification[];
     }
   ) {
     this.currentI = i;
-    this.values = values;
-    this.equivalences = equivalences;
+    this.unifications = values;
   }
   public getKeys(): number[] {
-    const fromValues = Object.keys(this.values).map((i) => parseInt(i));
-    const fromEquivalences = Object.keys(this.equivalences).map((i) =>
-      parseInt(i)
-    );
-    return fromValues.concat(fromEquivalences).sort();
+    const fromValues = Object.keys(this.unifications).map((i) => parseInt(i));
+    return fromValues.sort();
   }
   public newvar(i: unifvarId): [UnifVar, UnifVars] {
-    if (this.values[i] !== undefined || this.equivalences[i] !== undefined) {
+    if (this.unifications[i] !== undefined) {
       return [{ kind: "unifvar", id: i }, this];
     } else {
       const i = this.currentI + 1;
       return [
         { kind: "unifvar", id: i },
-        new UnifVars(i, this.equivalences, {
-          ...this.values,
-          ...{ [i]: null },
+        new UnifVars(i, {
+          ...this.unifications,
+          ...{ [i]: [] },
         }),
       ];
     }
   }
-  private findMainUnifvarInChain(i: unifvarId): unifvarId {
-    const found = this.equivalences[i];
-    if (found === undefined) {
-      return i;
-    } else {
-      return this.findMainUnifvarInChain(found);
+
+  public resolve(): {
+    [key: number /* unifvarid */]:
+      | null
+      | SimpleT
+      | ParametrizedT<SimpleT>
+      | (ParametrizedT<SimpleT> | SimpleT)[];
+  } {
+    const resolved: {
+      [key: number /* unifvarid */]:
+        | null
+        | SimpleT
+        | ParametrizedT<SimpleT>
+        | (ParametrizedT<SimpleT> | SimpleT)[];
+    } = {};
+    for (let unifvarId in this.unifications) {
+      let currentType:
+        | null
+        | ParametrizedT<SimpleT>
+        | SimpleT
+        | (ParametrizedT<SimpleT> | SimpleT)[] = null; // null = any type
+      this.unifications[unifvarId].forEach(function (unification) {
+        if (currentType === null) {
+          if (Array.isArray(unification.type)) {
+            currentType = unification.type;
+          } else if (unification.type.kind === "simple") {
+            currentType = unification.type;
+          } else if (unification.type.kind === "parametrized") {
+            currentType = unification.type;
+          } else {
+            allCasesHandled(unification.type);
+          }
+        } else if (Array.isArray(currentType)) {
+          if (Array.isArray(unification.type)) {
+            // TODO
+            return notImplementedYet(unification.expr);
+          } else if (unification.type.kind === "simple") {
+            // TODO
+            return notImplementedYet(unification.expr);
+          } else if (unification.type.kind === "parametrized") {
+            // TODO
+            return notImplementedYet(unification.expr);
+          } else {
+            allCasesHandled(unification.type);
+          }
+        } else if (currentType.kind === "simple") {
+          if (Array.isArray(unification.type)) {
+            // TODO
+            return notImplementedYet(unification.expr);
+          } else if (
+            unification.type.kind === "simple" ||
+            unification.type.kind === "parametrized"
+          ) {
+            currentType = unifySimplesOrParametrizeds(
+              unification.expr,
+              currentType,
+              unification.type,
+              unification.castType
+            );
+          } else {
+            allCasesHandled(unification.type);
+          }
+        } else if (currentType.kind === "parametrized") {
+          if (Array.isArray(unification.type)) {
+            // TODO
+            return notImplementedYet(unification.expr);
+          } else if (
+            unification.type.kind === "simple" ||
+            unification.type.kind === "parametrized"
+          ) {
+            currentType = unifySimplesOrParametrizeds(
+              unification.expr,
+              currentType,
+              unification.type,
+              unification.castType
+            );
+          } else {
+            allCasesHandled(unification.type);
+          }
+        } else {
+          allCasesHandled(currentType);
+        }
+      });
+      resolved[unifvarId] = currentType;
     }
+    return resolved;
   }
 
-  public lookup(
-    i: unifvarId
-  ): [ParametrizedT<SimpleT | UnifVar> | SimpleT | null, Expr[]] {
-    const main = this.findMainUnifvarInChain(i);
-    const found = this.values[main];
-    if (found === undefined) {
-      throw new Error(
-        `Typechecker error: Unknown unification var: ${JSON.stringify(
-          i
-        )}. Current unifvar values: ${JSON.stringify(
-          this.values
-        )}. Current equivalences: ${JSON.stringify(this.equivalences)}`
+  public unifyP(
+    e: Expr /* only for documentation */,
+    i: ParametrizedT<UnifVar>,
+    j: SimpleT | ParametrizedT<SimpleT> | (SimpleT | ParametrizedT<SimpleT>)[],
+    type: CastType
+  ): [UnifVar, UnifVars] {
+    // TODO this is shit: need to take nullable casting into account
+    if (Array.isArray(j)) {
+      const candidates = mapPartial(j, (p) =>
+        p.kind === "parametrized" ? p.typevar : null
       );
-    } else if (found === null) {
-      return [null, []];
+      return this.unify(e, i.typevar, candidates, type);
+    } else if (j.kind === "simple") {
+      throw new TypeMismatch(e, { expected: i, actual: j });
+    } else if (j.kind === "parametrized") {
+      return this.unify(e, i.typevar, j.typevar, type);
     } else {
-      const t = found.type;
-      return [t, found.unificatedExpressions];
+      return allCasesHandled(j);
     }
   }
 
-  private setValue(
-    e: Expr | null,
-    i: unifvarId,
-    t: SimpleT | ParametrizedT<SimpleT | UnifVar>
-  ) {
-    const [, exprs] = this.lookup(i);
-    return new UnifVars(this.currentI, this.equivalences, {
-      ...this.values,
-      ...{
-        [i]: {
-          type: t,
-          unificatedExpressions: exprs.concat(e ? [e] : []),
-        },
-      },
-    });
-  }
-
-  private registerEquivalence(i: UnifVar, j: UnifVar): UnifVars {
-    if (i.id === j.id) {
-      return this;
-    } else if (
-      this.findMainUnifvarInChain(i.id) === this.findMainUnifvarInChain(j.id)
-    ) {
-      return this;
-    } else {
-      const main = i.id < j.id ? i : j; // ordering unifvars so smallest id's always are main so we don't get weird circular references
-      const other = main.id === i.id ? j : i;
-      const [mainT, mainExprs] = this.lookup(main.id);
-      const [, otherExprs] = this.lookup(other.id);
-      // Unification of actual values happens in "areEqual()"
-      const newEquivalences = {
-        ...this.equivalences,
-        [other.id]: main.id,
-      };
-      const newValues = {
-        ...this.values,
-        [main.id]: mainT && {
-          type: mainT,
-          unificatedExpressions: mainExprs.concat(otherExprs),
-        },
-      };
-      delete newValues[other.id];
-      return new UnifVars(this.currentI, newEquivalences, newValues);
-    }
-  }
-
-  private areEqual(
-    e: Expr | null,
-    i: UnifVar,
-    j: UnifVar,
-    type: CastType
-  ): null | [UnifVar, UnifVars] {
-    const main = this.findMainUnifvarInChain(i.id);
-    const other = this.findMainUnifvarInChain(j.id);
-    const [currMain] = this.lookup(main);
-    const [currOther] = this.lookup(other);
-    const withEqui = this.registerEquivalence(i, j);
-    if (currMain === null) {
-      if (currOther === null) {
-        // unknown - unknown
-        return [{ id: main, kind: "unifvar" }, withEqui];
-      } else {
-        // unknown - simple
-        const res = withEqui.unify(
-          e,
-          { id: main, kind: "unifvar" },
-          currOther,
-          type
-        );
-        return res && [i, res[1]];
-      }
-    } else {
-      if (currOther === null) {
-        // simple - unknown
-        return withEqui.unify(
-          e,
-          { id: other, kind: "unifvar" },
-          currMain,
-          type
-        );
-      } else {
-        // simple - simple
-        const res = unifySimplesOrParametrizeds(
-          e,
-          withEqui,
-          currMain,
-          currOther,
-          type
-        );
-        return res && [{ id: main, kind: "unifvar" }, res[1]];
-      }
-    }
-  }
-
-  // * Checks if there are no type mismatches
-  // * Updates unifvar value
   public unify(
-    e: Expr | null /* only for documentation */,
+    e: Expr /* only for documentation */,
     i: UnifVar,
-    j: UnifVar | SimpleT | ParametrizedT<SimpleT | UnifVar>,
+    j: SimpleT | ParametrizedT<SimpleT> | (SimpleT | ParametrizedT<SimpleT>)[],
     type: CastType
-  ): null | [UnifVar, UnifVars] {
-    if (j.kind === "unifvar") {
-      return this.areEqual(e, i, j, type);
-    } else {
-      const main = this.findMainUnifvarInChain(i.id);
-      const [existing] = this.lookup(main);
-      if (existing === null) {
-        return [{ id: main, kind: "unifvar" }, this.setValue(e, main, j)];
-      } else {
-        const res = unifySimplesOrParametrizeds(e, this, existing, j, type);
-        return (
-          res && [
-            { id: main, kind: "unifvar" },
-            res[1].setValue(e, main, res[0]),
-          ]
-        );
-      }
-    }
-  }
-}
-
-function unifySimplesOrUnifVars(
-  e: Expr | null,
-  us: UnifVars,
-  source: SimpleT | UnifVar,
-  target: SimpleT | UnifVar,
-  type: CastType
-): null | [SimpleT | UnifVar, UnifVars] {
-  if (source.kind === "simple") {
-    if (target.kind === "simple") {
-      // simple - simple
-      const res = unifySimples(source, target, type);
-      return res && [res, us];
-    } else {
-      // simple - unif
-      return us.unify(e, target, source, type);
-    }
-  } else {
-    // unif - simple && unif - unif
-    return us.unify(e, source, target, type);
+  ): [UnifVar, UnifVars] {
+    return [
+      i,
+      new UnifVars(this.currentI, {
+        ...this.unifications,
+        [i.id]: this.unifications[i.id].concat([
+          {
+            expr: e,
+            castType: type,
+            type: j,
+          },
+        ]),
+      }),
+    ];
   }
 }
 
 function unifySimplesOrParametrizeds(
-  e: Expr | null,
-  us: UnifVars,
-  source: ParametrizedT<SimpleT | UnifVar> | SimpleT,
-  target: ParametrizedT<SimpleT | UnifVar> | SimpleT,
+  e: Expr,
+  source: ParametrizedT<SimpleT> | SimpleT | SetT,
+  target: ParametrizedT<SimpleT> | SimpleT | SetT,
   type: CastType
-): null | [ParametrizedT<SimpleT | UnifVar> | SimpleT, UnifVars] {
-  function wrapResInNullable(
-    res: null | [UnifVar | SimpleT, UnifVars]
-  ): null | [ParametrizedT<SimpleT | UnifVar>, UnifVars] {
-    return res === null
-      ? null
-      : [BuiltinTypeConstructors.Nullable(res[0]), res[1]];
+): ParametrizedT<SimpleT> | SimpleT {
+  if (source.kind === "set") {
+    return notImplementedYet(e);
+  }
+  if (target.kind === "set") {
+    return notImplementedYet(e);
+  }
+  function wrapResInNullable(res: SimpleT): ParametrizedT<SimpleT> {
+    return res && BuiltinTypeConstructors.Nullable(res);
   }
 
   // T -> Nullable<T> is a universal cast
@@ -354,43 +306,33 @@ function unifySimplesOrParametrizeds(
     source.name === "nullable" &&
     target.kind === "simple"
   ) {
-    return wrapResInNullable(
-      unifySimplesOrUnifVars(e, us, source.typevar, target, type)
-    );
+    return wrapResInNullable(unifySimples(e, source.typevar, target, type));
   }
   if (
     target.kind === "parametrized" &&
     target.name === "nullable" &&
     source.kind === "simple"
   ) {
-    return wrapResInNullable(
-      unifySimplesOrUnifVars(e, us, source, target.typevar, type)
-    );
+    return wrapResInNullable(unifySimples(e, source, target.typevar, type));
   }
 
   if (source.kind === "parametrized") {
     if (target.kind === "parametrized") {
       // parametrized - parametrized
-      const res = unifySimplesOrUnifVars(
-        e,
-        us,
-        source.typevar,
-        target.typevar,
-        type
-      );
-      return res && [{ ...source, typevar: res[0] }, res[1]];
+      const res = unifySimples(e, source.typevar, target.typevar, type);
+      return res;
     } else {
       // parametrized - simple
-      return null;
+      throw new TypeMismatch(e, { expected: source, actual: target });
     }
   } else {
     if (target.kind === "parametrized") {
       // simple - parametrized
-      return null;
+      throw new TypeMismatch(e, { expected: source, actual: target });
     } else {
       // simple - simple
-      const res = unifySimples(source, target, type);
-      return res && [res, us];
+      const res = unifySimples(e, source, target, type);
+      return res;
     }
   }
 }
@@ -409,10 +351,11 @@ function unifySimplesOrParametrizeds(
 //
 type CastType = "implicit" | "assignment" | "explicit";
 function unifySimples(
+  e: Expr,
   source: SimpleT,
   target: SimpleT,
   type: CastType
-): null | SimpleT {
+): SimpleT {
   // list casts = \dC+
 
   const casts: { source: SimpleT; target: SimpleT; type: CastType }[] = [
@@ -440,7 +383,7 @@ function unifySimples(
     if (matchingCast) {
       return matchingCast.target;
     } else {
-      return null;
+      throw new TypeMismatch(e, { expected: source, actual: target });
     }
   }
 }
@@ -668,6 +611,15 @@ class KindMismatch extends Error {
     super(`KindMismatch: ${e}: ${expected} vs ${actual}}`);
   }
 }
+class UnknownFunction extends Error {
+  constructor(e: Expr, n: QName, left: Type, right: Type) {
+    super(
+      `UnknownFunction: \n${showQName(n)} \nLeft: \n${JSON.stringify(
+        left
+      )} \nRight: \n${JSON.stringify(right)}}`
+    );
+  }
+}
 export class TypeMismatch extends Error {
   constructor(
     e: Expr,
@@ -877,10 +829,10 @@ function elabRef(c: Context, e: ExprRef): Type {
 }
 
 function unify(
-  e: Expr | null, // not actually used, just for "documentation", error handling, etc
+  e: Expr, // not actually used, just for "documentation", error handling, etc
   us: UnifVars,
   t1: ParametrizedT<SimpleT | UnifVar> | SimpleT | SetT | UnifVar,
-  t2: ParametrizedT<SimpleT | UnifVar> | SimpleT | SetT | UnifVar,
+  t2: ParametrizedT<SimpleT> | SimpleT | SetT,
   type: CastType
 ): null | [Type /* "Biggest" resulting type */, UnifVars] {
   if (t1.kind === "set" || t2.kind === "set") {
@@ -889,10 +841,28 @@ function unify(
     if (t1.kind === "unifvar") {
       return us.unify(e, t1, t2, type);
     } else {
-      if (t2.kind === "unifvar") {
-        return us.unify(e, t2, t1, type);
+      if (t1.kind === "parametrized") {
+        if (t2.kind === "parametrized") {
+          if (t1.typevar.kind === "unifvar") {
+            return us.unify(e, t1.typevar, t2.typevar, type);
+          } else {
+            return [
+              unifySimplesOrParametrizeds(e, t1.typevar, t2.typevar, type),
+              us,
+            ];
+          }
+        } else {
+          throw new TypeMismatch(e, {
+            expected: {
+              kind: "parametrized",
+              typevar: t1.typevar,
+              name: t1.name,
+            },
+            actual: t2,
+          });
+        }
       } else {
-        return unifySimplesOrParametrizeds(e, us, t1, t2, type);
+        return [unifySimplesOrParametrizeds(e, t1, t2, type), us];
       }
     }
   }
@@ -910,14 +880,9 @@ function elabBinary(c: Context, us: UnifVars, e: ExprBinary): [Type, UnifVars] {
   const [t1, us1] = elabExpr(c, us, e.left);
   const [t2, us2] = elabExpr(c, us1, e.right);
 
-  if (e.op === "=") {
-    const unifies = unify(e, us2, t1, t2, "implicit");
-    if (!unifies) {
-      throw new TypeMismatch(e, { expected: t1, actual: t2 });
-    } else {
-      return [BuiltinTypes.Boolean, unifies[1]];
-    }
-  } else if (e.op === "AND") {
+  // Find all the possible matches of the overloads. If there is more than one, unify the unifvar(s) with the union of them = an array of the possibilities
+
+  if (e.op === "AND" || e.op === "OR") {
     const unifies1 = unify(e, us2, t1, BuiltinTypes.Boolean, "implicit");
     if (!unifies1) {
       throw new TypeMismatch(e, { expected: BuiltinTypes.Boolean, actual: t1 });
@@ -939,7 +904,173 @@ function elabBinary(c: Context, us: UnifVars, e: ExprBinary): [Type, UnifVars] {
       }
     }
   } else {
-    return notImplementedYet(e);
+    const candidates = builtinoperators
+      .filter((op) => eqQNames(op.name, { name: e.op, schema: e.opSchema }))
+      .filter((op) => {
+        if (t1.kind === "unifvar") {
+          return true;
+        } else {
+          // TODO this is shit: need to take nullable casting into account
+          if (t1.kind === "parametrized") {
+            if (op.left.kind === "parametrized") {
+              if (t1.typevar.kind === "unifvar") {
+                return true;
+              } else {
+                try {
+                  unifySimplesOrParametrizeds(
+                    e,
+                    t1.typevar,
+                    op.left.typevar,
+                    "implicit"
+                  );
+                  return true;
+                } catch {
+                  return false;
+                }
+              }
+            } else {
+              return false;
+            }
+          }
+          try {
+            unifySimplesOrParametrizeds(e, t1, op.left, "implicit");
+            return true;
+          } catch {
+            return false;
+          }
+        }
+      })
+      .filter((op) => {
+        if (t2.kind === "unifvar") {
+          return true;
+        } else {
+          // TODO this is shit: need to take nullable casting into account
+          if (t2.kind === "parametrized") {
+            if (op.right.kind === "parametrized") {
+              if (t2.typevar.kind === "unifvar") {
+                return true;
+              } else {
+                try {
+                  unifySimplesOrParametrizeds(
+                    e,
+                    t2.typevar,
+                    op.right.typevar,
+                    "implicit"
+                  );
+                  return true;
+                } catch {
+                  return false;
+                }
+              }
+            } else {
+              return false;
+            }
+          }
+          try {
+            unifySimplesOrParametrizeds(e, t2, op.right, "implicit");
+            return true;
+          } catch {
+            return false;
+          }
+        }
+      });
+    if (candidates.length === 0) {
+      throw new UnknownFunction(e, { name: e.op, schema: e.opSchema }, t1, t2);
+    } else {
+      const [t3, us3] = (function (): [
+        UnifVar | ParametrizedT<SimpleT> | SimpleT,
+        UnifVars
+      ] {
+        if (t1.kind === "unifvar") {
+          return us2.unify(
+            e,
+            t1,
+            candidates.map((c) => c.left),
+            "implicit"
+          );
+        } else if (t1.kind === "parametrized") {
+          if (t1.typevar.kind === "unifvar") {
+            return us2.unifyP(
+              e,
+              t1 as ParametrizedT<UnifVar>, // todo
+              candidates.map((c) => c.left),
+              "implicit"
+            );
+          } else {
+            return [
+              unifySimplesOrParametrizeds(
+                e,
+                t1 as ParametrizedT<SimpleT>,
+                candidates[0].left,
+                "implicit"
+              ),
+              us2,
+            ];
+          }
+        } else {
+          return [
+            unifySimplesOrParametrizeds(e, t1, candidates[0].left, "implicit"),
+            us2,
+          ];
+        }
+      })();
+
+      const [t4, us4] = (function (): [
+        UnifVar | ParametrizedT<SimpleT> | SimpleT,
+        UnifVars
+      ] {
+        if (t2.kind === "unifvar") {
+          return us3.unify(
+            e,
+            t2,
+            candidates.map((c) => c.right),
+            "implicit"
+          );
+        } else if (t2.kind === "parametrized") {
+          if (t2.typevar.kind === "unifvar") {
+            return us3.unifyP(
+              e,
+              t2 as ParametrizedT<UnifVar>, // todo
+              candidates.map((c) => c.right),
+              "implicit"
+            );
+          } else {
+            return [
+              unifySimplesOrParametrizeds(
+                e,
+                t2 as ParametrizedT<SimpleT>,
+                candidates[0].right,
+                "implicit"
+              ),
+              us3,
+            ];
+          }
+        } else {
+          return [
+            unifySimplesOrParametrizeds(e, t2, candidates[0].right, "implicit"),
+            us3,
+          ];
+        }
+      })();
+
+      if (
+        !candidates.every(
+          (c) =>
+            JSON.stringify(c.result.name) ===
+            JSON.stringify(candidates[0].result.name)
+        )
+      ) {
+        throw new Error(
+          `Not all candidates for this function ${e.op} at ${showLocation(
+            e._location
+          )} have the same return type and I don't know how to handle that yet: ${candidates
+            .map((c) => JSON.stringify(c.result.name))
+            .join("\n")}`
+        );
+      }
+
+      return [candidates[0].result /* TODO this is WRONG! */, us4];
+    }
   }
   // TODO support custom operators
 }
@@ -1016,6 +1147,8 @@ function eqQNames<U extends QName, V extends QName>(u: U, v: V): boolean {
     ((!u.schema && v.schema === "dbo") ||
       (u.schema === "dbo" && !v.schema) ||
       (!u.schema && !v.schema) ||
+      (!u.schema && v.schema === "pg_catalog") ||
+      (u.schema === "pg_catalog" && !v.schema) ||
       u.schema === v.schema)
   );
 }

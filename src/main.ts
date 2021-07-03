@@ -16,12 +16,19 @@ go();
 
 function printSimpleAsTypescript(
   us: UnifVars,
-  t: SimpleT | ParametrizedT<SimpleT | UnifVar> | UnifVar | null
+  t:
+    | SimpleT
+    | UnifVar
+    | ParametrizedT<SimpleT | UnifVar>
+    | (ParametrizedT<SimpleT> | SimpleT)[]
+    | null
 ): string {
   if (t === null) {
     return "any";
+  } else if (Array.isArray(t)) {
+    return t.map((tsub) => printSimpleAsTypescript(us, tsub)).join(" | ");
   } else if (t.kind === "unifvar") {
-    const [found, _exprs] = us.lookup(t.id);
+    const found = us.resolve()[t.id];
     return printSimpleAsTypescript(us, found);
   } else {
     if (t.name === "array") {
@@ -74,7 +81,7 @@ async function go() {
       const [returnT, us] = doSelectFrom(
         g,
         { decls: [], aliases: [] },
-        new UnifVars(0, {}, {}),
+        new UnifVars(0, {}),
         st
       );
       console.log("Select:\n", sqlstr, "\n");
@@ -90,7 +97,7 @@ async function go() {
         us
           .getKeys()
           .map((k) => {
-            const [p, _exprs] = us.lookup(k);
+            const p = us.resolve()[k];
             const paramTypeAsString = printSimpleAsTypescript(us, p);
             console.log(`Param \$${k}:\n`, paramTypeAsString, "\n");
             return paramTypeAsString;

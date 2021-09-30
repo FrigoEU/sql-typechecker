@@ -8,12 +8,12 @@ import {
   DataTypeDef,
   Expr,
   ExprBinary,
-  ExprParameter,
   ExprRef,
   From,
   Name,
   // astVisitor,
   NodeLocation,
+  parse,
   PGNode,
   QName,
   SelectedColumn,
@@ -45,7 +45,7 @@ export type SetT = {
 const BuiltinTypes = {
   Boolean: {
     kind: "simple",
-    name: { name: "bool" },
+    name: { name: "boolean" },
   },
   Smallint: {
     kind: "simple",
@@ -193,11 +193,12 @@ function unifySimples(
 }
 
 // Lexical scoping
-type Context = {
+export type Context = {
   readonly decls: ReadonlyArray<{
-    readonly name: QName;
+    readonly name: Name;
     readonly type:
-      | SimpleT // let bindings and function parameters
+      | SimpleT // declare bindings and function parameters
+      | ParametrizedT<SimpleT> // declare bindings and function parameters
       | SetT; // from-tables, from-views, with, (temp tables?)
   }>;
 };
@@ -277,12 +278,12 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
   };
 }
 function doCreateView(
-  g: Global,
+  _g: Global,
   s: CreateViewStatement | CreateMaterializedViewStatement
 ): Global {
   return notImplementedYet(s);
 }
-function doAlterTable(g: Global, s: AlterTableStatement): Global {
+function doAlterTable(_g: Global, s: AlterTableStatement): Global {
   return notImplementedYet(s);
 }
 
@@ -306,7 +307,7 @@ export function doSelectFrom(
 
   if (s.where) {
     const t = elabExpr(newC, s.where);
-    if (t !== BuiltinTypes.Boolean) {
+    if (t.kind !== "simple" || !eqQNames(t.name, BuiltinTypes.Boolean.name)) {
       throw new TypeMismatch(s.where, {
         expected: BuiltinTypes.Boolean,
         actual: t,
@@ -333,6 +334,76 @@ export function doSelectFrom(
     kind: "set",
     fields,
   };
+}
+
+export function doCreateFunction(
+  g: Global,
+  c: Context,
+  s: CreateFunctionStatement
+): {
+  name: QName;
+  inputs: { name: Name; type: SimpleT | ParametrizedT<SimpleT> }[];
+  returns: SimpleT | SetT | null;
+  multipleRows: boolean;
+} {
+  const name = s.name;
+  if (!s.language) {
+    throw new Error(
+      "Please provide name for function at " + showLocation(s._location)
+    );
+  }
+  if (s.language && s.language.name.toLowerCase() === "sql") {
+    const inputs = s.arguments.map((arg) => {
+      if (!arg.name) {
+        throw new Error(
+          "Please provide name for all function arguments at " +
+            showLocation(s._location)
+        );
+      }
+      return {
+        name: arg.name,
+        type: mkType(
+          arg.type,
+          // Default rule of THIS typechecker:  params are NOT NULL
+          // , unless defined as eg: (myname int default null)
+          arg.default && arg.default.type === "null"
+            ? []
+            : [{ type: "not null" }]
+        ),
+      };
+    });
+    const contextForBody: Context = {
+      decls: c.decls.concat(inputs),
+    };
+
+    const body = parse(s.code);
+
+    if (body.length === 0) {
+      return {
+        name,
+        inputs,
+        returns: null,
+        multipleRows: false,
+      };
+    } else {
+      // TODO check rest of body for type errors
+      const lastStatement = body[body.length - 1];
+
+      if (lastStatement.type === "select") {
+        const res = doSelectFrom(g, contextForBody, lastStatement);
+        return {
+          name,
+          inputs,
+          returns: res,
+          multipleRows: true, // todo
+        };
+      } else {
+        return notImplementedYet(lastStatement);
+      }
+    }
+  } else {
+    return notImplementedYet(s);
+  }
 }
 
 type HandledFrom = { name: QName; rel: SetT };
@@ -379,19 +450,42 @@ class UnknownField extends Error {
     );
   }
 }
-class UnknownIdentifier extends Error {
+export class UnknownIdentifier extends Error {
   constructor(m: QName) {
     super(`UnknownIdentifier ${showQName(m)} @ ${showLocation(m._location)}`);
   }
 }
-class UnknownFunction extends Error {
+
+function printType(t: Type): string {
+  if (t.kind === "set") {
+    return (
+      "{" +
+      t.fields
+        .map(
+          (f) =>
+            (f.name === null ? `"?": ` : `"${f.name.name}": `) +
+            printType(f.type)
+        )
+        .join(", ") +
+      "}"
+    );
+  } else {
+    if (t.name === "array") {
+      return "(" + printType(t.typevar) + ")" + "[]";
+    } else if (t.name === "nullable") {
+      return printType(t.typevar) + " | null";
+    } else {
+      return t.name.name;
+    }
+  }
+}
+export class UnknownBinaryOp extends Error {
   constructor(e: Expr, n: QName, t1: Type, t2: Type) {
-    super(`UnknownFunction ${showQName(n)} @ ${showLocation(e._location)}
-Left:
-${JSON.stringify(t1)}
-Right:
-${JSON.stringify(t2)}
-`);
+    super(
+      `Can't apply operator "${showQName(n)}" to ${printType(
+        t1
+      )} and ${printType(t2)}`
+    );
   }
 }
 class AmbiguousIdentifier extends Error {
@@ -429,10 +523,6 @@ ${JSON.stringify(ts.actual)}}
 `
     );
   }
-}
-
-function isError<U>(a: Error | U): a is Error {
-  return a instanceof Error;
 }
 
 function mergeHandledFroms(c: Context, handledFroms: HandledFrom[]): Context {
@@ -519,19 +609,19 @@ function lookup(c: Context, n: QName): Type | null {
   }
 }
 
-function extractIndexFromParameter(e: ExprParameter): number {
-  if (e.name.startsWith("$")) {
-    const sub = e.name.substring(1);
-    const parsed = parseInt(sub);
-    if (isNaN(parsed)) {
-      throw new Error(`Failed to parse parameter ${JSON.stringify(e)}`);
-    } else {
-      return parsed;
-    }
-  } else {
-    throw new Error(`Failed to parse parameter ${JSON.stringify(e)}`);
-  }
-}
+// function extractIndexFromParameter(e: ExprParameter): number {
+//   if (e.name.startsWith("$")) {
+//     const sub = e.name.substring(1);
+//     const parsed = parseInt(sub);
+//     if (isNaN(parsed)) {
+//       throw new Error(`Failed to parse parameter ${JSON.stringify(e)}`);
+//     } else {
+//       return parsed;
+//     }
+//   } else {
+//     throw new Error(`Failed to parse parameter ${JSON.stringify(e)}`);
+//   }
+// }
 
 function lookupInSet(
   s: SetT,
@@ -577,19 +667,38 @@ function elabRef(c: Context, e: ExprRef): Type {
           return foundfield
             ? { set: t.name, field: e, type: foundfield }
             : null;
+        } else {
+          return null;
         }
-        return null;
       });
+
+      const foundIdentifiers = mapPartial(c.decls, (t) => {
+        if (t.type.kind === "set") {
+          return null;
+        } else {
+          return t.name.name === e.name
+            ? { name: t.name.name, type: t.type }
+            : null;
+        }
+      });
+
+      // Fields seem to have precedence over eg: function params in postgres?
       if (foundFields.length === 0) {
-        throw new UnknownIdentifier(e);
+        if (foundIdentifiers.length === 0) {
+          throw new UnknownIdentifier(e);
+        } else if (foundIdentifiers.length === 1) {
+          return foundIdentifiers[0].type;
+        } else {
+          throw new AmbiguousIdentifier(e, []);
+        }
       } else if (foundFields.length === 1) {
         return foundFields[0].type;
+      } else {
+        throw new AmbiguousIdentifier(
+          e,
+          foundFields.map((f) => f.set)
+        );
       }
-      // if (foundFields.length > 0)
-      throw new AmbiguousIdentifier(
-        e,
-        foundFields.map((f) => f.set)
-      );
     }
   }
 }
@@ -635,7 +744,7 @@ function elabBinary(c: Context, e: ExprBinary): Type {
     });
 
   if (!found) {
-    throw new UnknownFunction(e, { name: e.op, schema: e.opSchema }, t1, t2);
+    throw new UnknownBinaryOp(e, { name: e.op, schema: e.opSchema }, t1, t2);
   } else {
     return found.result;
   }
@@ -658,11 +767,6 @@ function elabExpr(c: Context, e: Expr): Type {
   } else {
     return notImplementedYet(e);
   }
-}
-
-function doCreateFunc(g: Global, s: CreateFunctionStatement): [QName, SetT] {
-  // introduce named parameters = aliases!
-  return notImplementedYet(s);
 }
 
 export function parseSetupScripts(ast: Statement[]): Global {
@@ -695,7 +799,7 @@ function nullifySet(s: SetT): SetT {
   };
 }
 
-function expectNever(_: never): any {
+function checkAllCasesHandled(_: never): any {
   throw new Error("Oops didn't expect that");
 }
 
@@ -706,8 +810,8 @@ function showQName(n: QName): string {
 function eqQNames<U extends QName, V extends QName>(u: U, v: V): boolean {
   return (
     u.name === v.name &&
-    ((!u.schema && v.schema === "dbo") ||
-      (u.schema === "dbo" && !v.schema) ||
+    ((!u.schema && (v.schema === "dbo" || v.schema === "pg_catalog")) ||
+      ((u.schema === "dbo" || u.schema === "pg_catalog") && !v.schema) ||
       (!u.schema && !v.schema) ||
       u.schema === v.schema)
   );
@@ -728,14 +832,14 @@ function mapPartial<T, U>(
   return newA.reverse();
 }
 
-function flatMapPartial<T, U>(a: T[], f: (t: T, i: number) => U[] | null): U[] {
-  const newA: U[] = [];
-  a.forEach(function (a, i) {
-    const res = f(a, i);
-    if (res === null) {
-    } else {
-      newA.push(...res);
-    }
-  });
-  return newA.reverse();
-}
+// function flatMapPartial<T, U>(a: T[], f: (t: T, i: number) => U[] | null): U[] {
+//   const newA: U[] = [];
+//   a.forEach(function (a, i) {
+//     const res = f(a, i);
+//     if (res === null) {
+//     } else {
+//       newA.push(...res);
+//     }
+//   });
+//   return newA.reverse();
+// }

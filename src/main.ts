@@ -1,46 +1,39 @@
 import * as fs from "fs/promises";
-import { parse, Statement } from "pgsql-ast-parser";
+import { parse, QName, Statement } from "pgsql-ast-parser";
 import {
-  parseSetupScripts,
+  doCreateFunction,
+  Global,
   notImplementedYet,
-  doSelectFrom,
+  ParametrizedT,
+  parseSetupScripts,
   SetT,
   SimpleT,
-  UnifVar,
-  Global,
-  UnifVars,
-  ParametrizedT,
 } from "./typecheck";
 
 go();
 
-function printSimpleAsTypescript(
-  us: UnifVars,
-  t: SimpleT | ParametrizedT<SimpleT | UnifVar> | UnifVar | null
-): string {
-  if (t === null) {
-    return "any";
-  } else if (t.kind === "unifvar") {
-    const [found, _exprs] = us.lookup(t.id);
-    return printSimpleAsTypescript(us, found);
+function printSimpleAsTypescript(t: SimpleT | ParametrizedT<SimpleT>): string {
+  if (t.name === "array") {
+    return "(" + printSimpleAsTypescript(t.typevar) + ")" + "[]";
+  } else if (t.name === "nullable") {
+    return printSimpleAsTypescript(t.typevar) + " | null";
   } else {
-    if (t.name === "array") {
-      return "(" + printSimpleAsTypescript(us, t.typevar) + ")" + "[]";
-    } else if (t.name === "nullable") {
-      return printSimpleAsTypescript(us, t.typevar) + " | null";
-    } else {
-      return t.name.name;
-    }
+    return t.name.name;
   }
 }
-function printSetAsTypescript(us: UnifVars, s: SetT): string {
+
+function printQName(qname: QName): string {
+  return qname.name;
+}
+
+function printSetAsTypescript(s: SetT): string {
   return (
     "{" +
     s.fields
       .map(
         (f) =>
-          (f.name === null ? `"?": ` : `"${f.name.name}": `) +
-          printSimpleAsTypescript(us, f.type)
+          (f.name === null ? `"?": ` : `"${printQName(f.name)}": `) +
+          printSimpleAsTypescript(f.type)
       )
       .join(", ") +
     "}"
@@ -70,16 +63,16 @@ async function go() {
       throw new Error("More than 1 SQL statement inside 'safesql'");
     }
     const st = ast[0];
-    if (st.type === "select") {
-      const [returnT, us] = doSelectFrom(
-        g,
-        { decls: [], aliases: [] },
-        new UnifVars(0, {}, {}),
-        st
-      );
+    if (st.type === "create function") {
+      const res = doCreateFunction(g, { decls: [] }, st);
       console.log("Select:\n", sqlstr, "\n");
 
-      const returnTypeAsString = printSetAsTypescript(us, returnT);
+      const returnTypeAsString =
+        res.returns === null
+          ? "void"
+          : res.returns.kind === "simple"
+          ? printSimpleAsTypescript(res.returns)
+          : printSetAsTypescript(res.returns);
       console.log("Returns:\n", returnTypeAsString, "\n");
 
       return (
@@ -87,12 +80,11 @@ async function go() {
         returnTypeAsString +
         ", " +
         "[" +
-        us
-          .getKeys()
+        res.inputs
           .map((k) => {
-            const [p, _exprs] = us.lookup(k);
-            const paramTypeAsString = printSimpleAsTypescript(us, p);
-            console.log(`Param \$${k}:\n`, paramTypeAsString, "\n");
+            const paramTypeAsString = printSimpleAsTypescript(k.type);
+
+            console.log(`Param \$${k.name}:\n`, paramTypeAsString, "\n");
             return paramTypeAsString;
           })
           .join(", ") +

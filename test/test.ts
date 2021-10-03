@@ -5,10 +5,10 @@ import {
   BuiltinTypes,
   BuiltinTypeConstructors,
   doCreateFunction,
-  ParametrizedT,
   parseSetupScripts,
   SetT,
   ScalarT,
+  SimpleT,
 } from "../src/typecheck";
 
 // https://github.com/alsatian-test/alsatian/blob/master/packages/alsatian/README.md
@@ -21,7 +21,7 @@ function testCreateFunction(
       Error,
       {
         name: QName;
-        inputs: { name: Name; type: ScalarT | ParametrizedT<ScalarT> }[];
+        inputs: { name: Name; type: SimpleT }[];
         returns: ScalarT | SetT | null;
         multipleRows: boolean;
       }
@@ -47,7 +47,7 @@ function expectInputs(
   queryStr: string,
   expectedInputTypes: {
     name: Name;
-    type: ScalarT | ParametrizedT<ScalarT>;
+    type: SimpleT;
   }[]
 ) {
   testCreateFunction(setupStr, queryStr, (res) => {
@@ -167,6 +167,7 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  // @FocusTest
   public innerJoin() {
     expectReturnType(
       "create table testje ( id int not null, name text );",
@@ -198,7 +199,7 @@ $$ LANGUAGE sql;
   }
 
   @Test()
-  @FocusTest
+  // @FocusTest
   public outerJoin() {
     expectReturnType(
       "create table testje ( id int not null, name text );",

@@ -4,40 +4,14 @@ import {
   doCreateFunction,
   Global,
   notImplementedYet,
-  ParametrizedT,
   parseSetupScripts,
-  SetT,
-  ScalarT,
+  printType,
 } from "./typecheck";
 
 go();
 
-function printSimpleAsTypescript(t: ScalarT | ParametrizedT<ScalarT>): string {
-  if (t.name === "array") {
-    return "(" + printSimpleAsTypescript(t.typevar) + ")" + "[]";
-  } else if (t.name === "nullable") {
-    return printSimpleAsTypescript(t.typevar) + " | null";
-  } else {
-    return t.name.name;
-  }
-}
-
 function printQName(qname: QName): string {
   return qname.name;
-}
-
-function printSetAsTypescript(s: SetT): string {
-  return (
-    "{" +
-    s.fields
-      .map(
-        (f) =>
-          (f.name === null ? `"?": ` : `"${printQName(f.name)}": `) +
-          printSimpleAsTypescript(f.type)
-      )
-      .join(", ") +
-    "}"
-  );
 }
 
 async function go() {
@@ -68,11 +42,7 @@ async function go() {
       console.log("Select:\n", sqlstr, "\n");
 
       const returnTypeAsString =
-        res.returns === null
-          ? "void"
-          : res.returns.kind === "simple"
-          ? printSimpleAsTypescript(res.returns)
-          : printSetAsTypescript(res.returns);
+        res.returns === null ? "void" : printType(res.returns);
       console.log("Returns:\n", returnTypeAsString, "\n");
 
       return (
@@ -82,7 +52,7 @@ async function go() {
         "[" +
         res.inputs
           .map((k) => {
-            const paramTypeAsString = printSimpleAsTypescript(k.type);
+            const paramTypeAsString = printType(k.type);
 
             console.log(`Param \$${k.name}:\n`, paramTypeAsString, "\n");
             return paramTypeAsString;

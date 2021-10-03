@@ -36,7 +36,11 @@ export type ScalarT = {
   kind: "scalar";
   name: QName;
 };
-type SimpleT = ScalarT | NullableT<any> | ArrayT<any> | NullableT<ArrayT<any>>;
+export type SimpleT =
+  | ScalarT
+  | NullableT<any>
+  | ArrayT<any>
+  | NullableT<ArrayT<any>>;
 type Field = {
   name: Name | null;
   type: SimpleT;
@@ -108,49 +112,47 @@ export type Global = {
   }>;
 };
 
-function unifySimplesOrParametrizeds(
+function unifySimples(
   e: Expr,
-  source: ParametrizedT<ScalarT> | ScalarT,
-  target: ParametrizedT<ScalarT> | ScalarT,
+  source: SimpleT,
+  target: SimpleT,
   type: CastType
-): ParametrizedT<ScalarT> | ScalarT {
-  function wrapResInNullable(res: ScalarT): ParametrizedT<ScalarT> {
-    return BuiltinTypeConstructors.Nullable(res);
-  }
-
+): SimpleT {
   // T -> Nullable<T> is a universal cast
-  if (
-    source.kind === "parametrized" &&
-    source.name === "nullable" &&
-    target.kind === "scalar"
-  ) {
-    return wrapResInNullable(unifySimples(e, source.typevar, target, type));
+  if (source.kind === "nullable" && target.kind === "scalar") {
+    return BuiltinTypeConstructors.Nullable(
+      unifySimples(e, source.typevar, target, type)
+    );
   }
-  if (
-    target.kind === "parametrized" &&
-    target.name === "nullable" &&
-    source.kind === "scalar"
-  ) {
-    return wrapResInNullable(unifySimples(e, source, target.typevar, type));
+  if (target.kind === "nullable" && source.kind === "scalar") {
+    return BuiltinTypeConstructors.Nullable(
+      unifySimples(e, source, target.typevar, type)
+    );
   }
 
-  if (source.kind === "parametrized") {
-    if (target.kind === "parametrized") {
-      // parametrized - parametrized
+  if (source.kind === "nullable") {
+    if (target.kind === "nullable") {
       const res = unifySimples(e, source.typevar, target.typevar, type);
       return { ...source, typevar: res };
     } else {
-      // parametrized - simple
+      throw new TypeMismatch(e, { expected: source, actual: target });
+    }
+  } else if (source.kind === "array") {
+    if (target.kind === "array") {
+      const res = unifySimples(e, source.typevar, target.typevar, type);
+      return { ...source, typevar: res };
+    } else {
+      throw new TypeMismatch(e, { expected: source, actual: target });
+    }
+  } else if (source.kind === "scalar") {
+    if (target.kind === "scalar") {
+      return unifyScalars(e, source, target, type);
+    } else {
+      // simple - parametrized
       throw new TypeMismatch(e, { expected: source, actual: target });
     }
   } else {
-    if (target.kind === "parametrized") {
-      // simple - parametrized
-      throw new TypeMismatch(e, { expected: source, actual: target });
-    } else {
-      // simple - simple
-      return unifySimples(e, source, target, type);
-    }
+    return checkAllCasesHandled(source);
   }
 }
 
@@ -167,7 +169,7 @@ function unifySimplesOrParametrizeds(
 // * Explicit: can happen when explicitely calling the CAST function
 //
 type CastType = "implicit" | "assignment" | "explicit";
-function unifySimples(
+function unifyScalars(
   e: Expr,
   source: ScalarT,
   target: ScalarT,
@@ -209,10 +211,10 @@ function unifySimples(
 export type Context = {
   readonly decls: ReadonlyArray<{
     readonly name: Name;
-    readonly type:
-      | ScalarT // declare bindings and function parameters
-      | ParametrizedT<ScalarT> // declare bindings and function parameters
-      | SetT; // from-tables, from-views, with, (temp tables?)
+    readonly type: Type;
+    // | ScalarT // declare bindings and function parameters
+    // | ParametrizedT<ScalarT> // declare bindings and function parameters
+    // | SetT; // from-tables, from-views, with, (temp tables?)
   }>;
 };
 
@@ -220,10 +222,7 @@ export function notImplementedYet(node: PGNode | null): any {
   throw new NotImplementedYet(node);
 }
 
-function mkType(
-  t: DataTypeDef,
-  cs: ColumnConstraint[]
-): ScalarT | ParametrizedT<ScalarT> {
+function mkType(t: DataTypeDef, cs: ColumnConstraint[]): SimpleT {
   const mapTypenames: { [n: string]: ScalarT } = {
     int: BuiltinTypes.Integer,
   };
@@ -350,7 +349,7 @@ export function doCreateFunction(
   s: CreateFunctionStatement
 ): {
   name: QName;
-  inputs: { name: Name; type: ScalarT | ParametrizedT<ScalarT> }[];
+  inputs: { name: Name; type: SimpleT }[];
   returns: ScalarT | SetT | null;
   multipleRows: boolean;
 } {
@@ -464,7 +463,7 @@ export class UnknownIdentifier extends Error {
   }
 }
 
-function printType(t: Type): string {
+export function printType(t: Type): string {
   if (t.kind === "set") {
     return (
       "{" +
@@ -478,12 +477,14 @@ function printType(t: Type): string {
       "}"
     );
   } else {
-    if (t.name === "array") {
+    if (t.kind === "array") {
       return "(" + printType(t.typevar) + ")" + "[]";
-    } else if (t.name === "nullable") {
+    } else if (t.kind === "nullable") {
       return printType(t.typevar) + " | null";
-    } else {
+    } else if (t.kind === "scalar") {
       return t.name.name;
+    } else {
+      return checkAllCasesHandled(t);
     }
   }
 }
@@ -629,10 +630,7 @@ function lookup(c: Context, n: QName): Type | null {
 //   }
 // }
 
-function lookupInSet(
-  s: SetT,
-  name: Name
-): ScalarT | ParametrizedT<ScalarT> | null {
+function lookupInSet(s: SetT, name: Name): SimpleT | null {
   const found = s.fields.find((f) => f.name && f.name.name === name.name);
   if (found) {
     return found.type;
@@ -666,7 +664,7 @@ function elabRef(c: Context, e: ExprRef): Type {
       const foundFields: {
         set: QName;
         field: Name;
-        type: ScalarT | ParametrizedT<ScalarT>;
+        type: SimpleT;
       }[] = mapPartial(c.decls, (t) => {
         if (t.type.kind === "set") {
           const foundfield = lookupInSet(t.type, e);
@@ -710,14 +708,15 @@ function elabRef(c: Context, e: ExprRef): Type {
 }
 
 export type binaryOp = {
-  left: ScalarT | ParametrizedT<ScalarT>;
-  right: ScalarT | ParametrizedT<ScalarT>;
-  result: ScalarT | ParametrizedT<ScalarT>;
+  left: SimpleT;
+  right: SimpleT;
+  result: SimpleT;
   name: QName;
   description: string;
 };
 
 function elabBinary(c: Context, e: ExprBinary): Type {
+  debugger;
   const t1 = elabExpr(c, e.left);
   const t2 = elabExpr(c, e.right);
 
@@ -737,12 +736,12 @@ function elabBinary(c: Context, e: ExprBinary): Type {
     })
     .find(function (op) {
       try {
-        unifySimplesOrParametrizeds(e, t1, op.left, "implicit");
+        unifySimples(e, t1, op.left, "implicit");
       } catch {
         return false;
       }
       try {
-        unifySimplesOrParametrizeds(e, t2, op.right, "implicit");
+        unifySimples(e, t2, op.right, "implicit");
       } catch {
         return false;
       }
@@ -801,7 +800,7 @@ function nullifySet(s: SetT): SetT {
     fields: s.fields.map((c) => ({
       name: c.name,
       type:
-        c.type.kind === "parametrized" && c.type.name === "nullable"
+        c.type.kind === "nullable"
           ? c.type
           : BuiltinTypeConstructors.Nullable(c.type),
     })),

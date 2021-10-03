@@ -102,7 +102,7 @@ function expectThrowLike(
 @TestFixture("Typechecker")
 export class TypecheckerTests {
   @Test()
-  public returnType() {
+  public select() {
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
@@ -127,6 +127,29 @@ $$ LANGUAGE sql;
     );
   }
 
+  @Test()
+  public alias() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT mytest.id as myid
+FROM testje as mytest
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "myid" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public inputTypes() {
     expectInputs(
       "create table testje ( id int not null, name text );",
@@ -152,7 +175,7 @@ $$ LANGUAGE sql;
   }
 
   @Test()
-  public basicErrorTest() {
+  public unifyError() {
     expectThrowLike(
       "create table testje ( id int not null, name text );",
       `
@@ -200,7 +223,7 @@ $$ LANGUAGE sql;
 
   @Test()
   // @FocusTest
-  public outerJoin() {
+  public leftJoin() {
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
@@ -227,6 +250,34 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  // @FocusTest
+  public rightJoin() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT testje.id as id1, testje2.id as id2
+FROM testje
+RIGHT JOIN testje AS testje2 ON testje.name = testje2.name
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id1" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
+          },
+          {
+            name: { name: "id2" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public ambiguousIdentifier() {
     expectThrowLike(
       "create table testje ( id int not null, name text );",
@@ -238,6 +289,44 @@ JOIN testje AS testje2 ON testje.name = testje2.name
 $$ LANGUAGE sql;
 `,
       `AmbiguousIdentifier name`
+    );
+  }
+
+  @Test()
+  public dontUseEqualNull() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id
+FROM testje
+WHERE id = NULL
+$$ LANGUAGE sql;
+`,
+      `Don't use "= NULL"`
+    );
+  }
+
+  @Test()
+  public isNull() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id
+FROM testje
+WHERE id IS NULL
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id1" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
     );
   }
 }

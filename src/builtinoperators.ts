@@ -8,6 +8,13 @@ export const builtinoperatorsFromSyntax: binaryOp[] = [
     result: { kind: "simple", name: { name: "boolean" } },
     description: "AND",
   },
+  {
+    name: { schema: "", name: "OR" },
+    left: { kind: "simple", name: { name: "boolean" } },
+    right: { kind: "simple", name: { name: "boolean" } },
+    result: { kind: "simple", name: { name: "boolean" } },
+    description: "OR",
+  },
 ];
 
 export const builtinoperatorsFromSchema: binaryOp[] = [

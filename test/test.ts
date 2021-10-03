@@ -1,13 +1,14 @@
-import { Expect, Ignore, IgnoreTest, Test, TestFixture } from "alsatian";
+import { Expect, FocusTest, Test, TestFixture } from "alsatian";
 import { Name, parse, QName } from "pgsql-ast-parser";
 import { Either, Left, Right } from "purify-ts";
 import {
+  BuiltinTypes,
+  BuiltinTypeConstructors,
   doCreateFunction,
   ParametrizedT,
   parseSetupScripts,
   SetT,
-  SimpleT,
-  UnknownBinaryOp,
+  ScalarT,
 } from "../src/typecheck";
 
 // https://github.com/alsatian-test/alsatian/blob/master/packages/alsatian/README.md
@@ -20,8 +21,8 @@ function testCreateFunction(
       Error,
       {
         name: QName;
-        inputs: { name: Name; type: SimpleT | ParametrizedT<SimpleT> }[];
-        returns: SimpleT | SetT | null;
+        inputs: { name: Name; type: ScalarT | ParametrizedT<ScalarT> }[];
+        returns: ScalarT | SetT | null;
         multipleRows: boolean;
       }
     >
@@ -41,11 +42,93 @@ function testCreateFunction(
   }
 }
 
+function expectInputs(
+  setupStr: string,
+  queryStr: string,
+  expectedInputTypes: {
+    name: Name;
+    type: ScalarT | ParametrizedT<ScalarT>;
+  }[]
+) {
+  testCreateFunction(setupStr, queryStr, (res) => {
+    res.caseOf({
+      Left: (err) => {
+        throw err;
+      },
+      Right: (res) => {
+        Expect(res.inputs.length).toEqual(expectedInputTypes.length);
+        expectedInputTypes.forEach((expectedInputType, i) => {
+          Expect(res.inputs[i]).toEqual(expectedInputType);
+        });
+      },
+    });
+  });
+}
+
+function expectReturnType(
+  setupStr: string,
+  queryStr: string,
+  expectedReturnType: SetT | ScalarT | null
+) {
+  testCreateFunction(setupStr, queryStr, (res) => {
+    res.caseOf({
+      Left: (err) => {
+        throw err;
+      },
+      Right: (res) => {
+        Expect(res.returns).toEqual(expectedReturnType);
+      },
+    });
+  });
+}
+
+function expectThrowLike(
+  setupStr: string,
+  queryStr: string,
+  expectedError: string
+) {
+  testCreateFunction(setupStr, queryStr, (res) => {
+    res.caseOf({
+      Left: (err) => {
+        Expect(err.message).toContain(expectedError);
+      },
+      Right: (_) => {
+        throw new Error("Should return error");
+      },
+    });
+  });
+}
+
 @TestFixture("Typechecker")
 export class TypecheckerTests {
-  @Test("Basic test")
-  public basicTest() {
-    testCreateFunction(
+  @Test()
+  public returnType() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+  SELECT id, name
+  FROM testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "name" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.String),
+          },
+        ],
+      }
+    );
+  }
+
+  public inputTypes() {
+    expectInputs(
       "create table testje ( id int not null, name text );",
       `
 CREATE FUNCTION myselect(myid int, myname text default null) RETURNS SETOF AS $$
@@ -55,52 +138,22 @@ CREATE FUNCTION myselect(myid int, myname text default null) RETURNS SETOF AS $$
   AND myname = name;
 $$ LANGUAGE sql;
 `,
-      function (res) {
-        const expectedResultType: SetT = {
-          kind: "set",
-          fields: [
-            {
-              name: { name: "id" },
-              type: { kind: "simple", name: { name: "integer" } },
-            },
-            {
-              name: { name: "name" },
-              type: {
-                kind: "parametrized",
-                name: "nullable",
-                typevar: { kind: "simple", name: { name: "text" } },
-              },
-            },
-          ],
-        };
-        res.caseOf({
-          Right: (res) => {
-            Expect(res.inputs.length).toEqual(2);
-            Expect(res.inputs[0]).toEqual({
-              name: { name: "myid" },
-              type: { kind: "simple", name: { name: "integer" } },
-            });
-            Expect(res.inputs[1]).toEqual({
-              name: { name: "myname" },
-              type: {
-                kind: "parametrized",
-                name: "nullable",
-                typevar: { kind: "simple", name: { name: "text" } },
-              },
-            });
-            Expect(res.returns).toEqual(expectedResultType);
-          },
-          Left: (e) => {
-            throw e;
-          },
-        });
-      }
+      [
+        {
+          name: { name: "myid" },
+          type: BuiltinTypes.Integer,
+        },
+        {
+          name: { name: "myname" },
+          type: BuiltinTypeConstructors.Nullable(BuiltinTypes.String),
+        },
+      ]
     );
   }
 
-  @Test("Type error test")
+  @Test()
   public basicErrorTest() {
-    testCreateFunction(
+    expectThrowLike(
       "create table testje ( id int not null, name text );",
       `
 CREATE FUNCTION myselect(myname text) RETURNS SETOF AS $$
@@ -109,246 +162,81 @@ CREATE FUNCTION myselect(myname text) RETURNS SETOF AS $$
   WHERE id = myname;
 $$ LANGUAGE sql;
 `,
-      function (res) {
-        res.caseOf({
-          Left: (err) => {
-            Expect(err.message).toEqual(
-              'Can\'t apply operator "=" to integer and text'
-            );
+      'Can\'t apply operator "=" to integer and text'
+    );
+  }
+
+  @Test()
+  public innerJoin() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT testje.id as id1, testje2.id as id2, testje.name
+FROM testje
+JOIN testje AS testje2 ON testje.name = testje2.name
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id1" },
+            type: BuiltinTypes.Integer,
           },
-          Right: (_) => {
-            throw new Error("Should return error");
+          {
+            name: { name: "id2" },
+            type: BuiltinTypes.Integer,
           },
-        });
+          {
+            name: { name: "name" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.String),
+          },
+        ],
       }
     );
   }
+
+  @Test()
+  @FocusTest
+  public outerJoin() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT testje.id as id1, testje2.id as id2
+FROM testje
+LEFT OUTER JOIN testje AS testje2 ON testje.name = testje2.name
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id1" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "id2" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public ambiguousIdentifier() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT name
+FROM testje
+JOIN testje AS testje2 ON testje.name = testje2.name
+$$ LANGUAGE sql;
+`,
+      `AmbiguousIdentifier name`
+    );
+  }
 }
-
-// @TestFixture("Typechecker")
-// export class TypecheckerTests {
-//   @Test("Basic test")
-//   public basicTest() {
-//     testSelectFrom(
-//       "create table testje ( id int not null, name text );",
-//       `
-// select id, name
-// from testje
-// where id = $1
-// and $2 = name
-// `,
-//       function ({ returnT, context }) {
-//         const expectedResultType: SetT = {
-//           kind: "set",
-//           fields: [
-//             {
-//               name: { name: "id" },
-//               type: { kind: "simple", name: { name: "integer" } },
-//             },
-//             {
-//               name: { name: "name" },
-//               type: {
-//                 kind: "parametrized",
-//                 name: "nullable",
-//                 typevar: { kind: "simple", name: { name: "text" } },
-//               },
-//             },
-//           ],
-//         };
-//         Expect(returnT).toEqual(expectedResultType);
-
-//         Expect(context.decls.length).toEqual(2);
-
-//         const expectedParam0: SimpleT = {
-//           kind: "simple",
-//           name: { name: "integer" },
-//         };
-//         Expect(context.decls[0]).toEqual(expectedParam0);
-
-//         const expectedParam1: ParametrizedT<SimpleT> = {
-//           kind: "parametrized",
-//           name: "nullable",
-//           typevar: { kind: "simple", name: { name: "text" } },
-//         };
-//         Expect(context.decls[1]).toEqual(expectedParam1);
-//       }
-//     );
-//   }
-
-//   @TestCase(`select somethingsomething from testje`)
-//   @TestCase(`select * from somethingsomething`)
-//   @Test("Unknown identifier")
-//   public unknownIdentifierTest(queryStr: string) {
-//     const setup = "create table testje ( id int not null, name text );";
-//     const g = parseSetupScripts(parse(setup));
-//     const query = parse(queryStr);
-//     Expect(() =>
-//       query[0].type === "select"
-//         ? doSelectFrom(g, { decls: [] }, query[0])
-//         : null
-//     ).toThrow();
-//   }
-
-//   @TestCase(`
-// select id from testje
-// where id = $1
-// and $2 = name
-// and $1 = $2
-// `)
-//   @TestCase(`
-// select id from testje
-// where id = 'test'
-// `)
-//   @TestCase(`
-// select id from testje
-// where name = 5
-// `)
-//   @TestCase(`
-// select id from testje
-// where name = id
-// `)
-//   @Test("Type mismatch")
-//   public typeMismatchTest(queryStr: string) {
-//     const setup = "create table testje ( id int not null, name text );";
-//     const g = parseSetupScripts(parse(setup));
-//     const query = parse(queryStr);
-//     Expect(() =>
-//       query[0].type === "select"
-//         ? doSelectFrom(g, { decls: [] }, query[0])
-//         : null
-//     ).toThrow();
-//   }
-
-//   @Test("Two unifvars test")
-//   public twoUnifvarsTest() {
-//     testSelectFrom(
-//       "create table testje ( id int not null, name text );",
-//       `
-// select id, name
-// from testje
-// where id = $1
-// and $1 = $2
-// `,
-//       function ({ returnT, context }) {
-//         const expectedResultType: SetT = {
-//           kind: "set",
-//           fields: [
-//             {
-//               name: { name: "id" },
-//               type: { kind: "simple", name: { name: "integer" } },
-//             },
-//             {
-//               name: { name: "name" },
-//               type: {
-//                 kind: "parametrized",
-//                 name: "nullable",
-//                 typevar: { kind: "simple", name: { name: "text" } },
-//               },
-//             },
-//           ],
-//         };
-//         Expect(returnT).toEqual(expectedResultType);
-
-//         Expect(context.decls.length).toEqual(2);
-
-//         const expectedParam0: SimpleT = {
-//           kind: "simple",
-//           name: { name: "integer" },
-//         };
-//         Expect(context.decls[0]).toEqual(expectedParam0);
-//         Expect(context.decls[1]).toEqual(expectedParam0);
-//       }
-//     );
-//   }
-
-//   @Test("Two unifvars no unification")
-//   public twoUnifvarsNoUnificationTest() {
-//     testSelectFrom(
-//       "create table testje ( id int not null, name text );",
-//       `
-// select id, name
-// from testje
-// where $1 = $2
-// `,
-//       function ({ context }) {
-//         Expect(context.decls.length).toEqual(2);
-
-//         Expect(context.decls[0]).toEqual(null);
-//         Expect(context.decls[1]).toEqual(null);
-//       }
-//     );
-//   }
-
-//   @Test("Two unifvars late unif")
-//   @TestCase(`
-// select id, name
-// from testje
-// where $1 = $2
-// and $1 = id
-// `)
-//   @TestCase(`
-// select id, name
-// from testje
-// where $1 = $2
-// and $2 = id
-// `)
-//   @TestCase(`
-// select id, name
-// from testje
-// where $1 = $2
-// and $2 = $3
-// and $1 = id
-// `)
-//   public twoUnifvarsLateUnif(queryStr: string) {
-//     testSelectFrom(
-//       "create table testje ( id int not null, name text );",
-//       queryStr,
-//       function ({ context }) {
-//         const expectedParam: SimpleT = {
-//           kind: "simple",
-//           name: { name: "integer" },
-//         };
-//         context.decls.forEach(function (k) {
-//           Expect(k.type).toEqual(expectedParam);
-//         });
-//       }
-//     );
-//   }
-
-//   @Test("Qualified select")
-//   public qualifiedSelect() {
-//     testSelectFrom(
-//       "create table testje ( id int not null, name text );",
-//       `select testje.id, id from testje`,
-//       function ({ returnT }) {
-//         const expectedParam: SimpleT = {
-//           kind: "simple",
-//           name: { name: "integer" },
-//         };
-//         const f = returnT.fields[0];
-//         Expect(f.type).toEqual(expectedParam);
-//         Expect(f.name).toEqual({ name: "id" });
-
-//         const f2 = returnT.fields[1];
-//         Expect(f2.type).toEqual(expectedParam);
-//         Expect(f2.name).toEqual({ name: "id" });
-//       }
-//     );
-//   }
-
-//   @Test("Operator")
-//   public operator() {
-//     testSelectFrom(
-//       "create table testje ( id int not null, name text );",
-//       `select id + 1 from testje`,
-//       function ({ returnT }) {
-//         const expectedParam: SimpleT = {
-//           kind: "simple",
-//           name: { name: "integer" },
-//         };
-//         const f = returnT.fields[0];
-//         Expect(f.type).toEqual(expectedParam);
-//       }
-//     );
-//   }
-// }

@@ -23,62 +23,75 @@ import {
 } from "pgsql-ast-parser";
 import { builtinoperators } from "./builtinoperators";
 
-export type Type = ParametrizedT<SimpleT> | SimpleT | SetT;
-export type ParametrizedT<T> = {
-  kind: "parametrized";
-  name: "nullable" | "array";
+export type Type = SimpleT | SetT;
+export type NullableT<T> = {
+  kind: "nullable";
   typevar: T;
 };
-export type SimpleT = {
-  kind: "simple";
+export type ArrayT<T> = {
+  kind: "array";
+  typevar: T;
+};
+export type ScalarT = {
+  kind: "scalar";
   name: QName;
 };
+type SimpleT = ScalarT | NullableT<any> | ArrayT<any> | NullableT<ArrayT<any>>;
 type Field = {
   name: Name | null;
-  type: SimpleT | ParametrizedT<SimpleT>;
+  type: SimpleT;
 };
 export type SetT = {
   kind: "set";
   fields: Field[];
 };
 
-const BuiltinTypes = {
+export const BuiltinTypes = {
   Boolean: {
-    kind: "simple",
+    kind: "scalar",
     name: { name: "boolean" },
   },
   Smallint: {
-    kind: "simple",
+    kind: "scalar",
     name: { name: "smallint" },
   },
   Integer: {
-    kind: "simple",
+    kind: "scalar",
     name: { name: "integer" },
   },
   Bigint: {
-    kind: "simple",
+    kind: "scalar",
     name: { name: "bigint" },
   },
   String: {
-    kind: "simple",
+    kind: "scalar",
     name: { name: "text" },
   },
   // Any: {
-  //   kind: "simple",
+  //   kind: "scalar",
   //   name: { name: "any" },
   //   typevar: null,
   // },
 } as const;
 
-const BuiltinTypeConstructors = {
-  Nullable: <T>(t: T): ParametrizedT<T> => ({
-    kind: "parametrized",
-    name: "nullable",
+function requireBoolean(e: Expr, t: Type): void {
+  if (t.kind === "scalar" && eqQNames(t.name, BuiltinTypes.Boolean.name)) {
+    return;
+  } else {
+    throw new TypeMismatch(e, {
+      expected: BuiltinTypes.Boolean,
+      actual: t,
+    });
+  }
+}
+
+export const BuiltinTypeConstructors = {
+  Nullable: <T>(t: T): NullableT<T> => ({
+    kind: "nullable",
     typevar: t,
   }),
-  Array: <T>(t: T): ParametrizedT<T> => ({
-    kind: "parametrized",
-    name: "array",
+  Array: <T>(t: T): ArrayT<T> => ({
+    kind: "array",
     typevar: t,
   }),
 } as const;
@@ -97,11 +110,11 @@ export type Global = {
 
 function unifySimplesOrParametrizeds(
   e: Expr,
-  source: ParametrizedT<SimpleT> | SimpleT,
-  target: ParametrizedT<SimpleT> | SimpleT,
+  source: ParametrizedT<ScalarT> | ScalarT,
+  target: ParametrizedT<ScalarT> | ScalarT,
   type: CastType
-): ParametrizedT<SimpleT> | SimpleT {
-  function wrapResInNullable(res: SimpleT): ParametrizedT<SimpleT> {
+): ParametrizedT<ScalarT> | ScalarT {
+  function wrapResInNullable(res: ScalarT): ParametrizedT<ScalarT> {
     return BuiltinTypeConstructors.Nullable(res);
   }
 
@@ -109,14 +122,14 @@ function unifySimplesOrParametrizeds(
   if (
     source.kind === "parametrized" &&
     source.name === "nullable" &&
-    target.kind === "simple"
+    target.kind === "scalar"
   ) {
     return wrapResInNullable(unifySimples(e, source.typevar, target, type));
   }
   if (
     target.kind === "parametrized" &&
     target.name === "nullable" &&
-    source.kind === "simple"
+    source.kind === "scalar"
   ) {
     return wrapResInNullable(unifySimples(e, source, target.typevar, type));
   }
@@ -156,13 +169,13 @@ function unifySimplesOrParametrizeds(
 type CastType = "implicit" | "assignment" | "explicit";
 function unifySimples(
   e: Expr,
-  source: SimpleT,
-  target: SimpleT,
+  source: ScalarT,
+  target: ScalarT,
   type: CastType
-): SimpleT {
+): ScalarT {
   // list casts = \dC+
 
-  const casts: { source: SimpleT; target: SimpleT; type: CastType }[] = [
+  const casts: { source: ScalarT; target: ScalarT; type: CastType }[] = [
     {
       source: BuiltinTypes.Smallint,
       target: BuiltinTypes.Integer,
@@ -197,8 +210,8 @@ export type Context = {
   readonly decls: ReadonlyArray<{
     readonly name: Name;
     readonly type:
-      | SimpleT // declare bindings and function parameters
-      | ParametrizedT<SimpleT> // declare bindings and function parameters
+      | ScalarT // declare bindings and function parameters
+      | ParametrizedT<ScalarT> // declare bindings and function parameters
       | SetT; // from-tables, from-views, with, (temp tables?)
   }>;
 };
@@ -210,8 +223,8 @@ export function notImplementedYet(node: PGNode | null): any {
 function mkType(
   t: DataTypeDef,
   cs: ColumnConstraint[]
-): SimpleT | ParametrizedT<SimpleT> {
-  const mapTypenames: { [n: string]: SimpleT } = {
+): ScalarT | ParametrizedT<ScalarT> {
+  const mapTypenames: { [n: string]: ScalarT } = {
     int: BuiltinTypes.Integer,
   };
   if (t.kind === "array") {
@@ -219,12 +232,12 @@ function mkType(
       throw new Error("Array or array not supported");
     } else {
       return BuiltinTypeConstructors.Array(
-        mapTypenames[t.arrayOf.name] || { kind: "simple", name: t.arrayOf }
+        mapTypenames[t.arrayOf.name] || { kind: "scalar", name: t.arrayOf }
       );
     }
   } else {
-    const t_: SimpleT = mapTypenames[t.name] || {
-      kind: "simple",
+    const t_: ScalarT = mapTypenames[t.name] || {
+      kind: "scalar",
       name: t,
     };
 
@@ -307,12 +320,7 @@ export function doSelectFrom(
 
   if (s.where) {
     const t = elabExpr(newC, s.where);
-    if (t.kind !== "simple" || !eqQNames(t.name, BuiltinTypes.Boolean.name)) {
-      throw new TypeMismatch(s.where, {
-        expected: BuiltinTypes.Boolean,
-        actual: t,
-      });
-    }
+    requireBoolean(s.where, t);
   }
 
   const fields = (s.columns || []).map(
@@ -342,8 +350,8 @@ export function doCreateFunction(
   s: CreateFunctionStatement
 ): {
   name: QName;
-  inputs: { name: Name; type: SimpleT | ParametrizedT<SimpleT> }[];
-  returns: SimpleT | SetT | null;
+  inputs: { name: Name; type: ScalarT | ParametrizedT<ScalarT> }[];
+  returns: ScalarT | SetT | null;
   multipleRows: boolean;
 } {
   const name = s.name;
@@ -545,6 +553,7 @@ function doSingleFrom(
   handledFroms: HandledFrom[],
   f: From
 ): HandledFrom[] {
+  debugger;
   if (f.type === "statement") {
     return notImplementedYet(f);
   } else if (f.type === "call") {
@@ -571,22 +580,19 @@ function doSingleFrom(
           : foundRel,
     };
 
-    const newHandledFroms =
+    const newHandledFroms_ =
       f.join && (f.join.type === "FULL JOIN" || f.join.type === "RIGHT JOIN")
         ? handledFroms.map((fr) => ({ ...fr, rel: nullifySet(fr.rel) }))
         : handledFroms;
 
+    const newHandledFroms = newHandledFroms_.concat(newHandledFrom);
+
     if (f.join?.on) {
       const t = elabExpr(mergeHandledFroms(c, newHandledFroms), f.join.on);
-      if (t !== BuiltinTypes.Boolean) {
-        throw new TypeMismatch(f.join.on, {
-          expected: BuiltinTypes.Boolean,
-          actual: t,
-        });
-      }
+      requireBoolean(f.join.on, t);
     }
 
-    return newHandledFroms.concat(newHandledFrom);
+    return newHandledFroms;
   }
 }
 function doFroms(g: Global, c: Context, froms: From[]): Context {
@@ -626,7 +632,7 @@ function lookup(c: Context, n: QName): Type | null {
 function lookupInSet(
   s: SetT,
   name: Name
-): SimpleT | ParametrizedT<SimpleT> | null {
+): ScalarT | ParametrizedT<ScalarT> | null {
   const found = s.fields.find((f) => f.name && f.name.name === name.name);
   if (found) {
     return found.type;
@@ -660,7 +666,7 @@ function elabRef(c: Context, e: ExprRef): Type {
       const foundFields: {
         set: QName;
         field: Name;
-        type: SimpleT | ParametrizedT<SimpleT>;
+        type: ScalarT | ParametrizedT<ScalarT>;
       }[] = mapPartial(c.decls, (t) => {
         if (t.type.kind === "set") {
           const foundfield = lookupInSet(t.type, e);
@@ -704,9 +710,9 @@ function elabRef(c: Context, e: ExprRef): Type {
 }
 
 export type binaryOp = {
-  left: SimpleT | ParametrizedT<SimpleT>;
-  right: SimpleT | ParametrizedT<SimpleT>;
-  result: SimpleT | ParametrizedT<SimpleT>;
+  left: ScalarT | ParametrizedT<ScalarT>;
+  right: ScalarT | ParametrizedT<ScalarT>;
+  result: ScalarT | ParametrizedT<ScalarT>;
   name: QName;
   description: string;
 };
@@ -794,7 +800,10 @@ function nullifySet(s: SetT): SetT {
     kind: "set",
     fields: s.fields.map((c) => ({
       name: c.name,
-      type: { ...c.type, nullable: true },
+      type:
+        c.type.kind === "parametrized" && c.type.name === "nullable"
+          ? c.type
+          : BuiltinTypeConstructors.Nullable(c.type),
     })),
   };
 }

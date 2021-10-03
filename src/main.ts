@@ -7,12 +7,12 @@ import {
   ParametrizedT,
   parseSetupScripts,
   SetT,
-  SimpleT,
+  ScalarT,
 } from "./typecheck";
 
 go();
 
-function printSimpleAsTypescript(t: SimpleT | ParametrizedT<SimpleT>): string {
+function printSimpleAsTypescript(t: ScalarT | ParametrizedT<ScalarT>): string {
   if (t.name === "array") {
     return "(" + printSimpleAsTypescript(t.typevar) + ")" + "[]";
   } else if (t.name === "nullable") {

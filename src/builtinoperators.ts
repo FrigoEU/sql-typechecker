@@ -1,6 +1,6 @@
 import { binaryOp } from "./typecheck";
 
-export const builtinoperatorsFromSyntax: binaryOp[] = [
+const builtinoperatorsFromSyntax: binaryOp[] = [
   {
     name: { schema: "", name: "AND" },
     left: { kind: "scalar", name: { name: "boolean" } },
@@ -17,7 +17,7 @@ export const builtinoperatorsFromSyntax: binaryOp[] = [
   },
 ];
 
-export const builtinoperatorsFromSchema: binaryOp[] = [
+const builtinoperatorsFromSchema: binaryOp[] = [
   {
     name: { schema: "pg_catalog", name: "!~" },
     left: { kind: "scalar", name: { name: "character" } },

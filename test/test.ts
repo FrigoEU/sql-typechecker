@@ -322,7 +322,30 @@ $$ LANGUAGE sql;
         kind: "set",
         fields: [
           {
-            name: { name: "id1" },
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public operators() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT -id + 2 as id
+FROM testje
+WHERE id + 5 < 7
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
             type: BuiltinTypes.Integer,
           },
         ],

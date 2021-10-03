@@ -9,6 +9,7 @@ import {
   Expr,
   ExprBinary,
   ExprRef,
+  ExprUnary,
   From,
   Name,
   // astVisitor,
@@ -22,8 +23,12 @@ import {
   toSql,
 } from "pgsql-ast-parser";
 import { builtinoperators } from "./builtinoperators";
+import { builtinUnaryOperators } from "./builtinunaryoperators";
 
 export type Type = SimpleT | SetT;
+export type AnyT = {
+  kind: "any";
+};
 export type NullableT<T> = {
   kind: "nullable";
   typevar: T;
@@ -37,10 +42,12 @@ export type ScalarT = {
   name: QName;
 };
 export type SimpleT =
+  | AnyT
   | ScalarT
   | NullableT<any>
   | ArrayT<any>
   | NullableT<ArrayT<any>>;
+
 type Field = {
   name: Name | null;
   type: SimpleT;
@@ -112,6 +119,32 @@ export type Global = {
   }>;
 };
 
+function eqType(t1: Type, t2: Type): boolean {
+  if (t1.kind === "any") {
+    return t2.kind === "any";
+  } else if (t1.kind === "nullable") {
+    return t2.kind === "nullable" && eqType(t1.typevar, t2.typevar);
+  } else if (t1.kind === "array") {
+    return t2.kind === "array" && eqType(t1.typevar, t2.typevar);
+  } else if (t1.kind === "scalar") {
+    return t2.kind === "scalar" && eqQNames(t1.name, t2.name);
+  } else if (t1.kind === "set") {
+    return (
+      t2.kind === "set" &&
+      t1.fields.length == t2.fields.length &&
+      t1.fields.reduce(
+        (acc: boolean, field, i) =>
+          acc &&
+          field.name?.name === t2.fields[i].name?.name &&
+          eqType(field.type, t2.fields[i].type),
+        true
+      )
+    );
+  } else {
+    return checkAllCasesHandled(t1);
+  }
+}
+
 function unifySimples(
   e: Expr,
   source: SimpleT,
@@ -130,7 +163,12 @@ function unifySimples(
     );
   }
 
-  if (source.kind === "nullable") {
+  if (target.kind === "any") {
+    return source;
+  }
+  if (source.kind === "any") {
+    return target;
+  } else if (source.kind === "nullable") {
     if (target.kind === "nullable") {
       const res = unifySimples(e, source.typevar, target.typevar, type);
       return { ...source, typevar: res };
@@ -483,9 +521,16 @@ export function printType(t: Type): string {
       return printType(t.typevar) + " | null";
     } else if (t.kind === "scalar") {
       return t.name.name;
+    } else if (t.kind === "any") {
+      return "any";
     } else {
       return checkAllCasesHandled(t);
     }
+  }
+}
+export class UnknownUnaryOp extends Error {
+  constructor(e: Expr, n: QName, t1: Type) {
+    super(`Can't apply unary operator "${showQName(n)}" to ${printType(t1)}`);
   }
 }
 export class UnknownBinaryOp extends Error {
@@ -507,8 +552,8 @@ class AmbiguousIdentifier extends Error {
   }
 }
 class KindMismatch extends Error {
-  constructor(e: Expr, expected: Type, actual: string) {
-    super(`KindMismatch: ${e}: ${expected} vs ${actual}}`);
+  constructor(e: Expr, type: Type, errormsg: string) {
+    super(`KindMismatch: ${e}: ${type}: ${errormsg}}`);
   }
 }
 export class TypeMismatch extends Error {
@@ -715,13 +760,68 @@ export type binaryOp = {
   description: string;
 };
 
+export type unaryOp = {
+  operand: SimpleT;
+  result: SimpleT;
+  name: QName;
+  description: string;
+};
+
+function isNotEmpty<A>(a: A | null | undefined): a is A {
+  return a !== null && a !== undefined;
+}
+
+function elabUnary(c: Context, e: ExprUnary): Type {
+  const t1 = elabExpr(c, e.operand);
+
+  if (t1.kind === "set") {
+    throw new KindMismatch(e, t1, "Can't apply unary operator to set");
+  }
+
+  const found = builtinUnaryOperators
+    .filter(function (op) {
+      return eqQNames(
+        {
+          name: e.op,
+          schema: e.opSchema,
+        },
+        op.name
+      );
+    })
+    .map(function (op) {
+      try {
+        const res = unifySimples(e, t1, op.operand, "implicit");
+        // If it's an exact match, we want it higher on the resolution priority
+        return [eqType(res, t1) ? 0 : 1, op] as const;
+      } catch {
+        return null;
+      }
+    })
+    .filter(isNotEmpty)
+    .sort((m1, m2) => (m1[0] > m2[0] ? 1 : -1))[0];
+
+  if (!found) {
+    throw new UnknownUnaryOp(e, { name: e.op, schema: e.opSchema }, t1);
+  } else {
+    return found[1].result;
+  }
+}
+
 function elabBinary(c: Context, e: ExprBinary): Type {
-  debugger;
   const t1 = elabExpr(c, e.left);
   const t2 = elabExpr(c, e.right);
 
   if (t1.kind === "set" || t2.kind === "set") {
     return notImplementedYet(e);
+  }
+
+  // Specific test on = NULL, because it's always False (I think?) and is a cause of a lot of bugs
+  if (e.op === "=" && (e.left.type === "null" || e.right.type === "null")) {
+    throw new Error(
+      `Don't use \"= NULL\", use "IS NULL" instead @ ${showLocation(
+        e._location
+      )}`
+    );
   }
 
   const found = builtinoperators
@@ -734,24 +834,24 @@ function elabBinary(c: Context, e: ExprBinary): Type {
         op.name
       );
     })
-    .find(function (op) {
+    .map(function (op) {
       try {
-        unifySimples(e, t1, op.left, "implicit");
+        const res1 = unifySimples(e, t1, op.left, "implicit");
+        const res2 = unifySimples(e, t2, op.right, "implicit");
+        const score1 = eqType(res1, t1) ? 0 : 1;
+        const score2 = eqType(res2, t2) ? 0 : 1;
+        return [score1 + score2, op] as const;
       } catch {
-        return false;
+        return null;
       }
-      try {
-        unifySimples(e, t2, op.right, "implicit");
-      } catch {
-        return false;
-      }
-      return true;
-    });
+    })
+    .filter(isNotEmpty)
+    .sort((m1, m2) => (m1[0] > m2[0] ? 1 : -1))[0];
 
   if (!found) {
     throw new UnknownBinaryOp(e, { name: e.op, schema: e.opSchema }, t1, t2);
   } else {
-    return found.result;
+    return found[1].result;
   }
 }
 
@@ -767,8 +867,12 @@ function elabExpr(c: Context, e: Expr): Type {
     return BuiltinTypes.Boolean;
   } else if (e.type === "string") {
     return BuiltinTypes.String;
+  } else if (e.type === "unary") {
+    return elabUnary(c, e);
   } else if (e.type === "binary") {
     return elabBinary(c, e);
+  } else if (e.type === "null") {
+    return { kind: "any" };
   } else {
     return notImplementedYet(e);
   }

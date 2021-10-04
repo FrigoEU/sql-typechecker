@@ -8,6 +8,7 @@ import {
   DataTypeDef,
   Expr,
   ExprBinary,
+  ExprCall,
   ExprRef,
   ExprUnary,
   From,
@@ -35,6 +36,7 @@ export type NullableT<T> = {
 };
 export type ArrayT<T> = {
   kind: "array";
+  subtype: "array" | "list";
   typevar: T;
 };
 export type ScalarT = {
@@ -70,6 +72,10 @@ export const BuiltinTypes = {
     kind: "scalar",
     name: { name: "integer" },
   },
+  Numeric: {
+    kind: "scalar",
+    name: { name: "numeric" },
+  },
   Bigint: {
     kind: "scalar",
     name: { name: "bigint" },
@@ -78,11 +84,9 @@ export const BuiltinTypes = {
     kind: "scalar",
     name: { name: "text" },
   },
-  // Any: {
-  //   kind: "scalar",
-  //   name: { name: "any" },
-  //   typevar: null,
-  // },
+  Any: {
+    kind: "any",
+  },
 } as const;
 
 function requireBoolean(e: Expr, t: Type): void {
@@ -103,6 +107,12 @@ export const BuiltinTypeConstructors = {
   }),
   Array: <T>(t: T): ArrayT<T> => ({
     kind: "array",
+    subtype: "array",
+    typevar: t,
+  }),
+  List: <T>(t: T): ArrayT<T> => ({
+    kind: "array",
+    subtype: "list",
     typevar: t,
   }),
 } as const;
@@ -129,7 +139,11 @@ function eqType(t1: Type, t2: Type): boolean {
   } else if (t1.kind === "nullable") {
     return t2.kind === "nullable" && eqType(t1.typevar, t2.typevar);
   } else if (t1.kind === "array") {
-    return t2.kind === "array" && eqType(t1.typevar, t2.typevar);
+    return (
+      t2.kind === "array" &&
+      t1.subtype === t2.subtype &&
+      eqType(t1.typevar, t2.typevar)
+    );
   } else if (t1.kind === "scalar") {
     return t2.kind === "scalar" && eqQNames(t1.name, t2.name);
   } else if (t1.kind === "set") {
@@ -180,7 +194,7 @@ function unifySimples(
       throw new TypeMismatch(e, { expected: source, actual: target });
     }
   } else if (source.kind === "array") {
-    if (target.kind === "array") {
+    if (target.kind === "array" && source.subtype === target.subtype) {
       const res = unifySimples(e, source.typevar, target.typevar, type);
       return { ...source, typevar: res };
     } else {
@@ -302,7 +316,7 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
         const targetTable = c.like;
         const found = g.tables.find((t) => eqQNames(t.name, targetTable));
         if (!found) {
-          throw new UnknownIdentifier(targetTable);
+          throw new UnknownIdentifier(c.like, targetTable);
         }
         return [acc[0].concat(found.rel.fields), acc[1].concat(found.defaults)];
       } else {
@@ -480,28 +494,38 @@ function showLocation(loc: NodeLocation | undefined): string {
   }
 }
 
-class NotImplementedYet extends Error {
+class ErrorWithLocation extends Error {
+  constructor(l: NodeLocation | undefined, m: string) {
+    super(`${showLocation(l)}: ${m}`);
+  }
+}
+
+class NotImplementedYet extends ErrorWithLocation {
   constructor(node: PGNode | null) {
     const m = node
       ? `: \n
 ${JSON.stringify(node)} @ ${node._location}`
       : "";
-    super(`NotImplementedYet: ${m}`);
+    super(node?._location, `NotImplementedYet: ${m}`);
   }
 }
 
-class UnknownField extends Error {
-  constructor(s: SetT, n: Name) {
+class UnknownField extends ErrorWithLocation {
+  constructor(e: Expr, s: SetT, n: Name) {
     super(
+      e._location,
       `UnknownField ${n.name} @ ${showLocation(
         n._location
       )} in ${JSON.stringify(s)}`
     );
   }
 }
-export class UnknownIdentifier extends Error {
-  constructor(m: QName) {
-    super(`UnknownIdentifier ${showQName(m)} @ ${showLocation(m._location)}`);
+export class UnknownIdentifier extends ErrorWithLocation {
+  constructor(e: PGNode, m: QName) {
+    super(
+      e._location,
+      `UnknownIdentifier ${showQName(m)} @ ${showLocation(m._location)}`
+    );
   }
 }
 
@@ -532,32 +556,51 @@ export function printType(t: Type): string {
     }
   }
 }
-export class UnknownUnaryOp extends Error {
+export class UnknownUnaryOp extends ErrorWithLocation {
   constructor(e: Expr, n: QName, t1: Type) {
-    super(`Can't apply unary operator "${showQName(n)}" to ${printType(t1)}`);
+    super(
+      e._location,
+      `Can't apply unary operator "${showQName(n)}" to ${printType(t1)}`
+    );
   }
 }
-export class UnknownBinaryOp extends Error {
+export class UnknownBinaryOp extends ErrorWithLocation {
   constructor(e: Expr, n: QName, t1: Type, t2: Type) {
     super(
+      e._location,
       `Can't apply operator "${showQName(n)}" to ${printType(
         t1
       )} and ${printType(t2)}`
     );
   }
 }
-class AmbiguousIdentifier extends Error {
-  constructor(m: QName, sets: QName[]) {
+export class UnknownFunction extends ErrorWithLocation {
+  constructor(e: Expr, n: QName, argTs: Type[]) {
+    const argsString = argTs.map((t) => printType(t)).join(", ");
     super(
+      e._location,
+      `Can't apply function "${showQName(n)}" to arguments: ${argsString}`
+    );
+  }
+}
+export class TypecheckerError extends ErrorWithLocation {
+  constructor(e: Expr, m: string) {
+    super(e._location, `Typechecker error: ${m}`);
+  }
+}
+class AmbiguousIdentifier extends ErrorWithLocation {
+  constructor(e: Expr, m: QName, sets: QName[]) {
+    super(
+      e._location,
       `AmbiguousIdentifier ${showQName(m)} @ ${showLocation(
         m._location
       )} present in ${JSON.stringify(sets)}`
     );
   }
 }
-class KindMismatch extends Error {
+class KindMismatch extends ErrorWithLocation {
   constructor(e: Expr, type: Type, errormsg: string) {
-    super(`KindMismatch: ${e}: ${type}: ${errormsg}}`);
+    super(e._location, `KindMismatch: ${e}: ${type}: ${errormsg}}`);
   }
 }
 export class TypeMismatch extends Error {
@@ -608,7 +651,6 @@ function doSingleFrom(
   handledFroms: HandledFrom[],
   f: From
 ): HandledFrom[] {
-  debugger;
   if (f.type === "statement") {
     return notImplementedYet(f);
   } else if (f.type === "call") {
@@ -619,7 +661,7 @@ function doSingleFrom(
     }
     const foundRel = findRel(g, f.name);
     if (!foundRel) {
-      throw new UnknownIdentifier(f.name);
+      throw new UnknownIdentifier(f, f.name);
     }
 
     const newHandledFrom = {
@@ -704,14 +746,14 @@ function elabRef(c: Context, e: ExprRef): Type {
     if (e.table) {
       const table = lookup(c, e.table);
       if (!table) {
-        throw new UnknownIdentifier(e.table);
+        throw new UnknownIdentifier(e, e.table);
       }
       if (!(table.kind === "set")) {
         throw new KindMismatch(e, table, "Expecting Set");
       }
       const field = lookupInSet(table, e);
       if (!field) {
-        throw new UnknownField(table, e);
+        throw new UnknownField(e, table, e);
       }
       return field;
     } else {
@@ -743,16 +785,17 @@ function elabRef(c: Context, e: ExprRef): Type {
       // Fields seem to have precedence over eg: function params in postgres?
       if (foundFields.length === 0) {
         if (foundIdentifiers.length === 0) {
-          throw new UnknownIdentifier(e);
+          throw new UnknownIdentifier(e, e);
         } else if (foundIdentifiers.length === 1) {
           return foundIdentifiers[0].type;
         } else {
-          throw new AmbiguousIdentifier(e, []);
+          throw new AmbiguousIdentifier(e, e, []);
         }
       } else if (foundFields.length === 1) {
         return foundFields[0].type;
       } else {
         throw new AmbiguousIdentifier(
+          e,
           e,
           foundFields.map((f) => f.set)
         );
@@ -780,7 +823,7 @@ function isNotEmpty<A>(a: A | null | undefined): a is A {
   return a !== null && a !== undefined;
 }
 
-function elabUnary(c: Context, e: ExprUnary): Type {
+function elabUnaryOp(c: Context, e: ExprUnary): Type {
   const t1 = elabExpr(c, e.operand);
 
   if (t1.kind === "set") {
@@ -823,7 +866,7 @@ function elabUnary(c: Context, e: ExprUnary): Type {
     return op.result;
   }
 }
-function elabBinary(c: Context, e: ExprBinary): Type {
+function elabBinaryOp(c: Context, e: ExprBinary): Type {
   const t1 = elabExpr(c, e.left);
   const t2 = elabExpr(c, e.right);
 
@@ -838,6 +881,12 @@ function elabBinary(c: Context, e: ExprBinary): Type {
         e._location
       )}`
     );
+  }
+
+  if (e.op === "IN" || e.op === "NOT IN") {
+    // No generics, so special casing this operator
+    unifySimples(e, t2, BuiltinTypeConstructors.List(t1), "implicit");
+    return BuiltinTypes.Boolean;
   }
 
   const found = builtinoperators
@@ -877,6 +926,37 @@ function elabBinary(c: Context, e: ExprBinary): Type {
   }
 }
 
+function elabCall(c: Context, e: ExprCall): Type {
+  const argTypes = e.args.map((arg) => elabExpr(c, arg));
+
+  if (
+    eqQNames(e.function, { name: "any" }) ||
+    eqQNames(e.function, { name: "some" }) ||
+    eqQNames(e.function, { name: "all" })
+  ) {
+    if (e.args.length !== 1) {
+      throw new UnknownFunction(e, e.function, argTypes);
+    }
+    const t = argTypes[0];
+    if (t.kind === "set") {
+      throw new UnknownFunction(e, e.function, [t]);
+    }
+    const unifiedT = unifySimples(
+      e,
+      t,
+      BuiltinTypeConstructors.Array(BuiltinTypes.Any),
+      "implicit"
+    );
+    if (unifiedT.kind !== "array") {
+      throw new TypecheckerError(e, "Expecting array type");
+    } else {
+      return unifiedT.typevar;
+    }
+  }
+
+  throw notImplementedYet(e);
+}
+
 function elabExpr(c: Context, e: Expr): Type {
   if (e.type === "ref") {
     const t = elabRef(c, e);
@@ -890,11 +970,29 @@ function elabExpr(c: Context, e: Expr): Type {
   } else if (e.type === "string") {
     return BuiltinTypes.String;
   } else if (e.type === "unary") {
-    return elabUnary(c, e);
+    return elabUnaryOp(c, e);
   } else if (e.type === "binary") {
-    return elabBinary(c, e);
+    return elabBinaryOp(c, e);
   } else if (e.type === "null") {
-    return { kind: "any" };
+    return BuiltinTypes.Any;
+  } else if (e.type === "numeric") {
+    return BuiltinTypes.Numeric;
+  } else if (e.type === "list" || e.type === "array") {
+    const typevars = e.expressions.map((subexpr) => elabExpr(c, subexpr));
+    const typevar = typevars.reduce((acc: SimpleT, t: Type) => {
+      if (t.kind === "set") {
+        throw new Error(
+          `Can't have sets inside lists / arrays @ ${e._location} `
+        );
+      } else {
+        return unifySimples(e, t, acc, "implicit");
+      }
+    }, BuiltinTypes.Any);
+    return e.type === "list"
+      ? BuiltinTypeConstructors.List(typevar)
+      : BuiltinTypeConstructors.Array(typevar);
+  } else if (e.type === "call") {
+    return elabCall(c, e);
   } else {
     return notImplementedYet(e);
   }
@@ -943,11 +1041,11 @@ function showQName(n: QName): string {
 
 function eqQNames<U extends QName, V extends QName>(u: U, v: V): boolean {
   return (
-    u.name === v.name &&
+    u.name.toLowerCase() === v.name.toLowerCase() &&
     ((!u.schema && (v.schema === "dbo" || v.schema === "pg_catalog")) ||
       ((u.schema === "dbo" || u.schema === "pg_catalog") && !v.schema) ||
       (!u.schema && !v.schema) ||
-      u.schema === v.schema)
+      u.schema?.toLowerCase() === v.schema?.toLowerCase())
   );
 }
 

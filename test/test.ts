@@ -35,7 +35,7 @@ function testCreateFunction(
       const res = doCreateFunction(g, { decls: [] }, query[0]);
       cont(Right(res));
     } catch (err) {
-      cont(Left(err));
+      cont(Left(err as Error));
     }
   } else {
     throw new Error("Bad test setup");
@@ -350,6 +350,95 @@ $$ LANGUAGE sql;
           },
         ],
       }
+    );
+  }
+
+  @Test()
+  public inList() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id
+FROM testje
+WHERE id IN (1, 2, 3)
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public inListMismatch() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect(mylist int[]) RETURNS SETOF AS $$
+SELECT id
+FROM testje
+WHERE id IN ('hello')
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public inListParameter() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect(mylist int[]) RETURNS SETOF AS $$
+SELECT id
+FROM testje
+WHERE id IN mylist
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public equalAny() {
+    expectInputs(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect(mylist int[]) RETURNS SETOF AS $$
+SELECT id
+FROM testje
+WHERE id = ANY(mylist)
+$$ LANGUAGE sql;
+`,
+      [
+        {
+          name: { name: "mylist" },
+          type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+        },
+      ]
+    );
+  }
+
+  @Test()
+  public equalAnyMismatch() {
+    debugger;
+    expectThrowLike(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect(mylist text[]) RETURNS SETOF AS $$
+SELECT id
+FROM testje
+WHERE id = ANY(mylist)
+$$ LANGUAGE sql;
+`,
+      "Can't apply operator"
     );
   }
 }

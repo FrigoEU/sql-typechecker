@@ -107,6 +107,10 @@ export const BuiltinTypeConstructors = {
   }),
 } as const;
 
+function isNullable(t: Type) {
+  return t.kind === "nullable";
+}
+
 export type Global = {
   readonly tables: ReadonlyArray<{
     readonly name: QName;
@@ -579,6 +583,11 @@ ${JSON.stringify(ts.actual)}}
   }
 }
 
+const warnings: [Expr, string][] = [];
+function registerWarning(e: Expr, message: string) {
+  warnings.push([e, message]);
+}
+
 function mergeHandledFroms(c: Context, handledFroms: HandledFrom[]): Context {
   return {
     ...c,
@@ -791,8 +800,12 @@ function elabUnary(c: Context, e: ExprUnary): Type {
     .map(function (op) {
       try {
         const res = unifySimples(e, t1, op.operand, "implicit");
-        // If it's an exact match, we want it higher on the resolution priority
-        return [eqType(res, t1) ? 0 : 1, op] as const;
+        // If it's an exact match, so no type coersion, we want it higher on the resolution priority
+        const score =
+          eqType(res, t1) || eqType(res, BuiltinTypeConstructors.Nullable(t1))
+            ? 0
+            : 1;
+        return [score, op] as const;
       } catch {
         return null;
       }
@@ -803,10 +816,13 @@ function elabUnary(c: Context, e: ExprUnary): Type {
   if (!found) {
     throw new UnknownUnaryOp(e, { name: e.op, schema: e.opSchema }, t1);
   } else {
-    return found[1].result;
+    const op = found[1];
+    if (op.name.name.toLowerCase() === "is null" && !isNullable(t1)) {
+      registerWarning(e, "IS NULL check but operand is not nullable");
+    }
+    return op.result;
   }
 }
-
 function elabBinary(c: Context, e: ExprBinary): Type {
   const t1 = elabExpr(c, e.left);
   const t2 = elabExpr(c, e.right);
@@ -838,8 +854,14 @@ function elabBinary(c: Context, e: ExprBinary): Type {
       try {
         const res1 = unifySimples(e, t1, op.left, "implicit");
         const res2 = unifySimples(e, t2, op.right, "implicit");
-        const score1 = eqType(res1, t1) ? 0 : 1;
-        const score2 = eqType(res2, t2) ? 0 : 1;
+        const score1 =
+          eqType(res1, t1) || eqType(res1, BuiltinTypeConstructors.Nullable(t1))
+            ? 0
+            : 1;
+        const score2 =
+          eqType(res2, t2) || eqType(res2, BuiltinTypeConstructors.Nullable(t2))
+            ? 0
+            : 1;
         return [score1 + score2, op] as const;
       } catch {
         return null;

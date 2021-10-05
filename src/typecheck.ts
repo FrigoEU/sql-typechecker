@@ -1077,6 +1077,9 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
       "implicit"
     );
     return BuiltinTypeConstructors.Array(t);
+  } else if (e.type === "default") {
+    // ??
+    return BuiltinTypes.AnyScalar;
   } else {
     return notImplementedYet(e);
   }

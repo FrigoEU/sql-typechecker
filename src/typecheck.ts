@@ -20,6 +20,7 @@ import {
   QName,
   SelectedColumn,
   SelectFromStatement,
+  SelectStatement,
   Statement,
   toSql,
 } from "pgsql-ast-parser";
@@ -27,8 +28,8 @@ import { builtinoperators } from "./builtinoperators";
 import { builtinUnaryOperators } from "./builtinunaryoperators";
 
 export type Type = SimpleT | SetT;
-export type AnyT = {
-  kind: "any";
+export type AnyScalarT = {
+  kind: "anyscalar";
 };
 export type NullableT<T> = {
   kind: "nullable";
@@ -44,7 +45,7 @@ export type ScalarT = {
   name: QName;
 };
 export type SimpleT =
-  | AnyT
+  | AnyScalarT
   | ScalarT
   | NullableT<any>
   | ArrayT<any>
@@ -84,8 +85,8 @@ export const BuiltinTypes = {
     kind: "scalar",
     name: { name: "text" },
   },
-  Any: {
-    kind: "any",
+  AnyScalar: {
+    kind: "anyscalar",
   },
 } as const;
 
@@ -134,8 +135,8 @@ export type Global = {
 };
 
 function eqType(t1: Type, t2: Type): boolean {
-  if (t1.kind === "any") {
-    return t2.kind === "any";
+  if (t1.kind === "anyscalar") {
+    return t2.kind === "anyscalar";
   } else if (t1.kind === "nullable") {
     return t2.kind === "nullable" && eqType(t1.typevar, t2.typevar);
   } else if (t1.kind === "array") {
@@ -163,6 +164,80 @@ function eqType(t1: Type, t2: Type): boolean {
   }
 }
 
+function unify(e: Expr, source: Type, target: Type, casttype: CastType): Type {
+  if (source.kind === "set") {
+    if (target.kind === "set") {
+      return unifySets(e, source, target, casttype);
+    } else {
+      return unifySetWithSimple(e, source, target, casttype);
+    }
+  } else {
+    if (target.kind === "set") {
+      return unifySetWithSimple(e, target, source, casttype);
+    } else {
+      return unifySimples(e, source, target, casttype);
+    }
+  }
+}
+
+function unifySets(
+  e: Expr,
+  source: SetT,
+  target: SetT,
+  casttype: CastType
+): SetT {
+  const sortFunc = (f1: Field, f2: Field) =>
+    (f1.name || "") > (f2.name || "") ? 1 : -1;
+  const sourceFields = source.fields.sort(sortFunc);
+  const targetFields = target.fields.sort(sortFunc);
+  if (sourceFields.length !== targetFields.length) {
+    throw new TypeMismatch(e, { expected: source, actual: target });
+  }
+  const newFields = sourceFields.map((sf, i) => {
+    const tf = targetFields[i];
+    if (
+      (sf.name === null && tf.name === null) ||
+      (sf.name !== null && tf.name !== null && eqQNames(sf.name, tf.name))
+    ) {
+    } else {
+      throw new TypeMismatch(e, { expected: source, actual: target });
+    }
+    const t = unifySimples(e, sf.type, tf.type, casttype);
+    return {
+      name: sf.name,
+      type: t,
+    };
+  });
+  return {
+    kind: "set",
+    fields: newFields,
+  };
+}
+
+function unifySetWithSimple(
+  e: Expr,
+  source: SetT,
+  target: SimpleT,
+  casttype: CastType
+): SimpleT {
+  // TODO add warning if no LIMIT 1
+  if (source.fields.length === 0) {
+    throw new TypeMismatch(
+      e,
+      { expected: source, actual: target },
+      "Set has no fields"
+    );
+  }
+  if (source.fields.length > 1) {
+    throw new TypeMismatch(
+      e,
+      { expected: source, actual: target },
+      "More than one row returned by a subquery used as an expression"
+    );
+  }
+  return unifySimples(e, source.fields[0].type, target, casttype);
+}
+
 function unifySimples(
   e: Expr,
   source: SimpleT,
@@ -181,10 +256,10 @@ function unifySimples(
     );
   }
 
-  if (target.kind === "any") {
+  if (target.kind === "anyscalar") {
     return source;
   }
-  if (source.kind === "any") {
+  if (source.kind === "anyscalar") {
     return target;
   } else if (source.kind === "nullable") {
     if (target.kind === "nullable") {
@@ -366,15 +441,14 @@ function deriveNameFromExpr(expr: Expr): Name | null {
   }
 }
 
-export function doSelectFrom(
-  g: Global,
-  c: Context,
-  s: SelectFromStatement
-): SetT {
+export function doSelect(g: Global, c: Context, s: SelectStatement): SetT {
+  if (s.type !== "select") {
+    return notImplementedYet(s);
+  }
   const newC: Context = doFroms(g, c, s.from || []);
 
   if (s.where) {
-    const t = elabExpr(newC, s.where);
+    const t = elabExpr(g, newC, s.where);
     requireBoolean(s.where, t);
   }
 
@@ -382,7 +456,7 @@ export function doSelectFrom(
     (c: SelectedColumn): Field => {
       const n = c.alias ? c.alias : deriveNameFromExpr(c.expr);
 
-      const t = elabExpr(newC, c.expr);
+      const t = elabExpr(g, newC, c.expr);
 
       if (t.kind === "set") {
         throw new KindMismatch(c.expr, t, "Can only be scalar or array type");
@@ -453,7 +527,7 @@ export function doCreateFunction(
       const lastStatement = body[body.length - 1];
 
       if (lastStatement.type === "select") {
-        const res = doSelectFrom(g, contextForBody, lastStatement);
+        const res = doSelect(g, contextForBody, lastStatement);
         return {
           name,
           inputs,
@@ -549,8 +623,8 @@ export function printType(t: Type): string {
       return printType(t.typevar) + " | null";
     } else if (t.kind === "scalar") {
       return t.name.name;
-    } else if (t.kind === "any") {
-      return "any";
+    } else if (t.kind === "anyscalar") {
+      return "anyscalar";
     } else {
       return checkAllCasesHandled(t);
     }
@@ -609,12 +683,13 @@ export class TypeMismatch extends Error {
     ts: {
       expected: Type;
       actual: Type;
-    }
+    },
+    mess?: string
   ) {
     super(
       `
 TypeMismatch:
-${toSql.expr(e)}
+${toSql.expr(e)} ${mess ? ": " + mess : ""}
 
 Expected:
 ${JSON.stringify(ts.expected)}
@@ -685,7 +760,7 @@ function doSingleFrom(
     const newHandledFroms = newHandledFroms_.concat(newHandledFrom);
 
     if (f.join?.on) {
-      const t = elabExpr(mergeHandledFroms(c, newHandledFroms), f.join.on);
+      const t = elabExpr(g, mergeHandledFroms(c, newHandledFroms), f.join.on);
       requireBoolean(f.join.on, t);
     }
 
@@ -823,8 +898,8 @@ function isNotEmpty<A>(a: A | null | undefined): a is A {
   return a !== null && a !== undefined;
 }
 
-function elabUnaryOp(c: Context, e: ExprUnary): Type {
-  const t1 = elabExpr(c, e.operand);
+function elabUnaryOp(g: Global, c: Context, e: ExprUnary): Type {
+  const t1 = elabExpr(g, c, e.operand);
 
   if (t1.kind === "set") {
     throw new KindMismatch(e, t1, "Can't apply unary operator to set");
@@ -866,9 +941,9 @@ function elabUnaryOp(c: Context, e: ExprUnary): Type {
     return op.result;
   }
 }
-function elabBinaryOp(c: Context, e: ExprBinary): Type {
-  const t1 = elabExpr(c, e.left);
-  const t2 = elabExpr(c, e.right);
+function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
+  const t1 = elabExpr(g, c, e.left);
+  const t2 = elabExpr(g, c, e.right);
 
   if (t1.kind === "set" || t2.kind === "set") {
     return notImplementedYet(e);
@@ -926,8 +1001,8 @@ function elabBinaryOp(c: Context, e: ExprBinary): Type {
   }
 }
 
-function elabCall(c: Context, e: ExprCall): Type {
-  const argTypes = e.args.map((arg) => elabExpr(c, arg));
+function elabCall(g: Global, c: Context, e: ExprCall): Type {
+  const argTypes = e.args.map((arg) => elabExpr(g, c, arg));
 
   if (
     eqQNames(e.function, { name: "any" }) ||
@@ -944,7 +1019,7 @@ function elabCall(c: Context, e: ExprCall): Type {
     const unifiedT = unifySimples(
       e,
       t,
-      BuiltinTypeConstructors.Array(BuiltinTypes.Any),
+      BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar),
       "implicit"
     );
     if (unifiedT.kind !== "array") {
@@ -957,7 +1032,7 @@ function elabCall(c: Context, e: ExprCall): Type {
   throw notImplementedYet(e);
 }
 
-function elabExpr(c: Context, e: Expr): Type {
+function elabExpr(g: Global, c: Context, e: Expr): Type {
   if (e.type === "ref") {
     const t = elabRef(c, e);
     return t;
@@ -970,15 +1045,15 @@ function elabExpr(c: Context, e: Expr): Type {
   } else if (e.type === "string") {
     return BuiltinTypes.String;
   } else if (e.type === "unary") {
-    return elabUnaryOp(c, e);
+    return elabUnaryOp(g, c, e);
   } else if (e.type === "binary") {
-    return elabBinaryOp(c, e);
+    return elabBinaryOp(g, c, e);
   } else if (e.type === "null") {
-    return BuiltinTypes.Any;
+    return BuiltinTypes.AnyScalar;
   } else if (e.type === "numeric") {
     return BuiltinTypes.Numeric;
   } else if (e.type === "list" || e.type === "array") {
-    const typevars = e.expressions.map((subexpr) => elabExpr(c, subexpr));
+    const typevars = e.expressions.map((subexpr) => elabExpr(g, c, subexpr));
     const typevar = typevars.reduce((acc: SimpleT, t: Type) => {
       if (t.kind === "set") {
         throw new Error(
@@ -987,12 +1062,21 @@ function elabExpr(c: Context, e: Expr): Type {
       } else {
         return unifySimples(e, t, acc, "implicit");
       }
-    }, BuiltinTypes.Any);
+    }, BuiltinTypes.AnyScalar);
     return e.type === "list"
       ? BuiltinTypeConstructors.List(typevar)
       : BuiltinTypeConstructors.Array(typevar);
   } else if (e.type === "call") {
-    return elabCall(c, e);
+    return elabCall(g, c, e);
+  } else if (e.type === "array select") {
+    const selectType = doSelect(g, c, e.select);
+    const t = unifySetWithSimple(
+      e,
+      selectType,
+      BuiltinTypes.AnyScalar,
+      "implicit"
+    );
+    return BuiltinTypeConstructors.Array(t);
   } else {
     return notImplementedYet(e);
   }

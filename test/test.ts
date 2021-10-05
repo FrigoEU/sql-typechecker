@@ -9,6 +9,7 @@ import {
   SetT,
   ScalarT,
   SimpleT,
+  ArrayT,
 } from "../src/typecheck";
 
 // https://github.com/alsatian-test/alsatian/blob/master/packages/alsatian/README.md
@@ -65,10 +66,10 @@ function expectInputs(
   });
 }
 
-function expectReturnType(
+function expectReturnType<T>(
   setupStr: string,
   queryStr: string,
-  expectedReturnType: SetT | ScalarT | null
+  expectedReturnType: SetT | ScalarT | ArrayT<T> | null
 ) {
   testCreateFunction(setupStr, queryStr, (res) => {
     res.caseOf({
@@ -428,7 +429,6 @@ $$ LANGUAGE sql;
 
   @Test()
   public equalAnyMismatch() {
-    debugger;
     expectThrowLike(
       "create table testje ( id int not null, name text );",
       `
@@ -439,6 +439,61 @@ WHERE id = ANY(mylist)
 $$ LANGUAGE sql;
 `,
       "Can't apply operator"
+    );
+  }
+
+  @Test()
+  public arraySelect() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT ARRAY[1, 2]
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public arraySelectWithSubquery() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT ARRAY(SELECT id from testje)
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public arraySelectWithMulticolumnSubquery() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT ARRAY(SELECT id, name from testje)
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
     );
   }
 }

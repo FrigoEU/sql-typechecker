@@ -246,6 +246,9 @@ function unifySetWithSimple(
   return unifySimples(e, source.fields[0].type, target, casttype);
 }
 
+function canCastTo(e: Expr, source: SimpleT, target: SimpleT): boolean {}
+
+// Get the "biggest" type back, if implicit coersion is possible
 function unifySimples(
   e: Expr,
   source: SimpleT,
@@ -508,6 +511,8 @@ export function elabSelect(g: Global, c: Context, s: SelectStatement): SetT {
       (acc: SetT, t: SetT) => unifySets(s, acc, t, "implicit"),
       typesPerRow[0]
     );
+  } else if (s.type === "with") {
+    return notImplementedYet(s);
   } else {
     return notImplementedYet(s);
   }
@@ -777,46 +782,58 @@ function doSingleFrom(
   handledFroms: HandledFrom[],
   f: From
 ): HandledFrom[] {
-  if (f.type === "statement") {
-    return notImplementedYet(f);
-  } else if (f.type === "call") {
-    return notImplementedYet(f);
-  } else {
-    if ((f.name.columnNames || []).length > 0) {
-      notImplementedYet(f);
+  function getHandledFrom(f: From): HandledFrom {
+    if (f.type === "statement") {
+      const t = elabSelect(g, c, f.statement);
+      return {
+        name: {
+          name: f.alias,
+          _location: f._location,
+        },
+        rel: t,
+      };
+    } else if (f.type === "call") {
+      return notImplementedYet(f);
+    } else if (f.type === "table") {
+      if ((f.name.columnNames || []).length > 0) {
+        notImplementedYet(f);
+      }
+      const foundRel = findRel(g, f.name);
+      if (!foundRel) {
+        throw new UnknownIdentifier(f, f.name);
+      }
+      return {
+        name: {
+          name: f.name.alias || f.name.name,
+          _location: f.name._location,
+        },
+        rel: foundRel,
+      };
+    } else {
+      return checkAllCasesHandled(f);
     }
-    const foundRel = findRel(g, f.name);
-    if (!foundRel) {
-      throw new UnknownIdentifier(f, f.name);
-    }
-
-    const newHandledFrom = {
-      name: f.name.alias
-        ? {
-            name: f.name.alias,
-            _location: f.name._location,
-          }
-        : f.name,
-      rel:
-        f.join && (f.join.type === "FULL JOIN" || f.join.type === "LEFT JOIN")
-          ? nullifySet(foundRel)
-          : foundRel,
-    };
-
-    const newHandledFroms_ =
-      f.join && (f.join.type === "FULL JOIN" || f.join.type === "RIGHT JOIN")
-        ? handledFroms.map((fr) => ({ ...fr, rel: nullifySet(fr.rel) }))
-        : handledFroms;
-
-    const newHandledFroms = newHandledFroms_.concat(newHandledFrom);
-
-    if (f.join?.on) {
-      const t = elabExpr(g, mergeHandledFroms(c, newHandledFroms), f.join.on);
-      requireBoolean(f.join.on, t);
-    }
-
-    return newHandledFroms;
   }
+
+  const newHandledFrom_ = getHandledFrom(f);
+
+  const newHandledFrom =
+    f.join && (f.join.type === "FULL JOIN" || f.join.type === "LEFT JOIN")
+      ? { ...newHandledFrom_, rel: nullifySet(newHandledFrom_.rel) }
+      : newHandledFrom_;
+
+  const newHandledFroms_ =
+    f.join && (f.join.type === "FULL JOIN" || f.join.type === "RIGHT JOIN")
+      ? handledFroms.map((fr) => ({ ...fr, rel: nullifySet(fr.rel) }))
+      : handledFroms;
+
+  const newHandledFroms = newHandledFroms_.concat(newHandledFrom);
+
+  if (f.join?.on) {
+    const t = elabExpr(g, mergeHandledFroms(c, newHandledFroms), f.join.on);
+    requireBoolean(f.join.on, t);
+  }
+
+  return newHandledFroms;
 }
 function doFroms(g: Global, c: Context, froms: From[]): Context {
   const inFroms: HandledFrom[] = froms.reduce(function (
@@ -1242,8 +1259,31 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     e.type === "with recursive"
   ) {
     return elabSelect(g, c, e);
+  } else if (e.type === "ternary") {
+    const valueT = elabExpr(g, c, e.value);
+    const hiT = elabExpr(g, c, e.hi);
+    const loT = elabExpr(g, c, e.lo);
+    unify(e, valueT, loT, "implicit");
+    unify(e, valueT, hiT, "implicit");
+    return BuiltinTypes.Boolean;
+  } else if (e.type === "substring" || e.type === "overlay") {
+    const valueT = elabExpr(g, c, e.value);
+    unify(e.value, valueT, BuiltinTypes.Text, "implicit");
+    if (e.from) {
+      const fromT = elabExpr(g, c, e.from);
+      unify(e.from, fromT, BuiltinTypes.Integer, "implicit");
+    }
+    if (e.for) {
+      const forT = elabExpr(g, c, e.for);
+      unify(e.for, forT, BuiltinTypes.Integer, "implicit");
+    }
+    return BuiltinTypes.Text;
+  } else if (e.type === "constant") {
+    throw new Error("Haven't been able to simulate this yet");
+  } else if (e.type === "cast") {
+    return unif;
   } else {
-    return notImplementedYet(e);
+    return checkAllCasesHandled(e.type);
   }
 }
 

@@ -934,6 +934,7 @@ $$ LANGUAGE sql;
 
   @Test()
   public selectValues() {
+    debugger;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
@@ -947,6 +948,10 @@ $$ LANGUAGE sql;
           {
             name: null,
             type: BuiltinTypes.Integer,
+          },
+          {
+            name: null,
+            type: BuiltinTypes.Text,
           },
         ],
       }
@@ -976,6 +981,185 @@ $$ LANGUAGE sql;
   $$ LANGUAGE sql;
   `,
       "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public ternary() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id
+FROM testje
+WHERE id BETWEEN 2 AND 5
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
+      }
+    );
+  }
+
+  @Test()
+  public ternaryMismatch() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id
+FROM testje
+WHERE id BETWEEN 2 AND '5'
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public substring() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT SUBSTRING(name from 5 for 7) as name
+FROM testje
+WHERE id BETWEEN 2 AND 5
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [{ name: { name: "name" }, type: BuiltinTypes.Text }],
+      }
+    );
+  }
+
+  @Test()
+  public substringMismatch() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT SUBSTRING(name from 5 for 'b') as name
+FROM testje
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public cast() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id::int as id, name::text as name
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "name" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public operatorOnNullable1() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id + NULL as id
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public operatorOnNullable2() {
+    expectReturnType(
+      "create table testje ( id int );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id + 5 as id
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public operatorOnNullable3() {
+    expectReturnType(
+      "create table testje ( id int NOT NULL);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id + 5 as id
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public operatorOnNullable4() {
+    expectReturnType(
+      "create table testje ( id int NOT NULL, id2 int);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id + id2 as id
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
+          },
+        ],
+      }
     );
   }
 }

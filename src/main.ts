@@ -5,7 +5,7 @@ import {
   Global,
   notImplementedYet,
   parseSetupScripts,
-  printType,
+  showType,
 } from "./typecheck";
 
 go();
@@ -42,7 +42,7 @@ async function go() {
       console.log("Select:\n", sqlstr, "\n");
 
       const returnTypeAsString =
-        res.returns === null ? "void" : printType(res.returns);
+        res.returns === null ? "void" : showType(res.returns);
       console.log("Returns:\n", returnTypeAsString, "\n");
 
       return (
@@ -52,7 +52,7 @@ async function go() {
         "[" +
         res.inputs
           .map((k) => {
-            const paramTypeAsString = printType(k.type);
+            const paramTypeAsString = showType(k.type);
 
             console.log(`Param \$${k.name}:\n`, paramTypeAsString, "\n");
             return paramTypeAsString;

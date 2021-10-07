@@ -489,9 +489,39 @@ export function elabSelect(g: Global, c: Context, s: SelectStatement): SetT {
     const typeR = elabSelect(g, c, s.right);
     return unifySets(s, typeL, typeR, "implicit");
   } else if (s.type === "values") {
-    return notImplementedYet(s);
+    const typesPerRow: SetT[] = s.values.map((exprs) => {
+      const fields = exprs.map((exp) => {
+        const t_ = elabExpr(g, c, exp);
+        const t = toSimpleT(t_);
+        if (t === null) {
+          throw new CantReduceToSimpleT(exp, t_);
+        } else {
+          return { name: null, type: t };
+        }
+      });
+      return {
+        kind: "set",
+        fields: fields,
+      };
+    });
+    return typesPerRow.reduce(
+      (acc: SetT, t: SetT) => unifySets(s, acc, t, "implicit"),
+      typesPerRow[0]
+    );
   } else {
     return notImplementedYet(s);
+  }
+}
+
+function toSimpleT(t: Type): SimpleT | null {
+  if (t.kind === "set") {
+    if (t.fields.length === 1) {
+      return t.fields[0].type;
+    } else {
+      return null;
+    }
+  } else {
+    return t;
   }
 }
 
@@ -605,24 +635,21 @@ ${JSON.stringify(node)} @ ${node._location}`
 
 class UnknownField extends ErrorWithLocation {
   constructor(e: Expr, s: SetT, n: Name) {
-    super(
-      e._location,
-      `UnknownField ${n.name} @ ${showLocation(
-        n._location
-      )} in ${JSON.stringify(s)}`
-    );
+    super(e._location, `UnknownField ${n.name}`);
   }
 }
 export class UnknownIdentifier extends ErrorWithLocation {
   constructor(e: PGNode, m: QName) {
-    super(
-      e._location,
-      `UnknownIdentifier ${showQName(m)} @ ${showLocation(m._location)}`
-    );
+    super(e._location, `UnknownIdentifier ${showQName(m)}`);
+  }
+}
+export class CantReduceToSimpleT extends ErrorWithLocation {
+  constructor(e: PGNode, m: Type) {
+    super(e._location, `Can't reduce to simple type: ${showType(m)}`);
   }
 }
 
-export function printType(t: Type): string {
+export function showType(t: Type): string {
   if (t.kind === "set") {
     return (
       "{" +
@@ -630,16 +657,16 @@ export function printType(t: Type): string {
         .map(
           (f) =>
             (f.name === null ? `"?": ` : `"${f.name.name}": `) +
-            printType(f.type)
+            showType(f.type)
         )
         .join(", ") +
       "}"
     );
   } else {
     if (t.kind === "array") {
-      return "(" + printType(t.typevar) + ")" + "[]";
+      return "(" + showType(t.typevar) + ")" + "[]";
     } else if (t.kind === "nullable") {
-      return printType(t.typevar) + " | null";
+      return showType(t.typevar) + " | null";
     } else if (t.kind === "scalar") {
       return t.name.name;
     } else if (t.kind === "anyscalar") {
@@ -653,7 +680,7 @@ export class UnknownUnaryOp extends ErrorWithLocation {
   constructor(e: Expr, n: QName, t1: Type) {
     super(
       e._location,
-      `Can't apply unary operator "${showQName(n)}" to ${printType(t1)}`
+      `Can't apply unary operator "${showQName(n)}" to ${showType(t1)}`
     );
   }
 }
@@ -661,9 +688,9 @@ export class UnknownBinaryOp extends ErrorWithLocation {
   constructor(e: Expr, n: QName, t1: Type, t2: Type) {
     super(
       e._location,
-      `Can't apply operator "${showQName(n)}" to ${printType(
-        t1
-      )} and ${printType(t2)}`
+      `Can't apply operator "${showQName(n)}" to ${showType(t1)} and ${showType(
+        t2
+      )}`
     );
   }
 }
@@ -674,7 +701,7 @@ export class UnknownFunction extends ErrorWithLocation {
 }
 export class InvalidArguments extends ErrorWithLocation {
   constructor(e: Expr, n: QName, argTs: Type[]) {
-    const argsString = argTs.map((t) => printType(t)).join(", ");
+    const argsString = argTs.map((t) => showType(t)).join(", ");
     super(
       e._location,
       `Can't apply function "${showQName(n)}" to arguments: ${argsString}`
@@ -897,10 +924,11 @@ function isNotEmpty<A>(a: A | null | undefined): a is A {
 }
 
 function elabUnaryOp(g: Global, c: Context, e: ExprUnary): Type {
-  const t1 = elabExpr(g, c, e.operand);
+  const t1_ = elabExpr(g, c, e.operand);
 
-  if (t1.kind === "set") {
-    throw new KindMismatch(e, t1, "Can't apply unary operator to set");
+  const t1 = toSimpleT(t1_);
+  if (t1 === null) {
+    throw new CantReduceToSimpleT(e, t1_);
   }
 
   const found = builtinUnaryOperators
@@ -937,11 +965,17 @@ function elabUnaryOp(g: Global, c: Context, e: ExprUnary): Type {
   }
 }
 function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
-  const t1 = elabExpr(g, c, e.left);
-  const t2 = elabExpr(g, c, e.right);
+  const t1_ = elabExpr(g, c, e.left);
+  const t2_ = elabExpr(g, c, e.right);
 
-  if (t1.kind === "set" || t2.kind === "set") {
-    return notImplementedYet(e);
+  const t1 = toSimpleT(t1_);
+  const t2 = toSimpleT(t2_);
+
+  if (t1 === null) {
+    throw new CantReduceToSimpleT(e, t1_);
+  }
+  if (t2 === null) {
+    throw new CantReduceToSimpleT(e, t2_);
   }
 
   // Specific test on = NULL, because it's always False (I think?) and is a cause of a lot of bugs
@@ -1001,9 +1035,10 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     if (e.args.length !== 1) {
       throw new InvalidArguments(e, e.function, argTypes);
     }
-    const t = argTypes[0];
-    if (t.kind === "set") {
-      throw new InvalidArguments(e, e.function, [t]);
+    const t_ = argTypes[0];
+    const t = toSimpleT(t_);
+    if (t === null) {
+      throw new CantReduceToSimpleT(e.args[0], argTypes[0]);
     }
     const unifiedT = unifySimples(
       e,
@@ -1026,9 +1061,10 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     }
     const types: [Expr, SimpleT][] = e.args
       .map((arg) => [arg, elabExpr(g, c, arg)] as const)
-      .map(([arg, t]) => {
-        if (t.kind === "set") {
-          throw new InvalidArguments(e, e.function, [t]);
+      .map(([arg, t_]) => {
+        const t = toSimpleT(t_);
+        if (t === null) {
+          throw new CantReduceToSimpleT(arg, t_);
         } else {
           return [arg, t];
         }
@@ -1073,12 +1109,11 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
   } else if (e.type === "numeric") {
     return BuiltinTypes.Numeric;
   } else if (e.type === "list" || e.type === "array") {
-    const typevars = e.expressions.map((subexpr) => elabExpr(g, c, subexpr));
-    const typevar = typevars.reduce((acc: SimpleT, t: Type) => {
-      if (t.kind === "set") {
-        throw new Error(
-          `Can't have sets inside lists / arrays @ ${e._location} `
-        );
+    const typevar = e.expressions.reduce((acc: SimpleT, subexpr: Expr) => {
+      const t_ = elabExpr(g, c, subexpr);
+      const t = toSimpleT(t_);
+      if (t === null) {
+        throw new CantReduceToSimpleT(e, t_);
       } else {
         return unifySimples(e, t, acc, "implicit");
       }
@@ -1145,18 +1180,17 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
   } else if (e.type === "arrayIndex") {
     const arrayT = elabExpr(g, c, e.array);
     const indexT = elabExpr(g, c, e.index);
-    const unifiedArrayT = unify(
+    const unifiedArrayT_ = unify(
       e.array,
       arrayT,
       BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar),
       "implicit"
     );
     unify(e.array, indexT, BuiltinTypes.Integer, "implicit");
-    if (unifiedArrayT.kind === "set") {
-      throw new TypeMismatch(e.array, {
-        expected: arrayT,
-        actual: BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar),
-      });
+    const unifiedArrayT = toSimpleT(unifiedArrayT_);
+
+    if (unifiedArrayT === null) {
+      throw new CantReduceToSimpleT(e.array, unifiedArrayT_);
     } else {
       const unnulified = unnullify(unifiedArrayT);
       if (unnulified.kind !== "array") {

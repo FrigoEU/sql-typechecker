@@ -1,15 +1,16 @@
-import { Expect, FocusTest, Test, TestFixture } from "alsatian";
+import { Expect, Focus, IgnoreTest, Test, TestFixture } from "alsatian";
 import { Name, parse, QName } from "pgsql-ast-parser";
 import { Either, Left, Right } from "purify-ts";
 import {
-  BuiltinTypes,
+  ArrayT,
   BuiltinTypeConstructors,
+  BuiltinTypes,
   doCreateFunction,
   parseSetupScripts,
-  SetT,
   ScalarT,
+  SetT,
   SimpleT,
-  ArrayT,
+  Type,
 } from "../src/typecheck";
 
 // https://github.com/alsatian-test/alsatian/blob/master/packages/alsatian/README.md
@@ -23,7 +24,7 @@ function testCreateFunction(
       {
         name: QName;
         inputs: { name: Name; type: SimpleT }[];
-        returns: ScalarT | SetT | null;
+        returns: Type | null;
         multipleRows: boolean;
       }
     >
@@ -33,7 +34,7 @@ function testCreateFunction(
   const query = parse(queryStr);
   if (query[0].type === "create function") {
     try {
-      const res = doCreateFunction(g, { decls: [] }, query[0]);
+      const res = doCreateFunction(g, { decls: [], froms: [] }, query[0]);
       cont(Right(res));
     } catch (err) {
       cont(Left(err as Error));
@@ -121,13 +122,12 @@ $$ LANGUAGE sql;
           },
           {
             name: { name: "name" },
-            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.String),
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
           },
         ],
       }
     );
   }
-
   @Test()
   public alias() {
     expectReturnType(
@@ -169,7 +169,7 @@ $$ LANGUAGE sql;
         },
         {
           name: { name: "myname" },
-          type: BuiltinTypeConstructors.Nullable(BuiltinTypes.String),
+          type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ]
     );
@@ -191,7 +191,6 @@ $$ LANGUAGE sql;
   }
 
   @Test()
-  // @FocusTest
   public innerJoin() {
     expectReturnType(
       "create table testje ( id int not null, name text );",
@@ -215,7 +214,7 @@ $$ LANGUAGE sql;
           },
           {
             name: { name: "name" },
-            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.String),
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
           },
         ],
       }
@@ -223,7 +222,6 @@ $$ LANGUAGE sql;
   }
 
   @Test()
-  // @FocusTest
   public leftJoin() {
     expectReturnType(
       "create table testje ( id int not null, name text );",
@@ -251,7 +249,6 @@ $$ LANGUAGE sql;
   }
 
   @Test()
-  // @FocusTest
   public rightJoin() {
     expectReturnType(
       "create table testje ( id int not null, name text );",
@@ -290,6 +287,44 @@ JOIN testje AS testje2 ON testje.name = testje2.name
 $$ LANGUAGE sql;
 `,
       `AmbiguousIdentifier name`
+    );
+  }
+
+  @Test()
+  public selectStar() {
+    expectReturnType(
+      `
+create table testje ( id int not null, name text );
+create table testje2 ( id2 int not null, name2 text );
+`,
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT *
+FROM testje
+JOIN testje2 ON testje.id = testje2.id2
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "name" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+          {
+            name: { name: "id2" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "name2" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+        ],
+      }
     );
   }
 
@@ -493,6 +528,453 @@ CREATE FUNCTION myselect() RETURNS SETOF AS $$
 SELECT ARRAY(SELECT id, name from testje)
 $$ LANGUAGE sql;
 `,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public extract() {
+    expectReturnType(
+      "create table testje ( id int not null, mystamp timestamp not null);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT EXTRACT(DAY FROM mystamp)
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: BuiltinTypes.Numeric,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public extractError() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT EXTRACT(DAY FROM name)
+from testje
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public jsonMember() {
+    expectReturnType(
+      "create table testje ( id int not null, myjson json);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT myjson->'bleb'
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: BuiltinTypes.AnyScalar,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public jsonMemberError() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT name->'bleb'
+from testje
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public Coalesce() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT COALESCE(name, 'hello')
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: BuiltinTypes.Text,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public nullif() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT NULLIF(name, 'hello')
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public CoalesceMismatch() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT COALESCE(name, 2)
+from testje
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public keyword() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT CURRENT_TIMESTAMP
+from testje
+$$ LANGUAGE sql;
+`,
+      { kind: "set", fields: [{ name: null, type: BuiltinTypes.Timestamp }] }
+    );
+  }
+
+  @Test()
+  public arrayIndex() {
+    expectReturnType(
+      "create table testje ( id int not null, name text[]);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT name[1]
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public arrayIndexMismatch() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT name[1]
+from testje
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public caseWithValue() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT CASE name WHEN '' THEN 2 ELSE 5 END
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public caseWithValueMismatchedValues() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT CASE name WHEN 7 THEN 2 ELSE 5 END
+from testje
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public caseWithValueMismatchedReturns() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT CASE name WHEN '' THEN 2 ELSE 'bleb' END
+from testje
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public caseWithoutValue() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT CASE WHEN name = '' THEN 2 ELSE 5 END
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public caseWithoutValueMismatchedCondition() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT CASE WHEN name THEN 2 ELSE 5 END
+from testje
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public caseWithoutValueMismatchedReturns() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT CASE WHEN name = '' THEN 2 ELSE 'bleb' END
+from testje
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public selectExpr() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT (SELECT t2.id from testje as t2)
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public selectUnion() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id, name
+FROM testje
+UNION
+SELECT id + 1, name
+FROM testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "name" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public selectUnionAll() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id, name
+FROM testje
+UNION ALL
+SELECT id + 1, name
+FROM testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "name" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  @IgnoreTest("Haven't implemented column name resolution properly yet")
+  public fieldNameFromOperation() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id + 1
+FROM testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public selectUnionMismatch() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT id, name
+FROM testje
+UNION
+SELECT name
+FROM testje
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public selectValues() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT * FROM (VALUES (1, 'one'), (2, 'two')) AS vals
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public selectValuesMismatchLengths() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+  CREATE FUNCTION myselect() RETURNS SETOF AS $$
+  SELECT * FROM (VALUES (1, 'one'), (2)) AS vals
+  $$ LANGUAGE sql;
+  `,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public selectValuesMismatchTypes() {
+    expectThrowLike(
+      "create table testje ( id int not null, name text);",
+      `
+  CREATE FUNCTION myselect() RETURNS SETOF AS $$
+  SELECT * FROM (VALUES (1, 'one'), (2, 5)) AS vals
+  $$ LANGUAGE sql;
+  `,
       "TypeMismatch"
     );
   }

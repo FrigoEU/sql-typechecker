@@ -569,6 +569,20 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public extractErrorWithWrongCasting() {
+    expectThrowLike(
+      "create table testje ( id int not null, mytime time not null);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT EXTRACT(DAY FROM mytime)
+from testje
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
   public jsonMember() {
     expectReturnType(
       "create table testje ( id int not null, myjson json);",
@@ -934,7 +948,6 @@ $$ LANGUAGE sql;
 
   @Test()
   public selectValues() {
-    debugger;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
@@ -1030,7 +1043,35 @@ $$ LANGUAGE sql;
 `,
       {
         kind: "set",
-        fields: [{ name: { name: "name" }, type: BuiltinTypes.Text }],
+        fields: [
+          {
+            name: { name: "name" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public substringNotnullable() {
+    expectReturnType(
+      "create table testje ( id int not null, name text not null);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT SUBSTRING(name from 5 for 7) as name
+FROM testje
+WHERE id BETWEEN 2 AND 5
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "name" },
+            type: BuiltinTypes.Text,
+          },
+        ],
       }
     );
   }
@@ -1157,6 +1198,28 @@ $$ LANGUAGE sql;
           {
             name: { name: "id" },
             type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public unification() {
+    expectReturnType(
+      "create table testje ( id int NOT NULL, id2 int);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT CASE id WHEN 0 THEN 5 ELSE 6.5 END as mynumber
+FROM testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "mynumber" },
+            type: BuiltinTypes.Numeric,
           },
         ],
       }

@@ -1,12 +1,12 @@
 import { unaryOp } from "./typecheck";
 
 const builtinunaryoperatorsFromSyntax: unaryOp[] = [
-  {
-    name: { name: "IS NULL" },
-    operand: { kind: "nullable", typevar: { kind: "anyscalar" } },
-    result: { kind: "scalar", name: { name: "boolean" } },
-    description: "is NULL check",
-  },
+  // {
+  //   name: { name: "IS NULL" },
+  //   operand: { kind: "nullable", typevar: { kind: "anyscalar" } },
+  //   result: { kind: "scalar", name: { name: "boolean" } },
+  //   description: "is NULL check",
+  // },
 ];
 
 const builtinunaryoperatorsFromSchema: unaryOp[] = [

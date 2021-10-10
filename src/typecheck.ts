@@ -554,7 +554,7 @@ export function elabSelect(
   s: SelectStatement
 ): SetT | VoidT {
   if (s.type === "select") {
-    const newC: Context = doFroms(g, c, s.from || []);
+    const newC: Context = doFroms(g, c, s, s.from || []);
 
     if (s.where) {
       const t = elabExpr(g, newC, s.where);
@@ -570,7 +570,11 @@ export function elabSelect(
         if (t.fields.length === 0) {
           throw new KindMismatch(c.expr, t, "Set with no fields");
         } else if (t.fields.length === 1) {
-          return [{ name: n, type: t.fields[0].type }];
+          if (c.expr.type === "ref" && c.expr.name === "*") {
+            return t.fields;
+          } else {
+            return [{ name: n, type: t.fields[0].type }];
+          }
         } else {
           // AFAIK, * is the only way to introduce multiple fields with one expression
           if (c.expr.type === "ref" && c.expr.name === "*") {
@@ -827,16 +831,26 @@ export function doCreateFunction(
 type HandledFrom = { name: QName; rel: SetT };
 type Nullable<T> = T | null;
 
-function findRel(g: Global, n: QName): Nullable<SetT> {
-  const t = g.tables.find((t) => eqQNames(t.name, n));
-  if (t) {
-    return t.rel;
-  } else {
-    const v = g.views.find((v) => eqQNames(v.name, n));
-    if (v) {
-      return v.rel;
+function findRel(g: Global, c: Context, e: Expr, n: QName): Nullable<SetT> {
+  debugger;
+  const d = c.decls.find((d) => eqQNames(d.name, n));
+  if (d) {
+    if (d.type.kind === "set") {
+      return d.type;
     } else {
-      return null;
+      throw new KindMismatch(e, d.type, "Expecting a set or table");
+    }
+  } else {
+    const t = g.tables.find((t) => eqQNames(t.name, n));
+    if (t) {
+      return t.rel;
+    } else {
+      const v = g.views.find((v) => eqQNames(v.name, n));
+      if (v) {
+        return v.rel;
+      } else {
+        return null;
+      }
     }
   }
 }
@@ -1014,6 +1028,7 @@ function mergeHandledFroms(c: Context, handledFroms: HandledFrom[]): Context {
 function doSingleFrom(
   g: Global,
   c: Context,
+  e: Expr,
   handledFroms: HandledFrom[],
   f: From
 ): HandledFrom[] {
@@ -1040,7 +1055,7 @@ function doSingleFrom(
       if ((f.name.columnNames || []).length > 0) {
         notImplementedYet(f);
       }
-      const foundRel = findRel(g, f.name);
+      const foundRel = findRel(g, c, e, f.name);
       if (!foundRel) {
         throw new UnknownIdentifier(f, f.name);
       }
@@ -1077,12 +1092,12 @@ function doSingleFrom(
 
   return newHandledFroms;
 }
-function doFroms(g: Global, c: Context, froms: From[]): Context {
+function doFroms(g: Global, c: Context, e: Expr, froms: From[]): Context {
   const inFroms: HandledFrom[] = froms.reduce(function (
     acc: HandledFrom[],
     f: From
   ) {
-    return doSingleFrom(g, c, acc, f);
+    return doSingleFrom(g, c, e, acc, f);
   },
   []);
   return mergeHandledFroms(c, inFroms);
@@ -1099,13 +1114,23 @@ function lookupInSet(s: SetT, name: Name): SimpleT | null {
 
 function elabRef(c: Context, e: ExprRef): Type {
   if (e.name === "*") {
-    return {
-      kind: "set",
-      fields: c.froms.reduce(
-        (acc: Field[], from) => acc.concat(from.type.fields),
-        []
-      ),
-    };
+    const tab = e.table;
+    if (tab !== undefined) {
+      const found = c.froms.find((f) => eqQNames(f.name, tab));
+      if (!found) {
+        throw new UnknownIdentifier(e, tab);
+      } else {
+        return found.type;
+      }
+    } else {
+      return {
+        kind: "set",
+        fields: c.froms.reduce(
+          (acc: Field[], from) => acc.concat(from.type.fields),
+          []
+        ),
+      };
+    }
   } else {
     const tableName = e.table;
     if (tableName) {

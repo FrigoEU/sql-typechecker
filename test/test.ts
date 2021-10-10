@@ -330,6 +330,36 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public selectTableStar() {
+    expectReturnType(
+      `
+create table testje ( id int not null, name text );
+create table testje2 ( id2 int not null, name2 text );
+`,
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+SELECT testje2.*
+FROM testje
+JOIN testje2 ON testje.id = testje2.id2
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id2" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "name2" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public dontUseEqualNull() {
     expectThrowLike(
       "create table testje ( id int not null, name text );",
@@ -1292,6 +1322,25 @@ INSERT INTO testje (id) VALUES (default) RETURNING id;
 $$ LANGUAGE sql;
 `,
       "No default value provided"
+    );
+  }
+
+  @Test()
+  public with() {
+    expectReturnType(
+      "create table testje ( id int NOT NULL);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+WITH mycte AS (
+  SELECT id from testje
+)
+SELECT * from mycte
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
+      }
     );
   }
 }

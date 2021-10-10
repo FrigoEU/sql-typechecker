@@ -11,6 +11,7 @@ import {
   SetT,
   SimpleT,
   Type,
+  VoidT,
 } from "../src/typecheck";
 
 // https://github.com/alsatian-test/alsatian/blob/master/packages/alsatian/README.md
@@ -24,7 +25,7 @@ function testCreateFunction(
       {
         name: QName;
         inputs: { name: Name; type: SimpleT }[];
-        returns: Type | null;
+        returns: Type | VoidT;
         multipleRows: boolean;
       }
     >
@@ -70,7 +71,7 @@ function expectInputs(
 function expectReturnType<T>(
   setupStr: string,
   queryStr: string,
-  expectedReturnType: SetT | ScalarT | ArrayT<T> | null
+  expectedReturnType: SetT | ScalarT | ArrayT<T> | VoidT
 ) {
   testCreateFunction(setupStr, queryStr, (res) => {
     res.caseOf({
@@ -1223,6 +1224,74 @@ $$ LANGUAGE sql;
           },
         ],
       }
+    );
+  }
+
+  @Test()
+  public insert() {
+    expectReturnType(
+      "create table testje ( id int NOT NULL, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+INSERT INTO testje (id, name) VALUES (1, 'hello');
+$$ LANGUAGE sql;
+`,
+      { kind: "void" }
+    );
+  }
+
+  @Test()
+  public returning() {
+    expectReturnType(
+      "create table testje ( id int NOT NULL, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+INSERT INTO testje (id, name) VALUES (1, 'hello') RETURNING id;
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public default_() {
+    expectReturnType(
+      "create table testje ( id int NOT NULL default 5, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+INSERT INTO testje (id, name) VALUES (default, 'hello') RETURNING id;
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public defaultError() {
+    expectThrowLike(
+      "create table testje ( id int NOT NULL);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+INSERT INTO testje (id) VALUES (default) RETURNING id;
+$$ LANGUAGE sql;
+`,
+      "No default value provided"
     );
   }
 }

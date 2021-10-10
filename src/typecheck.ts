@@ -12,6 +12,7 @@ import {
   ExprRef,
   ExprUnary,
   From,
+  InsertStatement,
   Name,
   // astVisitor,
   NodeLocation,
@@ -42,6 +43,10 @@ export type ArrayT<T> = {
 export type ScalarT = {
   kind: "scalar";
   name: QName;
+};
+export type VoidT = {
+  // represents nothing, so zero rows, like when doing an INSERT without RETURNING
+  kind: "void";
 };
 export type SimpleT =
   | AnyScalarT
@@ -435,12 +440,15 @@ function castScalars(
 // Lexical scoping
 export type Context = {
   readonly froms: ReadonlyArray<{
+    // used in INSERT as well, name is not great
     readonly name: Name;
     readonly type: SetT;
   }>;
   readonly decls: ReadonlyArray<{
     readonly name: Name;
-    readonly type: Type;
+    readonly type:
+      | Type
+      | VoidT /* with statement can return bindings of type void */;
     // | ScalarT // declare bindings and function parameters
     // | ParametrizedT<ScalarT> // declare bindings and function parameters
     // | SetT; // with, (temp tables?)
@@ -539,7 +547,12 @@ function deriveNameFromExpr(expr: Expr): Name | null {
   }
 }
 
-export function elabSelect(g: Global, c: Context, s: SelectStatement): SetT {
+// WITH ... INSERT is also a SelectStatement. So this will return SetT or VoidT I think...
+export function elabSelect(
+  g: Global,
+  c: Context,
+  s: SelectStatement
+): SetT | VoidT {
   if (s.type === "select") {
     const newC: Context = doFroms(g, c, s.from || []);
 
@@ -577,6 +590,20 @@ export function elabSelect(g: Global, c: Context, s: SelectStatement): SetT {
   } else if (s.type === "union" || s.type === "union all") {
     const typeL = elabSelect(g, c, s.left);
     const typeR = elabSelect(g, c, s.right);
+    if (typeL.kind === "void") {
+      throw new KindMismatch(
+        s.left,
+        typeL,
+        "Can't union a statement that returns nothing"
+      );
+    }
+    if (typeR.kind === "void") {
+      throw new KindMismatch(
+        s.right,
+        typeR,
+        "Can't union a statement that returns nothing"
+      );
+    }
     return unifySets(s, typeL, typeR);
   } else if (s.type === "values") {
     const typesPerRow: SetT[] = s.values.map((exprs) => {
@@ -599,10 +626,123 @@ export function elabSelect(g: Global, c: Context, s: SelectStatement): SetT {
       typesPerRow[0]
     );
   } else if (s.type === "with") {
+    const resultingContext = s.bind.reduce((c, bind) => {
+      const t = elabStatement(g, c, bind.statement);
+      return {
+        ...c,
+        decls: c.decls.concat({
+          name: bind.alias,
+          type: t || { kind: "void" },
+        }),
+      };
+    }, c);
+    const res = elabStatement(g, resultingContext, s.in);
+    if (res.kind !== "void" && res.kind !== "set") {
+      return {
+        kind: "set",
+        fields: [
+          {
+            name: null,
+            type: res,
+          },
+        ],
+      };
+    } else {
+      return res;
+    }
+  } else if (s.type === "with recursive") {
     return notImplementedYet(s);
   } else {
-    return notImplementedYet(s);
+    return checkAllCasesHandled(s.type);
   }
+}
+
+function elabInsert(g: Global, c: Context, s: InsertStatement): VoidT | SetT {
+  const insertingInto: null | {
+    readonly name: QName;
+    readonly rel: SetT;
+    readonly defaults: Name[];
+  } = g.tables.find((t) => eqQNames(t.name, s.into)) || null;
+  if (!insertingInto) {
+    throw new UnknownIdentifier(s, s.into);
+  }
+
+  const nameToAddInContext = s.into.alias || s.into.name;
+  const newContext = {
+    ...c,
+    froms: c.froms.concat({
+      name: { name: nameToAddInContext },
+      type: insertingInto.rel,
+    }),
+  };
+
+  const columns: Field[] = s.columns
+    ? s.columns.map((c) => {
+        const foundField = insertingInto.rel.fields.find((f) => {
+          if (!f.name) {
+            throw new Error("Assertion error: Table field without name");
+          }
+          return eqQNames(c, f.name);
+        });
+        if (!foundField) {
+          throw new UnknownIdentifier(s, c);
+        }
+        return foundField;
+      })
+    : insertingInto.rel.fields;
+
+  const insertT = elabSelect(g, newContext, s.insert);
+
+  if (insertT.kind === "void") {
+    throw new ColumnsMismatch(s.insert, {
+      expected: columns.length,
+      actual: 0,
+    });
+  }
+
+  if (insertT.fields.length !== columns.length) {
+    throw new ColumnsMismatch(s.insert, {
+      expected: columns.length,
+      actual: insertT.fields.length,
+    });
+  }
+
+  insertT.fields.forEach((insertField, i) => {
+    const col = columns[i];
+    const hasDefault = !!insertingInto.defaults.find((defa) =>
+      eqQNames(defa, col.name! /* asserted non-nullability before */)
+    );
+    // somehow we need to know here that the insertField is coming from a DEFAULT expression
+    // Should this be a seperate type? Right now it's "anyscalar", but that's probably not correct. Having elabExpr return a default type will be a headache though...
+
+    cast(s.insert, insertField.type, col.type, "assignment");
+  });
+
+  if (s.returning) {
+    return {
+      kind: "set",
+      fields: s.returning.map((selectedCol) => {
+        const t_ = elabExpr(g, newContext, selectedCol.expr);
+        const t = toSimpleT(t_);
+        if (!t) {
+          throw new KindMismatch(
+            selectedCol.expr,
+            t_,
+            "Need simple type here, not a set"
+          );
+        } else {
+          return {
+            name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
+            type: t,
+          };
+        }
+      }),
+    };
+  } else {
+    return { kind: "void" };
+  }
+
+  // TODO: typecheck s.onConflict
 }
 
 function toSimpleT(t: Type): SimpleT | null {
@@ -624,7 +764,7 @@ export function doCreateFunction(
 ): {
   name: QName;
   inputs: { name: Name; type: SimpleT }[];
-  returns: Type | null;
+  returns: Type | VoidT;
   multipleRows: boolean;
 } {
   const name = s.name;
@@ -664,7 +804,7 @@ export function doCreateFunction(
       return {
         name,
         inputs,
-        returns: null,
+        returns: { kind: "void" },
         multipleRows: false,
       };
     } else {
@@ -726,7 +866,7 @@ ${JSON.stringify(node)} @ ${node._location}`
 }
 
 class UnknownField extends ErrorWithLocation {
-  constructor(e: Expr, s: SetT, n: Name) {
+  constructor(e: Expr, _s: SetT, n: Name) {
     super(e._location, `UnknownField ${n.name}`);
   }
 }
@@ -815,8 +955,16 @@ class AmbiguousIdentifier extends ErrorWithLocation {
     );
   }
 }
+class ColumnsMismatch extends ErrorWithLocation {
+  constructor(e: Expr, opts: { expected: number; actual: number }) {
+    super(
+      e._location,
+      `ColumnsMismatch: Expecting ${opts.expected} columns, got ${opts.actual} columns`
+    );
+  }
+}
 class KindMismatch extends ErrorWithLocation {
-  constructor(e: Expr, type: Type, errormsg: string) {
+  constructor(e: Expr, type: Type | VoidT, errormsg: string) {
     super(e._location, `KindMismatch: ${e}: ${type}: ${errormsg}}`);
   }
 }
@@ -872,6 +1020,13 @@ function doSingleFrom(
   function getHandledFrom(f: From): HandledFrom {
     if (f.type === "statement") {
       const t = elabSelect(g, c, f.statement);
+      if (t.kind === "void") {
+        throw new KindMismatch(
+          f.statement,
+          t,
+          "Can't bind a statement that returns void in a FROM statement"
+        );
+      }
       return {
         name: {
           name: f.alias,
@@ -977,7 +1132,7 @@ function elabRef(c: Context, e: ExprRef): Type {
       });
 
       const foundIdentifiers = mapPartial(c.decls, (t) => {
-        if (t.type.kind === "set") {
+        if (t.type.kind === "set" || t.type.kind === "void") {
           return null;
         } else {
           return t.name.name === e.name
@@ -1297,6 +1452,13 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     return elabCall(g, c, e);
   } else if (e.type === "array select") {
     const selectType = elabSelect(g, c, e.select);
+    if (selectType.kind === "void") {
+      throw new KindMismatch(
+        e.select,
+        selectType,
+        "Select in array select can't return void"
+      );
+    }
     const t = unifySetWithSimple(e, selectType, BuiltinTypes.AnyScalar);
     return BuiltinTypeConstructors.Array(t);
   } else if (e.type === "default") {
@@ -1444,7 +1606,15 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     e.type === "with" ||
     e.type === "with recursive"
   ) {
-    return elabSelect(g, c, e);
+    const t = elabSelect(g, c, e);
+    if (t.kind === "void") {
+      throw new KindMismatch(
+        e,
+        t,
+        "Select as an expression needs to return something"
+      );
+    }
+    return t;
   } else if (e.type === "ternary") {
     const valueT = elabExpr(g, c, e.value);
     const hiT = elabExpr(g, c, e.hi);
@@ -1482,7 +1652,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
   }
 }
 
-function elabStatement(g: Global, c: Context, s: Statement): null | Type {
+function elabStatement(g: Global, c: Context, s: Statement): VoidT | Type {
   if (
     s.type === "select" ||
     s.type === "union" ||
@@ -1492,6 +1662,8 @@ function elabStatement(g: Global, c: Context, s: Statement): null | Type {
     s.type === "values"
   ) {
     return elabExpr(g, c, s);
+  } else if (s.type === "insert") {
+    return elabInsert(g, c, s);
   } else {
     return notImplementedYet(s);
   }

@@ -6,6 +6,7 @@ import {
   CreateTableStatement,
   CreateViewStatement,
   DataTypeDef,
+  DeleteStatement,
   Expr,
   ExprBinary,
   ExprCall,
@@ -732,6 +733,54 @@ function elabInsert(g: Global, c: Context, s: InsertStatement): VoidT | SetT {
   }
 
   // TODO: typecheck s.onConflict
+}
+
+function elabDelete(g: Global, c: Context, s: DeleteStatement): VoidT | SetT {
+  const deletingFrom: null | {
+    readonly name: QName;
+    readonly rel: SetT;
+  } = g.tables.find((t) => eqQNames(t.name, s.from)) || null;
+
+  if (!deletingFrom) {
+    throw new UnknownIdentifier(s, s.from);
+  }
+  const nameToAddInContext = s.from.alias || s.from.name;
+  const newContext = {
+    ...c,
+    froms: c.froms.concat({
+      name: { name: nameToAddInContext },
+      type: deletingFrom.rel,
+    }),
+  };
+
+  if (s.where) {
+    const whereT = elabExpr(g, newContext, s.where);
+    cast(s.where, whereT, BuiltinTypes.Boolean, "implicit");
+  }
+
+  if (s.returning) {
+    return {
+      kind: "set",
+      fields: s.returning.map((selectedCol) => {
+        const t_ = elabExpr(g, newContext, selectedCol.expr);
+        const t = toSimpleT(t_);
+        if (!t) {
+          throw new KindMismatch(
+            selectedCol.expr,
+            t_,
+            "Need simple type here, not a set"
+          );
+        } else {
+          return {
+            name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
+            type: t,
+          };
+        }
+      }),
+    };
+  } else {
+    return { kind: "void" };
+  }
 }
 
 function toSimpleT(t: Type): SimpleT | null {
@@ -1674,6 +1723,8 @@ function elabStatement(g: Global, c: Context, s: Statement): VoidT | Type {
     return elabExpr(g, c, s);
   } else if (s.type === "insert") {
     return elabInsert(g, c, s);
+  } else if (s.type === "delete") {
+    return elabDelete(g, c, s);
   } else {
     return notImplementedYet(s);
   }

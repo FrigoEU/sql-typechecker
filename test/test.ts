@@ -1271,6 +1271,19 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public insertErro() {
+    expectThrowLike(
+      "create table testje ( id int NOT NULL, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF AS $$
+INSERT INTO testje (id, name) VALUES (1, 2);
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
   public returning() {
     expectReturnType(
       "create table testje ( id int NOT NULL, name text);",
@@ -1328,6 +1341,38 @@ $$ LANGUAGE sql;
         kind: "set",
         fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
       }
+    );
+  }
+
+  @Test()
+  public delete_() {
+    expectReturnType(
+      "create table testje ( id int NOT NULL);",
+      `
+CREATE FUNCTION mydelete() RETURNS SETOF AS $$
+DELETE FROM testje
+WHERE id = 5
+RETURNING id
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "set",
+        fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
+      }
+    );
+  }
+
+  @Test()
+  public deleteError() {
+    expectThrowLike(
+      "create table testje ( id int NOT NULL);",
+      `
+CREATE FUNCTION mydelete() RETURNS SETOF AS $$
+DELETE FROM testje
+WHERE id = ''
+$$ LANGUAGE sql;
+`,
+      "Can't apply operator"
     );
   }
 }

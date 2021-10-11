@@ -159,7 +159,7 @@ export type Global = {
   readonly tables: ReadonlyArray<{
     readonly name: QName;
     readonly rel: SetT;
-    readonly defaults: Name[];
+    // readonly defaults: Name[];
   }>;
   readonly views: ReadonlyArray<{
     readonly name: QName;
@@ -491,29 +491,21 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
     // so that's a bit more work. Not a huge amount though, just didnt do it yet
     return notImplementedYet(s);
   }
-  const [fields, defaults] = s.columns.reduce(
-    function (acc: [Field[], Name[]], c) {
-      if (c.kind === "like table") {
-        const targetTable = c.like;
-        const found = g.tables.find((t) => eqQNames(t.name, targetTable));
-        if (!found) {
-          throw new UnknownIdentifier(c.like, targetTable);
-        }
-        return [acc[0].concat(found.rel.fields), acc[1].concat(found.defaults)];
-      } else {
-        return [
-          acc[0].concat({
-            name: c.name,
-            type: mkType(c.dataType, c.constraints || []),
-          }),
-          (c.constraints || []).some((c) => c.type === "default")
-            ? acc[1].concat(c.name)
-            : acc[1],
-        ];
+  const fields = s.columns.reduce(function (acc: Field[], c) {
+    if (c.kind === "like table") {
+      const targetTable = c.like;
+      const found = g.tables.find((t) => eqQNames(t.name, targetTable));
+      if (!found) {
+        throw new UnknownIdentifier(c.like, targetTable);
       }
-    },
-    [[], []]
-  );
+      return acc.concat(found.rel.fields);
+    } else {
+      return acc.concat({
+        name: c.name,
+        type: mkType(c.dataType, c.constraints || []),
+      });
+    }
+  }, []);
   return {
     ...g,
     tables: g.tables.concat({
@@ -522,7 +514,6 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
         kind: "set",
         fields,
       },
-      defaults,
     }),
   };
 }
@@ -665,7 +656,6 @@ function elabInsert(g: Global, c: Context, s: InsertStatement): VoidT | SetT {
   const insertingInto: null | {
     readonly name: QName;
     readonly rel: SetT;
-    readonly defaults: Name[];
   } = g.tables.find((t) => eqQNames(t.name, s.into)) || null;
   if (!insertingInto) {
     throw new UnknownIdentifier(s, s.into);
@@ -713,11 +703,6 @@ function elabInsert(g: Global, c: Context, s: InsertStatement): VoidT | SetT {
 
   insertT.fields.forEach((insertField, i) => {
     const col = columns[i];
-    const hasDefault = !!insertingInto.defaults.find((defa) =>
-      eqQNames(defa, col.name! /* asserted non-nullability before */)
-    );
-    // somehow we need to know here that the insertField is coming from a DEFAULT expression
-    // Should this be a seperate type? Right now it's "anyscalar", but that's probably not correct. Having elabExpr return a default type will be a headache though...
 
     cast(s.insert, insertField.type, col.type, "assignment");
   });

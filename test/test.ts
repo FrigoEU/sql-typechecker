@@ -1313,19 +1313,6 @@ $$ LANGUAGE sql;
   }
 
   @Test()
-  public defaultError() {
-    expectThrowLike(
-      "create table testje ( id int NOT NULL);",
-      `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
-INSERT INTO testje (id) VALUES (default) RETURNING id;
-$$ LANGUAGE sql;
-`,
-      "No default value provided"
-    );
-  }
-
-  @Test()
   public with() {
     expectReturnType(
       "create table testje ( id int NOT NULL);",

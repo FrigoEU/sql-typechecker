@@ -9,7 +9,7 @@
     "check": "tsc -p . --noEmit",
     "build": "node esbuild.js",
     "test": "alsatian ./test/**/*.ts",
-    "start": "npm run build && node --enable-source-maps ./out/main.js ",
+    "start": "npm run build && node --enable-source-maps ./out/main.js ./sample -o ./sample/out.ts",
     "debug": "npm run build && node --inspect-brk --enable-source-maps ./out/main.js ",
     "test_debug": "node --inspect-brk ./node_modules/alsatian/dist/cli/alsatian-cli.js ./test/**/*.ts -t 20000000"
   },

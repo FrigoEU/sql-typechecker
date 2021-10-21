@@ -1,88 +1,165 @@
 import * as fs from "fs/promises";
-import { parse, QName, Statement } from "pgsql-ast-parser";
+import * as path from "path";
+import { CreateFunctionStatement, parse, Statement } from "pgsql-ast-parser";
 import {
+  checkAllCasesHandled,
   doCreateFunction,
-  Global,
-  notImplementedYet,
+  functionType,
   parseSetupScripts,
   showType,
+  Type,
 } from "./typecheck";
 
 go();
 
-function printQName(qname: QName): string {
-  return qname.name;
+async function findSqlFiles(dir: string): Promise<string[]> {
+  const inThisDir = await fs.readdir(dir);
+  const res: string[] = [];
+  for (let p of inThisDir) {
+    const fullP = path.join(dir, p);
+    if (fullP.endsWith(".sql")) {
+      res.push(fullP);
+    } else {
+      const stat = await fs.stat(fullP);
+      if (stat.isDirectory()) {
+        const inSubFolder = await findSqlFiles(fullP);
+        res.push(...inSubFolder);
+      } else {
+        // not a sql file, not a directory
+      }
+    }
+  }
+  return res;
+}
+
+function isCreateFunctionStatement(
+  st: Statement
+): st is CreateFunctionStatement {
+  return st.type === "create function";
+}
+
+export function showTypeAsTypescriptType(t: Type): string {
+  if (t.kind === "set") {
+    return (
+      "{" +
+      t.fields
+        .map(
+          (f) =>
+            (f.name === null ? `"?": ` : `"${f.name.name}": `) +
+            showTypeAsTypescriptType(f.type)
+        )
+        .join(", ") +
+      "}"
+    );
+  } else {
+    if (t.kind === "array") {
+      return "(" + showTypeAsTypescriptType(t.typevar) + ")" + "[]";
+    } else if (t.kind === "nullable") {
+      return showTypeAsTypescriptType(t.typevar) + " | null";
+    } else if (t.kind === "scalar") {
+      if (["numeric", "integer", "real", "double"].includes(t.name.name)) {
+        return "number";
+      } else if (
+        ["text", "name", "char", "character", "varchar", "nvarchar"].includes(
+          t.name.name
+        )
+      ) {
+        return "string";
+      } else {
+        return t.name.name;
+      }
+    } else if (t.kind === "anyscalar") {
+      return "anyscalar";
+    } else {
+      return checkAllCasesHandled(t);
+    }
+  }
+}
+
+function functionToTypescript(f: functionType): string {
+  const returnTypeAsString =
+    f.returns.kind === "void"
+      ? "void"
+      : showTypeAsTypescriptType(f.returns) + "[]";
+
+  const argsType =
+    "{" +
+    f.inputs
+      .map((k) => {
+        const paramTypeAsString = showTypeAsTypescriptType(k.type);
+
+        // console.log(`Param \$${k.name.name}:\n`, paramTypeAsString, "\n");
+        return k.name.name + ": " + paramTypeAsString;
+      })
+      .join(", ") +
+    "}";
+
+  const argsAsList = f.inputs
+    .map((i) => "${args." + i.name.name + "}")
+    .join(", ");
+
+  return `
+export function ${f.name.name}(pg: postgres.Sql<any>, args: ${argsType}): Promise<${returnTypeAsString}>{
+return pg\`select ${f.name.name}(${argsAsList})\`;
+}
+`;
 }
 
 async function go() {
-  const f = await fs.readFile("./test.sql", "utf-8");
-
-  const ast: Statement[] = parse(f);
-
-  // console.log("Parsed AST:\n", JSON.stringify(ast, null, 2), "\n");
-
-  const g = parseSetupScripts(ast);
-
-  // console.log("Global:\n", JSON.stringify(g, null, 2), "\n");
-
-  const f2 = await fs.readFile("./test.ts", "utf-8");
-
-  function genTypes(g: Global, sqlstr: string): string {
-    const ast: Statement[] = parse(sqlstr);
-
-    if (ast.length === 0) {
-      throw new Error("No SQL statement found inside 'safesql'");
-    }
-    if (ast.length > 1) {
-      throw new Error("More than 1 SQL statement inside 'safesql'");
-    }
-    const st = ast[0];
-    if (st.type === "create function") {
-      const res = doCreateFunction(g, { decls: [] }, st);
-      console.log("Select:\n", sqlstr, "\n");
-
-      const returnTypeAsString =
-        res.returns === null ? "void" : showType(res.returns);
-      console.log("Returns:\n", returnTypeAsString, "\n");
-
-      return (
-        "<" +
-        returnTypeAsString +
-        ", " +
-        "[" +
-        res.inputs
-          .map((k) => {
-            const paramTypeAsString = showType(k.type);
-
-            console.log(`Param \$${k.name}:\n`, paramTypeAsString, "\n");
-            return paramTypeAsString;
-          })
-          .join(", ") +
-        "]"
-      );
-    } else if (st.type === "union" || st.type === "union all") {
-      return notImplementedYet(st);
-    } else if (st.type === "with") {
-      return notImplementedYet(st);
-    } else if (st.type === "with recursive") {
-      return notImplementedYet(st);
-    } else if (st.type === "values") {
-      return notImplementedYet(st);
-    } else {
-      return notImplementedYet(st);
-    }
+  const dir = process.argv[2];
+  if (!dir) {
+    throw new Error("Please provide directory with SQL files");
   }
 
-  function doReplacement(sqlstr: string) {
-    return `safesql<${genTypes(g, sqlstr)}>(\`${sqlstr}\``;
+  const outArg = findOutArg(process.argv);
+  if (!outArg) {
+    throw new Error("Please provide -o/--out parameter");
+  }
+  const allSqlFiles = await findSqlFiles(path.resolve(process.cwd(), dir));
+
+  // console.log(`Processing files: ${allSqlFiles.join(", ")}`);
+
+  const allStatements: Statement[] = [];
+  for (let sqlFile of allSqlFiles) {
+    console.log("Processing file ${sqlFile}");
+    const fileContents = await fs.readFile(sqlFile, "utf-8");
+    const statements: Statement[] = parse(fileContents);
+    allStatements.push(...statements);
   }
 
-  const newf2 = f2.replace(
-    /safesql(?:<[^>]*>)?\(\s*`([^`]*)`/g,
-    function (match, sqlstr) {
-      return doReplacement(sqlstr);
-    }
+  console.log(`Processing ${allStatements.length} statements`);
+
+  const g = parseSetupScripts(allStatements);
+
+  console.log("Global:\n", JSON.stringify(g, null, 2), "\n");
+
+  const createFunctionStatements = allStatements.filter(
+    isCreateFunctionStatement
   );
 
-  await fs.writeFile("./test-genned.ts", newf2, "utf-8");
+  const outfile = await prepOutFile(path.resolve(process.cwd(), outArg));
+
+  for (let st of createFunctionStatements) {
+    const res = doCreateFunction(g, { decls: [], froms: [] }, st);
+    const writing = functionToTypescript(res);
+    console.log(`Writing: ${writing}`);
+    await fs.appendFile(outfile, writing, "utf-8");
+  }
+}
+
+async function prepOutFile(path: string): Promise<string> {
+  // const stat = await fs.stat(path);
+  // if (!stat.isFile)
+  // await fs.truncate(path);
+  await fs.writeFile(path, `import postgres from "postgres";\n`, "utf-8");
+  return path;
+}
+
+function findOutArg(args: string[]): string | null {
+  const flagIndex = args.findIndex((arg) => arg === "-o" || arg === "--out");
+  if (!flagIndex) {
+    return null;
+  } else {
+    return args[flagIndex + 1] || null;
+  }
 }

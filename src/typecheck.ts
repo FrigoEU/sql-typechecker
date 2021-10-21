@@ -546,7 +546,7 @@ export function elabSelect(
   s: SelectStatement
 ): SetT | VoidT {
   if (s.type === "select") {
-    const newC: Context = doFroms(g, c, s, s.from || []);
+    const newC: Context = addFromsToScope(g, c, s, s.from || []);
 
     if (s.where) {
       const t = elabExpr(g, newC, s.where);
@@ -795,16 +795,18 @@ function toSimpleT(t: Type): SimpleT | null {
   }
 }
 
-export function doCreateFunction(
-  g: Global,
-  c: Context,
-  s: CreateFunctionStatement
-): {
+export type functionType = {
   name: QName;
   inputs: { name: Name; type: SimpleT }[];
   returns: Type | VoidT;
   multipleRows: boolean;
-} {
+};
+
+export function doCreateFunction(
+  g: Global,
+  c: Context,
+  s: CreateFunctionStatement
+): functionType {
   const name = s.name;
   if (!s.language) {
     throw new Error(
@@ -1126,7 +1128,12 @@ function doSingleFrom(
 
   return newHandledFroms;
 }
-function doFroms(g: Global, c: Context, e: Expr, froms: From[]): Context {
+function addFromsToScope(
+  g: Global,
+  c: Context,
+  e: Expr,
+  froms: From[]
+): Context {
   const inFroms: HandledFrom[] = froms.reduce(function (
     acc: HandledFrom[],
     f: From
@@ -1776,7 +1783,7 @@ function unnullify(s: SimpleT): SimpleT {
   }
 }
 
-function checkAllCasesHandled(_: never): any {
+export function checkAllCasesHandled(_: never): any {
   throw new Error("Oops didn't expect that");
 }
 

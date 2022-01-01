@@ -1,5 +1,5 @@
 {
-  "main": "index.tsx",
+  "main": "out/index.js",
   "dependencies": {
     "pgsql-ast-parser": "frigoeu/pgsql-ast-parser#plpgsql",
     "purify-ts": "^1.0.0",
@@ -9,17 +9,16 @@
     "check": "tsc -p . --noEmit",
     "build": "node esbuild.js",
     "test": "alsatian ./test/**/*.ts",
-    "start": "npm run build && node --enable-source-maps ./out/main.js ./sample -o ./sample/out.ts",
-    "debug": "npm run build && node --inspect-brk --enable-source-maps ./out/main.js ",
+    "start": "npm run build && node --enable-source-maps ./out/index.js ./sample -o ./sample/out.ts",
+    "start_school": "npm run build && node --enable-source-maps ./out/index.js ./school -o ./school/out.ts",
+    "debug": "npm run build && node --inspect-brk --enable-source-maps ./out/index.js ",
     "test_debug": "node --inspect-brk ./node_modules/alsatian/dist/cli/alsatian-cli.js ./test/**/*.ts -t 20000000"
   },
   "devDependencies": {
-    "@swc/core": "^1.2.92",
-    "@swc/helpers": "^0.2.13",
     "@types/node": "^14.14.10",
+    "@types/prettier": "^2.4.2",
     "alsatian": "^3.2.1",
     "esbuild": "0.8.34",
-    "prettier": "2.2.1",
-    "ts-node": "github:TypeStrong/ts-node#main"
+    "prettier": "2.2.1"
   }
 }

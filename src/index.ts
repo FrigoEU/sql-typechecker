@@ -6,9 +6,11 @@ import {
   doCreateFunction,
   functionType,
   parseSetupScripts,
+  showSqlType,
   showType,
   Type,
 } from "./typecheck";
+import * as prettier from "prettier";
 
 go();
 
@@ -57,7 +59,11 @@ export function showTypeAsTypescriptType(t: Type): string {
     } else if (t.kind === "nullable") {
       return showTypeAsTypescriptType(t.typevar) + " | null";
     } else if (t.kind === "scalar") {
-      if (["numeric", "integer", "real", "double"].includes(t.name.name)) {
+      if (
+        ["numeric", "bigint", "smallint", "integer", "real", "double"].includes(
+          t.name.name
+        )
+      ) {
         return "number";
       } else if (
         ["text", "name", "char", "character", "varchar", "nvarchar"].includes(
@@ -65,6 +71,8 @@ export function showTypeAsTypescriptType(t: Type): string {
         )
       ) {
         return "string";
+      } else if (["bytea"].includes(t.name.name)) {
+        return "Buffer";
       } else {
         return t.name.name;
       }
@@ -98,9 +106,21 @@ function functionToTypescript(f: functionType): string {
     .map((i) => "${args." + i.name.name + "}")
     .join(", ");
 
+  const argsForCreateFunction = f.inputs
+    .map((k) => k.name.name + showSqlType(k.type))
+    .join(", ");
+
   return `
-export function ${f.name.name}(pg: postgres.Sql<any>, args: ${argsType}): Promise<${returnTypeAsString}>{
+export function ${
+    f.name.name
+  }(pg: postgres.Sql<any>, args: ${argsType}): Promise<${returnTypeAsString}>{
 return pg\`select ${f.name.name}(${argsAsList})\`;
+/*
+CREATE FUNCTION ${f.name.name}(${argsForCreateFunction}) RETURNS ${
+    f.multipleRows ? "SETOF " : ""
+  }__todo__ AS
+$$${f.code}$$ LANGUAGE ${f.language};
+*/
 }
 `;
 }
@@ -131,7 +151,7 @@ async function go() {
 
   const g = parseSetupScripts(allStatements);
 
-  console.log("Global:\n", JSON.stringify(g, null, 2), "\n");
+  // console.log("Global:\n", JSON.stringify(g, null, 2), "\n");
 
   const createFunctionStatements = allStatements.filter(
     isCreateFunctionStatement
@@ -141,8 +161,10 @@ async function go() {
 
   for (let st of createFunctionStatements) {
     const res = doCreateFunction(g, { decls: [], froms: [] }, st);
-    const writing = functionToTypescript(res);
-    console.log(`Writing: ${writing}`);
+    const writing = prettier.format(functionToTypescript(res), {
+      parser: "typescript",
+    });
+    // console.log(`Writing: ${writing}`);
     await fs.appendFile(outfile, writing, "utf-8");
   }
 }

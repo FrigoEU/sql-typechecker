@@ -25,6 +25,7 @@ import {
   Statement,
   toSql,
 } from "pgsql-ast-parser";
+import { builtincasts } from "./builtincasts";
 import { builtinoperators } from "./builtinoperators";
 import { builtinUnaryOperators } from "./builtinunaryoperators";
 
@@ -391,7 +392,7 @@ function unifySimples(e: Expr, source: SimpleT, target: SimpleT): SimpleT {
 // * In Assignment: (Only) in insert/update statements, when trying to "fit" data into table columns
 // * Explicit: can happen when explicitely calling the CAST function
 //
-type CastType = "implicit" | "assignment" | "explicit";
+export type CastType = "implicit" | "assignment" | "explicit";
 function castScalars(
   e: Expr,
   source: ScalarT,
@@ -400,23 +401,7 @@ function castScalars(
 ): void {
   // list casts = \dC+
 
-  const casts: { source: ScalarT; target: ScalarT; type: CastType }[] = [
-    {
-      source: BuiltinTypes.Smallint,
-      target: BuiltinTypes.Integer,
-      type: "implicit",
-    },
-    {
-      source: BuiltinTypes.Integer,
-      target: BuiltinTypes.Bigint,
-      type: "implicit",
-    },
-    {
-      source: BuiltinTypes.Integer,
-      target: BuiltinTypes.Numeric,
-      type: "implicit",
-    },
-  ];
+  const casts = builtincasts;
 
   if (eqQNames(source.name, target.name)) {
     return;
@@ -427,13 +412,15 @@ function castScalars(
         eqQNames(c.target.name, target.name) &&
         // Implicit casts can always be done explicitly as well
         // Not the other way around: some casts are dangerous so you need to ASK for them
-        (c.type === type || (c.type === "implicit" && type === "explicit"))
+        (c.type === type ||
+          (c.type === "implicit" && type === "assignment") ||
+          (c.type === "implicit" && type === "explicit"))
     );
     if (matchingCast) {
       // ok
       return;
     } else {
-      throw new TypeMismatch(e, { expected: source, actual: target });
+      throw new TypeMismatch(e, { expected: target, actual: source });
     }
   }
 }
@@ -460,22 +447,39 @@ export function notImplementedYet(node: PGNode | null): any {
   throw new NotImplementedYet(node);
 }
 
+function normalizeTypeName(s: string): string {
+  if (s === "int8") {
+    return "bigint";
+  }
+  if (s === "int" || s === "int4") {
+    return "integer";
+  }
+  if (s === "int2") {
+    return "smallint";
+  }
+  if (s === "decimal") {
+    return "numeric";
+  }
+  if (s === "bool") {
+    return "boolean";
+  }
+  return s;
+}
+
 function mkType(t: DataTypeDef, cs: ColumnConstraint[]): SimpleT {
-  const mapTypenames: { [n: string]: ScalarT } = {
-    int: BuiltinTypes.Integer,
-  };
   if (t.kind === "array") {
     if (t.arrayOf.kind === "array") {
       throw new Error("Array or array not supported");
     } else {
-      return BuiltinTypeConstructors.Array(
-        mapTypenames[t.arrayOf.name] || { kind: "scalar", name: t.arrayOf }
-      );
+      return BuiltinTypeConstructors.Array({
+        kind: "scalar",
+        name: { ...t.arrayOf, name: normalizeTypeName(t.arrayOf.name) },
+      });
     }
   } else {
-    const t_: ScalarT = mapTypenames[t.name] || {
+    const t_: ScalarT = {
       kind: "scalar",
-      name: t,
+      name: { ...t, name: normalizeTypeName(t.name) },
     };
 
     const notnullable = cs.some(
@@ -522,7 +526,8 @@ function doCreateView(
   _g: Global,
   s: CreateViewStatement | CreateMaterializedViewStatement
 ): Global {
-  return notImplementedYet(s);
+  return _g;
+  // return notImplementedYet(s);
 }
 function doAlterTable(_g: Global, s: AlterTableStatement): Global {
   return notImplementedYet(s);
@@ -800,6 +805,8 @@ export type functionType = {
   inputs: { name: Name; type: SimpleT }[];
   returns: Type | VoidT;
   multipleRows: boolean;
+  code: string;
+  language: string;
 };
 
 export function doCreateFunction(
@@ -810,7 +817,7 @@ export function doCreateFunction(
   const name = s.name;
   if (!s.language) {
     throw new Error(
-      "Please provide name for function at " + showLocation(s._location)
+      "Please provide language for function at " + showLocation(s._location)
     );
   }
   if (s.language && s.language.name.toLowerCase() === "sql") {
@@ -825,8 +832,10 @@ export function doCreateFunction(
         name: arg.name,
         type: mkType(
           arg.type,
+          // !!!!!!!!!!!!
           // Default rule of THIS typechecker:  params are NOT NULL
           // , unless defined as eg: (myname int default null)
+          // !!!!!!!!!!!!
           arg.default && arg.default.type === "null"
             ? []
             : [{ type: "not null" }]
@@ -846,6 +855,8 @@ export function doCreateFunction(
         inputs,
         returns: { kind: "void" },
         multipleRows: false,
+        code: s.code,
+        language: s.language.name,
       };
     } else {
       // TODO check rest of body for type errors
@@ -857,6 +868,8 @@ export function doCreateFunction(
         inputs,
         returns: returnType,
         multipleRows: true, // todo
+        code: s.code,
+        language: s.language.name,
       };
     }
   } else {
@@ -958,6 +971,32 @@ export function showType(t: Type): string {
     }
   }
 }
+export function showSqlType(t: Type): string {
+  if (t.kind === "set") {
+    return (
+      "{" +
+      t.fields
+        .map(
+          (f) =>
+            (f.name === null ? `"?" ` : `"${f.name.name}" `) + showType(f.type)
+        )
+        .join(", ") +
+      "}"
+    );
+  } else {
+    if (t.kind === "array") {
+      return "(" + showSqlType(t.typevar) + ")" + "[]";
+    } else if (t.kind === "nullable") {
+      return showSqlType(t.typevar) + " DEFAULT NULL";
+    } else if (t.kind === "scalar") {
+      return t.name.name;
+    } else if (t.kind === "anyscalar") {
+      return "anyscalar";
+    } else {
+      return checkAllCasesHandled(t);
+    }
+  }
+}
 export class UnknownUnaryOp extends ErrorWithLocation {
   constructor(e: Expr, n: QName, t1: Type) {
     super(
@@ -1018,7 +1057,7 @@ class KindMismatch extends ErrorWithLocation {
     super(e._location, `KindMismatch: ${e}: ${type}: ${errormsg}}`);
   }
 }
-export class TypeMismatch extends Error {
+export class TypeMismatch extends ErrorWithLocation {
   constructor(
     e: Expr,
     ts: {
@@ -1028,6 +1067,7 @@ export class TypeMismatch extends Error {
     mess?: string
   ) {
     super(
+      e._location,
       `
 TypeMismatch:
 ${toSql.expr(e)} ${mess ? ": " + mess : ""}

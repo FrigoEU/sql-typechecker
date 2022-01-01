@@ -1,7 +1,7 @@
 const esbuild = require("esbuild");
 
 const buildServerOptions = {
-  entryPoints: ["src/main.ts"],
+  entryPoints: ["src/index.ts"],
   // define: {"process.env.NODE_ENV": "'development'"},
   bundle: true,
   jsxFactory: 'h',

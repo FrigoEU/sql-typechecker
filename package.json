@@ -1,17 +1,20 @@
 {
-  "main": "out/index.js",
+  "name": "sql-typechecker",
+  "version": "0.0.1",
+  "main": "out/cli.js",
+  "bin": "out/cli.js",
   "dependencies": {
     "pgsql-ast-parser": "frigoeu/pgsql-ast-parser#plpgsql",
-    "purify-ts": "^1.0.0",
-    "typescript": "4.4.3"
+    "prettier": "2.2.1"
   },
   "scripts": {
     "check": "tsc -p . --noEmit",
     "build": "node esbuild.js",
+    "install": "npm run build",
     "test": "alsatian ./test/**/*.ts",
-    "start": "npm run build && node --enable-source-maps ./out/index.js ./sample -o ./sample/out.ts",
-    "start_school": "npm run build && node --enable-source-maps ./out/index.js ./school -o ./school/out.ts",
-    "debug": "npm run build && node --inspect-brk --enable-source-maps ./out/index.js ",
+    "start": "npm run build && node --enable-source-maps ./out/cli.js ./sample -o ./sample/out.ts",
+    "start_school": "npm run build && node --enable-source-maps ./out/cli.js ./school -o ./school/out.ts",
+    "debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js ",
     "test_debug": "node --inspect-brk ./node_modules/alsatian/dist/cli/alsatian-cli.js ./test/**/*.ts -t 20000000"
   },
   "devDependencies": {
@@ -19,6 +22,7 @@
     "@types/prettier": "^2.4.2",
     "alsatian": "^3.2.1",
     "esbuild": "0.8.34",
-    "prettier": "2.2.1"
+    "purify-ts": "^1.0.0",
+    "typescript": "4.4.3"
   }
 }

@@ -4,7 +4,7 @@ export function getemailstosend(
   args: {}
 ): Promise<
   {
-    uw_id: bigint;
+    uw_id: number;
     uw_from: string;
     uw_replyto: string | null;
     uw_address: string;
@@ -44,7 +44,7 @@ $$ LANGUAGE sql;
 export function insertnewemailstatus(
   pg: postgres.Sql<any>,
   args: { uw_emailid: number; version: number; uw_status: string }
-): Promise<{ uw_emailid: bigint }[]> {
+): Promise<{ uw_emailid: number }[]> {
   return pg`select insertnewemailstatus(${args.uw_emailid}, ${args.version}, ${args.uw_status})`;
   /*
 CREATE FUNCTION insertnewemailstatus(uw_emailidinteger, versioninteger, uw_statustext) RETURNS SETOF __todo__ AS

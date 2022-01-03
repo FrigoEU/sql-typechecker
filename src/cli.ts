@@ -14,7 +14,7 @@ import * as prettier from "prettier";
 
 go();
 
-async function findSqlFiles(dir: string): Promise<string[]> {
+async function findSqlFilesInDir(dir: string): Promise<string[]> {
   const inThisDir = await fs.readdir(dir);
   const res: string[] = [];
   for (let p of inThisDir) {
@@ -24,7 +24,7 @@ async function findSqlFiles(dir: string): Promise<string[]> {
     } else {
       const stat = await fs.stat(fullP);
       if (stat.isDirectory()) {
-        const inSubFolder = await findSqlFiles(fullP);
+        const inSubFolder = await findSqlFilesInDir(fullP);
         res.push(...inSubFolder);
       } else {
         // not a sql file, not a directory
@@ -126,18 +126,28 @@ $$${f.code}$$ LANGUAGE ${f.language};
 }
 
 async function go() {
-  const dir = process.argv[2];
-  if (!dir) {
-    throw new Error("Please provide directory with SQL files");
-  }
-
-  const outArg = findOutArg(process.argv);
+  const outArgs = findInArgs({ argv: process.argv, flags: ["-o", "--out"] });
+  const outArg = outArgs[0];
   if (!outArg) {
     throw new Error("Please provide -o/--out parameter");
   }
-  const allSqlFiles = await findSqlFiles(path.resolve(process.cwd(), dir));
 
-  // console.log(`Processing files: ${allSqlFiles.join(", ")}`);
+  const dirs = findInArgs({ argv: process.argv, flags: ["-d", "--dir"] });
+  const files = findInArgs({ argv: process.argv, flags: ["-f", "--file"] });
+
+  const allSqlFiles = (
+    await Promise.all(
+      dirs.map((dir) => findSqlFilesInDir(path.resolve(process.cwd(), dir)))
+    )
+  )
+    .flat()
+    .concat(files);
+
+  if (allSqlFiles.length === 0) {
+    throw new Error(
+      "Please provide at least one SQL file with flags -f/--file or -d/--dir"
+    );
+  }
 
   const allStatements: Statement[] = [];
   for (let sqlFile of allSqlFiles) {
@@ -177,11 +187,14 @@ async function prepOutFile(path: string): Promise<string> {
   return path;
 }
 
-function findOutArg(args: string[]): string | null {
-  const flagIndex = args.findIndex((arg) => arg === "-o" || arg === "--out");
-  if (!flagIndex) {
-    return null;
-  } else {
-    return args[flagIndex + 1] || null;
+function findInArgs(opts: { argv: string[]; flags: string[] }): string[] {
+  let i = 0;
+  let res = [];
+  for (let arg of opts.argv) {
+    if (opts.flags.includes(arg) && opts.argv[i + 1]) {
+      res.push(opts.argv[i + 1]);
+    }
+    i = i + 1;
   }
+  return res;
 }

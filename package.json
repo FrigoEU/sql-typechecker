@@ -1,6 +1,6 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "main": "out/cli.js",
   "bin": "out/cli.js",
   "dependencies": {
@@ -12,8 +12,8 @@
     "build": "node esbuild.js",
     "install": "npm run build",
     "test": "alsatian ./test/**/*.ts",
-    "start": "npm run build && node --enable-source-maps ./out/cli.js ./sample -o ./sample/out.ts",
-    "start_school": "npm run build && node --enable-source-maps ./out/cli.js ./school -o ./school/out.ts",
+    "start": "npm run build && node --enable-source-maps ./out/cli.js -d ./sample -o ./sample/out.ts",
+    "start_school": "npm run build && node --enable-source-maps ./out/cli.js -d ./school -o ./school/out.ts",
     "debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js ",
     "test_debug": "node --inspect-brk ./node_modules/alsatian/dist/cli/alsatian-cli.js ./test/**/*.ts -t 20000000"
   },

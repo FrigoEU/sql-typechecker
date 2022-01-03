@@ -9,6 +9,7 @@ import {
   showSqlType,
   showType,
   Type,
+  SimpleT,
 } from "./typecheck";
 import * as prettier from "prettier";
 
@@ -88,7 +89,8 @@ function functionToTypescript(f: functionType): string {
   const returnTypeAsString =
     f.returns.kind === "void"
       ? "void"
-      : showTypeAsTypescriptType(f.returns) + "[]";
+      : showTypeAsTypescriptType(f.returns) +
+        (f.multipleRows ? "[]" : " | undefined");
 
   const argsType =
     "{" +
@@ -110,12 +112,37 @@ function functionToTypescript(f: functionType): string {
     .map((k) => k.name.name + showSqlType(k.type))
     .join(", ");
 
+  function showTypeDroppingNullable(t: SimpleT): string {
+    if (t.kind === "nullable") {
+      return showTypeDroppingNullable(t.typevar);
+    } else if (t.kind === "array") {
+      return showTypeDroppingNullable(t.typevar) + "[]";
+    } else if (t.kind === "anyscalar") {
+      return "anyscalar";
+    } else if (t.kind === "scalar") {
+      return t.name.name;
+    } else {
+      return "";
+    }
+  }
+
+  const asExpression =
+    f.returns.kind === "set"
+      ? ` AS ${f.name.name}(${f.returns.fields
+          .map(
+            (f) => (f.name?.name || "") + " " + showTypeDroppingNullable(f.type)
+          )
+          .join(", ")})`
+      : "";
+
   return `
 export function ${
     f.name.name
   }(pg: postgres.Sql<any>, args: ${argsType}): Promise<${returnTypeAsString}>{
-return pg\`select ${f.name.name}(${argsAsList})\`;
-/*
+return pg\`select ${f.name.name}(${argsAsList})${asExpression}\`${
+    f.multipleRows ? "" : "[0]"
+  };
+/* -- ORIGINAL --
 CREATE FUNCTION ${f.name.name}(${argsForCreateFunction}) RETURNS ${
     f.multipleRows ? "SETOF " : ""
   }__todo__ AS

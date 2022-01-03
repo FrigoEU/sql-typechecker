@@ -17,8 +17,8 @@ export function getemailstosend(
     uw_content: Buffer | null;
   }[]
 > {
-  return pg`select getemailstosend()`;
-  /*
+  return pg`select getemailstosend() AS getemailstosend(uw_id bigint, uw_from text, uw_replyto text, uw_address text, uw_addressee text, uw_subject text, uw_text text, uw_html text, uw_externalid text, uw_filename text, uw_content bytea)`;
+  /* -- ORIGINAL --
 CREATE FUNCTION getemailstosend() RETURNS SETOF __todo__ AS
 $$
   SELECT 
@@ -44,10 +44,10 @@ $$ LANGUAGE sql;
 export function insertnewemailstatus(
   pg: postgres.Sql<any>,
   args: { uw_emailid: number; version: number; uw_status: string }
-): Promise<{ uw_emailid: number }[]> {
-  return pg`select insertnewemailstatus(${args.uw_emailid}, ${args.version}, ${args.uw_status})`;
-  /*
-CREATE FUNCTION insertnewemailstatus(uw_emailidinteger, versioninteger, uw_statustext) RETURNS SETOF __todo__ AS
+): Promise<{ uw_emailid: number } | undefined> {
+  return pg`select insertnewemailstatus(${args.uw_emailid}, ${args.version}, ${args.uw_status}) AS insertnewemailstatus(uw_emailid bigint)`[0];
+  /* -- ORIGINAL --
+CREATE FUNCTION insertnewemailstatus(uw_emailidinteger, versioninteger, uw_statustext) RETURNS __todo__ AS
 $$
   INSERT INTO uw_email_statusses 
     (uw_emailid, uw_version, uw_status, uw_stamp, uw_islastversion) 

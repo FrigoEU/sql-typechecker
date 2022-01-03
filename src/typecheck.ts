@@ -850,6 +850,7 @@ export function doCreateFunction(
     const body = parse(s.code);
 
     if (body.length === 0) {
+      // empty function body
       return {
         name,
         inputs,
@@ -867,7 +868,7 @@ export function doCreateFunction(
         name,
         inputs,
         returns: returnType,
-        multipleRows: true, // todo
+        multipleRows: (s.returns && s.returns.setof) || false,
         code: s.code,
         language: s.language.name,
       };

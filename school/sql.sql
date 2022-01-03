@@ -956,7 +956,7 @@ CREATE TABLE uw_Payenrollment_onlinepayments(
     CONSTRAINT uw_Payenrollment_onlinepayments_EnrollmentOrRequest
     CHECK (((uw_enrollmentId IS NULL) AND (NOT (uw_enrollmentrequestId IS NULL))) OR ((uw_enrollmentrequestId IS NULL) AND (NOT (uw_enrollmentId IS NULL)))));
 
-CREATE OR REPLACE FUNCTION getEmailsToSend() RETURNS SETOF AS $$
+CREATE OR REPLACE FUNCTION getEmailsToSend() RETURNS SETOF RECORD AS $$
   SELECT 
   e.uw_id, 
   e.uw_from, 

@@ -24,6 +24,7 @@ import {
   SelectStatement,
   Statement,
   toSql,
+  UpdateStatement,
 } from "pgsql-ast-parser";
 import { builtincasts } from "./builtincasts";
 import { builtinoperators } from "./builtinoperators";
@@ -740,21 +741,26 @@ function elabInsert(g: Global, c: Context, s: InsertStatement): VoidT | SetT {
   // TODO: typecheck s.onConflict
 }
 
-function elabDelete(g: Global, c: Context, s: DeleteStatement): VoidT | SetT {
-  const deletingFrom: null | {
+function elabDeleteOrUpdate(
+  g: Global,
+  c: Context,
+  s: DeleteStatement | UpdateStatement
+): VoidT | SetT {
+  const tableName = s.type === "delete" ? s.from : s.table;
+  const tableDef: null | {
     readonly name: QName;
     readonly rel: SetT;
-  } = g.tables.find((t) => eqQNames(t.name, s.from)) || null;
+  } = g.tables.find((t) => eqQNames(t.name, tableName)) || null;
 
-  if (!deletingFrom) {
-    throw new UnknownIdentifier(s, s.from);
+  if (!tableDef) {
+    throw new UnknownIdentifier(s, tableName);
   }
-  const nameToAddInContext = s.from.alias || s.from.name;
+  const nameToAddInContext = tableName.alias || tableName.name;
   const newContext = {
     ...c,
     froms: c.froms.concat({
       name: { name: nameToAddInContext },
-      type: deletingFrom.rel,
+      type: tableDef.rel,
     }),
   };
 
@@ -1771,8 +1777,8 @@ function elabStatement(g: Global, c: Context, s: Statement): VoidT | Type {
     return elabExpr(g, c, s);
   } else if (s.type === "insert") {
     return elabInsert(g, c, s);
-  } else if (s.type === "delete") {
-    return elabDelete(g, c, s);
+  } else if (s.type === "delete" || s.type === "update") {
+    return elabDeleteOrUpdate(g, c, s);
   } else {
     return notImplementedYet(s);
   }

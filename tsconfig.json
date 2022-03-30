@@ -2,7 +2,7 @@
   "compilerOptions": {
     "module": "commonjs",
     "target": "ES2019",
-    "rootDir": "src",
+    "rootDir": "",
     "sourceMap": true,
     "strict": true,
     "esModuleInterop": true,
@@ -14,7 +14,9 @@
     ]
   },
   "include": [
+    "index.ts",
+    "sample/**/*",
     "src/**/*",
     "test/**/*"
-  ],
+  ]
 }

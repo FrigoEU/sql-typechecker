@@ -137,10 +137,10 @@ function functionToTypescript(f: functionType): string {
       : "";
 
   return `
-export function ${
+export async function ${
     f.name.name
   }(pg: postgres.Sql<any>, args: ${argsType}): Promise<${returnTypeAsString}>{
-return pg\`select ${f.name.name}(${argsAsList})${asExpression}\`${
+return (await pg\`SELECT * FROM ${f.name.name}(${argsAsList})${asExpression}\` as any)${
     f.multipleRows ? "" : "[0]"
   };
 /* -- ORIGINAL --

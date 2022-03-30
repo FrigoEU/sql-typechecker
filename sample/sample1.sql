@@ -3,8 +3,18 @@ CREATE TABLE testje (
   name text
 );
 
-CREATE FUNCTION selectFromTestje()
-RETURNS SETOF
+CREATE OR REPLACE FUNCTION selectFromTestje()
+RETURNS SETOF record
 AS $$
   SELECT ARRAY(SELECT id from testje)
 $$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION selectAllFromTestje()
+RETURNS SETOF record
+AS $$
+  SELECT id, name
+  FROM testje
+$$ LANGUAGE sql;
+
+
+

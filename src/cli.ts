@@ -43,7 +43,7 @@ function isCreateFunctionStatement(
 }
 
 export function showTypeAsTypescriptType(t: Type): string {
-  if (t.kind === "set") {
+  if (t.kind === "record") {
     return (
       "{" +
       t.fields
@@ -128,7 +128,7 @@ function functionToTypescript(f: functionType): string {
   }
 
   const asExpression =
-    f.returns.kind === "set"
+    f.returns.kind === "record"
       ? ` AS ${f.name.name}(${f.returns.fields
           .map(
             (f) => (f.name?.name || "") + " " + showTypeDroppingNullable(f.type)

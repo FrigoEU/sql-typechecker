@@ -8,7 +8,7 @@ import {
   doCreateFunction,
   parseSetupScripts,
   ScalarT,
-  SetT,
+  RecordT,
   SimpleT,
   Type,
   VoidT,
@@ -71,7 +71,7 @@ function expectInputs(
 function expectReturnType<T>(
   setupStr: string,
   queryStr: string,
-  expectedReturnType: SetT | ScalarT | ArrayT<T> | VoidT
+  expectedReturnType: RecordT | ScalarT | ArrayT<T> | VoidT
 ) {
   testCreateFunction(setupStr, queryStr, (res) => {
     res.caseOf({

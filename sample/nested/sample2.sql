@@ -15,7 +15,6 @@ AS $$
   $$ LANGUAGE sql;
 
 
-DROP FUNCTION selectFromTestje1();
 CREATE OR REPLACE FUNCTION selectFromTestje1()
   RETURNS record
 AS $$
@@ -23,7 +22,6 @@ AS $$
   FROM testje
 $$ LANGUAGE sql;
 
-drop function selectFromTestje2();
 CREATE FUNCTION selectFromTestje2()
   RETURNS SETOF record
 AS $$
@@ -31,6 +29,6 @@ AS $$
   FROM testje
 $$ LANGUAGE sql;
 
-select * from selectFromTestje1() AS (id int, name text);
+-- select * from selectFromTestje1() AS (id int, name text);
 
-select * from selectFromTestje2() AS (id int, name text);
+-- select * from selectFromTestje2() AS (id int, name text);

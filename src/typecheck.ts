@@ -30,7 +30,7 @@ import { builtincasts } from "./builtincasts";
 import { builtinoperators } from "./builtinoperators";
 import { builtinUnaryOperators } from "./builtinunaryoperators";
 
-export type Type = SimpleT | SetT;
+export type Type = SimpleT | RecordT;
 export type AnyScalarT = {
   kind: "anyscalar";
 };
@@ -62,8 +62,8 @@ type Field = {
   name: Name | null;
   type: SimpleT;
 };
-export type SetT = {
-  kind: "set";
+export type RecordT = {
+  kind: "record";
   fields: Field[];
 };
 
@@ -161,12 +161,12 @@ function isNullable(t: Type) {
 export type Global = {
   readonly tables: ReadonlyArray<{
     readonly name: QName;
-    readonly rel: SetT;
+    readonly rel: RecordT;
     // readonly defaults: Name[];
   }>;
   readonly views: ReadonlyArray<{
     readonly name: QName;
-    readonly rel: SetT;
+    readonly rel: RecordT;
   }>;
 };
 
@@ -183,9 +183,9 @@ function eqType(t1: Type, t2: Type): boolean {
     );
   } else if (t1.kind === "scalar") {
     return t2.kind === "scalar" && eqQNames(t1.name, t2.name);
-  } else if (t1.kind === "set") {
+  } else if (t1.kind === "record") {
     return (
-      t2.kind === "set" &&
+      t2.kind === "record" &&
       t1.fields.length == t2.fields.length &&
       t1.fields.reduce(
         (acc: boolean, field, i) =>
@@ -201,15 +201,15 @@ function eqType(t1: Type, t2: Type): boolean {
 }
 
 function unify(e: Expr, source: Type, target: Type): Type {
-  if (source.kind === "set") {
-    if (target.kind === "set") {
-      return unifySets(e, source, target);
+  if (source.kind === "record") {
+    if (target.kind === "record") {
+      return unifyRecords(e, source, target);
     } else {
-      return unifySetWithSimple(e, source, target);
+      return unifyRecordWithSimple(e, source, target);
     }
   } else {
-    if (target.kind === "set") {
-      return unifySetWithSimple(e, target, source);
+    if (target.kind === "record") {
+      return unifyRecordWithSimple(e, target, source);
     } else {
       return unifySimples(e, source, target);
     }
@@ -217,25 +217,25 @@ function unify(e: Expr, source: Type, target: Type): Type {
 }
 
 function cast(e: Expr, source: Type, target: Type, casttype: CastType): void {
-  if (source.kind === "set") {
-    if (target.kind === "set") {
-      castSets(e, source, target, casttype);
+  if (source.kind === "record") {
+    if (target.kind === "record") {
+      castRecords(e, source, target, casttype);
     } else {
-      castSetToSimple(e, source, target, casttype);
+      castRecordToSimple(e, source, target, casttype);
     }
   } else {
-    if (target.kind === "set") {
-      castSimpleToSet(e, source, target, casttype);
+    if (target.kind === "record") {
+      castSimpleToRecord(e, source, target, casttype);
     } else {
       castSimples(e, source, target, casttype);
     }
   }
 }
 
-function castSets(
+function castRecords(
   e: Expr,
-  source: SetT,
-  target: SetT,
+  source: RecordT,
+  target: RecordT,
   casttype: CastType
 ): void {
   if (source.fields.length !== target.fields.length) {
@@ -247,7 +247,7 @@ function castSets(
   });
 }
 
-function unifySets(e: Expr, source: SetT, target: SetT): SetT {
+function unifyRecords(e: Expr, source: RecordT, target: RecordT): RecordT {
   if (source.fields.length !== target.fields.length) {
     throw new TypeMismatch(e, { expected: source, actual: target });
   }
@@ -260,14 +260,14 @@ function unifySets(e: Expr, source: SetT, target: SetT): SetT {
     };
   });
   return {
-    kind: "set",
+    kind: "record",
     fields: newFields,
   };
 }
 
-function castSetToSimple(
+function castRecordToSimple(
   e: Expr,
-  source: SetT,
+  source: RecordT,
   target: SimpleT,
   casttype: CastType
 ): void {
@@ -276,7 +276,7 @@ function castSetToSimple(
     throw new TypeMismatch(
       e,
       { expected: source, actual: target },
-      "Set has no fields"
+      "Record has no fields"
     );
   }
   if (source.fields.length > 1) {
@@ -289,10 +289,10 @@ function castSetToSimple(
   castSimples(e, source.fields[0].type, target, casttype);
 }
 
-function castSimpleToSet(
+function castSimpleToRecord(
   e: Expr,
   source: SimpleT,
-  target: SetT,
+  target: RecordT,
   casttype: CastType
 ): void {
   // TODO add warning if no LIMIT 1
@@ -300,7 +300,7 @@ function castSimpleToSet(
     throw new TypeMismatch(
       e,
       { expected: source, actual: target },
-      "Set has no fields"
+      "Record has no fields"
     );
   }
   if (target.fields.length > 1) {
@@ -313,13 +313,17 @@ function castSimpleToSet(
   castSimples(e, source, target.fields[0].type, casttype);
 }
 
-function unifySetWithSimple(e: Expr, source: SetT, target: SimpleT): SimpleT {
+function unifyRecordWithSimple(
+  e: Expr,
+  source: RecordT,
+  target: SimpleT
+): SimpleT {
   // TODO add warning if no LIMIT 1
   if (source.fields.length === 0) {
     throw new TypeMismatch(
       e,
       { expected: source, actual: target },
-      "Set has no fields"
+      "Record has no fields"
     );
   }
   if (source.fields.length > 1) {
@@ -431,7 +435,7 @@ export type Context = {
   readonly froms: ReadonlyArray<{
     // used in INSERT as well, name is not great
     readonly name: Name;
-    readonly type: SetT;
+    readonly type: RecordT;
   }>;
   readonly decls: ReadonlyArray<{
     readonly name: Name;
@@ -440,7 +444,7 @@ export type Context = {
       | VoidT /* with statement can return bindings of type void */;
     // | ScalarT // declare bindings and function parameters
     // | ParametrizedT<ScalarT> // declare bindings and function parameters
-    // | SetT; // with, (temp tables?)
+    // | RecordT; // with, (temp tables?)
   }>;
 };
 
@@ -517,7 +521,7 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
     tables: g.tables.concat({
       name: s.name,
       rel: {
-        kind: "set",
+        kind: "record",
         fields,
       },
     }),
@@ -545,12 +549,12 @@ function deriveNameFromExpr(expr: Expr): Name | null {
   }
 }
 
-// WITH ... INSERT is also a SelectStatement. So this will return SetT or VoidT I think...
+// WITH ... INSERT is also a SelectStatement. So this will return RecordT or VoidT I think...
 export function elabSelect(
   g: Global,
   c: Context,
   s: SelectStatement
-): SetT | VoidT {
+): RecordT | VoidT {
   if (s.type === "select") {
     const newC: Context = addFromsToScope(g, c, s, s.from || []);
 
@@ -564,9 +568,9 @@ export function elabSelect(
 
       const t = elabExpr(g, newC, c.expr);
 
-      if (t.kind === "set") {
+      if (t.kind === "record") {
         if (t.fields.length === 0) {
-          throw new KindMismatch(c.expr, t, "Set with no fields");
+          throw new KindMismatch(c.expr, t, "Record with no fields");
         } else if (t.fields.length === 1) {
           if (c.expr.type === "ref" && c.expr.name === "*") {
             return t.fields;
@@ -578,7 +582,11 @@ export function elabSelect(
           if (c.expr.type === "ref" && c.expr.name === "*") {
             return t.fields;
           } else {
-            throw new KindMismatch(c.expr, t, "Set with more than one field");
+            throw new KindMismatch(
+              c.expr,
+              t,
+              "Record with more than one field"
+            );
           }
         }
       }
@@ -586,7 +594,7 @@ export function elabSelect(
       return [{ name: n, type: t }];
     });
     return {
-      kind: "set",
+      kind: "record",
       fields,
     };
   } else if (s.type === "union" || s.type === "union all") {
@@ -606,9 +614,9 @@ export function elabSelect(
         "Can't union a statement that returns nothing"
       );
     }
-    return unifySets(s, typeL, typeR);
+    return unifyRecords(s, typeL, typeR);
   } else if (s.type === "values") {
-    const typesPerRow: SetT[] = s.values.map((exprs) => {
+    const typesPerRow: RecordT[] = s.values.map((exprs) => {
       const fields = exprs.map((exp) => {
         const t_ = elabExpr(g, c, exp);
         const t = toSimpleT(t_);
@@ -619,12 +627,12 @@ export function elabSelect(
         }
       });
       return {
-        kind: "set",
+        kind: "record",
         fields: fields,
       };
     });
     return typesPerRow.reduce(
-      (acc: SetT, t: SetT) => unifySets(s, acc, t),
+      (acc: RecordT, t: RecordT) => unifyRecords(s, acc, t),
       typesPerRow[0]
     );
   } else if (s.type === "with") {
@@ -639,9 +647,9 @@ export function elabSelect(
       };
     }, c);
     const res = elabStatement(g, resultingContext, s.in);
-    if (res.kind !== "void" && res.kind !== "set") {
+    if (res.kind !== "void" && res.kind !== "record") {
       return {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: null,
@@ -659,10 +667,14 @@ export function elabSelect(
   }
 }
 
-function elabInsert(g: Global, c: Context, s: InsertStatement): VoidT | SetT {
+function elabInsert(
+  g: Global,
+  c: Context,
+  s: InsertStatement
+): VoidT | RecordT {
   const insertingInto: null | {
     readonly name: QName;
-    readonly rel: SetT;
+    readonly rel: RecordT;
   } = g.tables.find((t) => eqQNames(t.name, s.into)) || null;
   if (!insertingInto) {
     throw new UnknownIdentifier(s, s.into);
@@ -716,7 +728,7 @@ function elabInsert(g: Global, c: Context, s: InsertStatement): VoidT | SetT {
 
   if (s.returning) {
     return {
-      kind: "set",
+      kind: "record",
       fields: s.returning.map((selectedCol) => {
         const t_ = elabExpr(g, newContext, selectedCol.expr);
         const t = toSimpleT(t_);
@@ -724,7 +736,7 @@ function elabInsert(g: Global, c: Context, s: InsertStatement): VoidT | SetT {
           throw new KindMismatch(
             selectedCol.expr,
             t_,
-            "Need simple type here, not a set"
+            "Need simple type here, not a record"
           );
         } else {
           return {
@@ -745,11 +757,11 @@ function elabDeleteOrUpdate(
   g: Global,
   c: Context,
   s: DeleteStatement | UpdateStatement
-): VoidT | SetT {
+): VoidT | RecordT {
   const tableName = s.type === "delete" ? s.from : s.table;
   const tableDef: null | {
     readonly name: QName;
-    readonly rel: SetT;
+    readonly rel: RecordT;
   } = g.tables.find((t) => eqQNames(t.name, tableName)) || null;
 
   if (!tableDef) {
@@ -771,7 +783,7 @@ function elabDeleteOrUpdate(
 
   if (s.returning) {
     return {
-      kind: "set",
+      kind: "record",
       fields: s.returning.map((selectedCol) => {
         const t_ = elabExpr(g, newContext, selectedCol.expr);
         const t = toSimpleT(t_);
@@ -779,7 +791,7 @@ function elabDeleteOrUpdate(
           throw new KindMismatch(
             selectedCol.expr,
             t_,
-            "Need simple type here, not a set"
+            "Need simple type here, not a record"
           );
         } else {
           return {
@@ -795,7 +807,7 @@ function elabDeleteOrUpdate(
 }
 
 function toSimpleT(t: Type): SimpleT | null {
-  if (t.kind === "set") {
+  if (t.kind === "record") {
     if (t.fields.length === 1) {
       return t.fields[0].type;
     } else {
@@ -870,10 +882,50 @@ export function doCreateFunction(
       const lastStatement = body[body.length - 1];
       const returnType = elabStatement(g, contextForBody, lastStatement);
 
+      debugger;
+
+      const unifiedReturnType = (function (): Type | VoidT {
+        const dummyExpr = {
+          // TODO!
+          _location: s._location,
+          type: "null" as const,
+        };
+
+        if (returnType.kind === "void") {
+          if (!s.returns) {
+            return { kind: "void" };
+          } else {
+            if (s.returns.type.kind === "table") {
+              throw new Error("RETURNS TABLE is not supported yet");
+            }
+            const annotatedType = mkType(s.returns.type, []);
+            throw new KindMismatch(
+              dummyExpr,
+              annotatedType,
+              "Function returns void"
+            );
+          }
+        }
+        if (!s.returns) {
+          throw new KindMismatch(dummyExpr, { kind: "void" }, "Function  void");
+        }
+
+        if (s.returns.type.kind === "table") {
+          throw new Error("RETURNS TABLE is not supported yet");
+        }
+        // if (s.returns.type.kind === "array") {
+        //   throw new Error("RETURNS array is unsupported for now");
+        // }
+
+        const annotatedType = mkType(s.returns.type, []);
+
+        return unify(dummyExpr, returnType, annotatedType);
+      })();
+
       return {
         name,
         inputs,
-        returns: returnType,
+        returns: unifiedReturnType,
         multipleRows: (s.returns && s.returns.setof) || false,
         code: s.code,
         language: s.language.name,
@@ -884,17 +936,17 @@ export function doCreateFunction(
   }
 }
 
-type HandledFrom = { name: QName; rel: SetT };
+type HandledFrom = { name: QName; rel: RecordT };
 type Nullable<T> = T | null;
 
-function findRel(g: Global, c: Context, e: Expr, n: QName): Nullable<SetT> {
+function findRel(g: Global, c: Context, e: Expr, n: QName): Nullable<RecordT> {
   debugger;
   const d = c.decls.find((d) => eqQNames(d.name, n));
   if (d) {
-    if (d.type.kind === "set") {
+    if (d.type.kind === "record") {
       return d.type;
     } else {
-      throw new KindMismatch(e, d.type, "Expecting a set or table");
+      throw new KindMismatch(e, d.type, "Expecting a record or table");
     }
   } else {
     const t = g.tables.find((t) => eqQNames(t.name, n));
@@ -936,7 +988,7 @@ ${JSON.stringify(node)} @ ${node._location}`
 }
 
 class UnknownField extends ErrorWithLocation {
-  constructor(e: Expr, _s: SetT, n: Name) {
+  constructor(e: Expr, _s: RecordT, n: Name) {
     super(e._location, `UnknownField ${n.name}`);
   }
 }
@@ -952,7 +1004,7 @@ export class CantReduceToSimpleT extends ErrorWithLocation {
 }
 
 export function showType(t: Type): string {
-  if (t.kind === "set") {
+  if (t.kind === "record") {
     return (
       "{" +
       t.fields
@@ -979,7 +1031,7 @@ export function showType(t: Type): string {
   }
 }
 export function showSqlType(t: Type): string {
-  if (t.kind === "set") {
+  if (t.kind === "record") {
     return (
       "{" +
       t.fields
@@ -1042,12 +1094,12 @@ export class TypecheckerError extends ErrorWithLocation {
   }
 }
 class AmbiguousIdentifier extends ErrorWithLocation {
-  constructor(e: Expr, m: QName, sets: QName[]) {
+  constructor(e: Expr, m: QName, records: QName[]) {
     super(
       e._location,
       `AmbiguousIdentifier ${showQName(m)} @ ${showLocation(
         m._location
-      )} present in ${JSON.stringify(sets)}`
+      )} present in ${JSON.stringify(records)}`
     );
   }
 }
@@ -1158,12 +1210,12 @@ function doSingleFrom(
 
   const newHandledFrom =
     f.join && (f.join.type === "FULL JOIN" || f.join.type === "LEFT JOIN")
-      ? { ...newHandledFrom_, rel: nullifySet(newHandledFrom_.rel) }
+      ? { ...newHandledFrom_, rel: nullifyRecord(newHandledFrom_.rel) }
       : newHandledFrom_;
 
   const newHandledFroms_ =
     f.join && (f.join.type === "FULL JOIN" || f.join.type === "RIGHT JOIN")
-      ? handledFroms.map((fr) => ({ ...fr, rel: nullifySet(fr.rel) }))
+      ? handledFroms.map((fr) => ({ ...fr, rel: nullifyRecord(fr.rel) }))
       : handledFroms;
 
   const newHandledFroms = newHandledFroms_.concat(newHandledFrom);
@@ -1191,7 +1243,7 @@ function addFromsToScope(
   return mergeHandledFroms(c, inFroms);
 }
 
-function lookupInSet(s: SetT, name: Name): SimpleT | null {
+function lookupInRecord(s: RecordT, name: Name): SimpleT | null {
   const found = s.fields.find((f) => f.name && f.name.name === name.name);
   if (found) {
     return found.type;
@@ -1212,7 +1264,7 @@ function elabRef(c: Context, e: ExprRef): Type {
       }
     } else {
       return {
-        kind: "set",
+        kind: "record",
         fields: c.froms.reduce(
           (acc: Field[], from) => acc.concat(from.type.fields),
           []
@@ -1226,26 +1278,28 @@ function elabRef(c: Context, e: ExprRef): Type {
       if (!table) {
         throw new UnknownIdentifier(e, tableName);
       }
-      if (!(table.type.kind === "set")) {
-        throw new KindMismatch(e, table.type, "Expecting Set");
+      if (!(table.type.kind === "record")) {
+        throw new KindMismatch(e, table.type, "Expecting Record");
       }
-      const field = lookupInSet(table.type, e);
+      const field = lookupInRecord(table.type, e);
       if (!field) {
         throw new UnknownField(e, table.type, e);
       }
       return field;
     } else {
       const foundFields: {
-        set: QName;
+        record: QName;
         field: Name;
         type: SimpleT;
       }[] = mapPartial(c.froms, (t) => {
-        const foundfield = lookupInSet(t.type, e);
-        return foundfield ? { set: t.name, field: e, type: foundfield } : null;
+        const foundfield = lookupInRecord(t.type, e);
+        return foundfield
+          ? { record: t.name, field: e, type: foundfield }
+          : null;
       });
 
       const foundIdentifiers = mapPartial(c.decls, (t) => {
-        if (t.type.kind === "set" || t.type.kind === "void") {
+        if (t.type.kind === "record" || t.type.kind === "void") {
           return null;
         } else {
           return t.name.name === e.name
@@ -1269,7 +1323,7 @@ function elabRef(c: Context, e: ExprRef): Type {
         throw new AmbiguousIdentifier(
           e,
           e,
-          foundFields.map((f) => f.set)
+          foundFields.map((f) => f.record)
         );
       }
     }
@@ -1572,7 +1626,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
         "Select in array select can't return void"
       );
     }
-    const t = unifySetWithSimple(e, selectType, BuiltinTypes.AnyScalar);
+    const t = unifyRecordWithSimple(e, selectType, BuiltinTypes.AnyScalar);
     return BuiltinTypeConstructors.Array(t);
   } else if (e.type === "default") {
     // ??
@@ -1804,9 +1858,9 @@ export function parseSetupScripts(ast: Statement[]): Global {
   );
 }
 
-function nullifySet(s: SetT): SetT {
+function nullifyRecord(s: RecordT): RecordT {
   return {
-    kind: "set",
+    kind: "record",
     fields: s.fields.map((c) => ({
       name: c.name,
       type: nullify(c.type),

@@ -24,6 +24,6 @@ Type inference:
 
 TODO:
 * interpret + check RETURNS:
-  * bvb "int": krijg je echt int terug, geen set
-  * "record": krijg je een set met fields terug
+  * bvb "int": krijg je echt int terug, geen record
+  * "record": krijg je een record met fields terug
   * setof {record,"int"}: krijg je meerdere lijnen terug

@@ -12,14 +12,9 @@ async function go() {
     id: 2,
     name: "ble",
   });
-  console.log(JSON.stringify(resInsert));
-  const resInsert2 = await sample.insertintotestjerecord(sqlclient, {
-    id: 2,
-    name: "ble",
-  });
-  console.log(JSON.stringify(resInsert2));
+  console.log(resInsert?.toString());
   const resSelect = await sample.selectallfromtestje(sqlclient, {});
-  console.log(JSON.stringify(resSelect));
+  resSelect.map((r) => console.log(r.name + ": " + r.id));
 }
 
 go()

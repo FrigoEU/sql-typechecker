@@ -4,14 +4,6 @@ AS $$
   INSERT INTO testje (id, name)
   VALUES (id, name)
   RETURNING id;
-$$ LANGUAGE sql;
-
-CREATE OR REPLACE FUNCTION insertIntoTestjeRecord(id int, name text DEFAULT NULL)
-  RETURNS record
-AS $$
-  INSERT INTO testje (id, name)
-  VALUES (id, name)
-  RETURNING id;
   $$ LANGUAGE sql;
 
 

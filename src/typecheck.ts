@@ -833,6 +833,7 @@ export function doCreateFunction(
   s: CreateFunctionStatement
 ): functionType {
   const name = s.name;
+  console.log(`Typechecking function: ${name.name}`);
   if (!s.language) {
     throw new Error(
       "Please provide language for function at " + showLocation(s._location)
@@ -882,8 +883,6 @@ export function doCreateFunction(
       const lastStatement = body[body.length - 1];
       const returnType = elabStatement(g, contextForBody, lastStatement);
 
-      debugger;
-
       const unifiedReturnType = (function (): Type | VoidT {
         const dummyExpr = {
           // TODO!
@@ -894,10 +893,9 @@ export function doCreateFunction(
         if (returnType.kind === "void") {
           if (!s.returns) {
             return { kind: "void" };
+          } else if (s.returns.type.kind === "table") {
+            throw new Error("RETURNS TABLE is not supported yet");
           } else {
-            if (s.returns.type.kind === "table") {
-              throw new Error("RETURNS TABLE is not supported yet");
-            }
             const annotatedType = mkType(s.returns.type, []);
             throw new KindMismatch(
               dummyExpr,
@@ -907,19 +905,30 @@ export function doCreateFunction(
           }
         }
         if (!s.returns) {
-          throw new KindMismatch(dummyExpr, { kind: "void" }, "Function  void");
-        }
-
-        if (s.returns.type.kind === "table") {
+          throw new KindMismatch(
+            dummyExpr,
+            { kind: "void" },
+            "Function needs return type"
+          );
+        } else if (s.returns.type.kind === "table") {
           throw new Error("RETURNS TABLE is not supported yet");
+        } else if (
+          s.returns.type.kind === undefined &&
+          s.returns.type.name === "record"
+        ) {
+          if (returnType.kind === "record") {
+            return returnType;
+          } else {
+            throw new KindMismatch(
+              dummyExpr,
+              returnType,
+              "Function returns record type but type annotation disagrees"
+            );
+          }
+        } else {
+          const annotatedType = mkType(s.returns.type, []);
+          return unify(dummyExpr, returnType, annotatedType);
         }
-        // if (s.returns.type.kind === "array") {
-        //   throw new Error("RETURNS array is unsupported for now");
-        // }
-
-        const annotatedType = mkType(s.returns.type, []);
-
-        return unify(dummyExpr, returnType, annotatedType);
       })();
 
       return {

@@ -110,7 +110,7 @@ function functionToTypescript(f: functionType): string {
     .join(", ");
 
   const argsForCreateFunction = f.inputs
-    .map((k) => k.name.name + showSqlType(k.type))
+    .map((k) => k.name.name + " " + showSqlType(k.type))
     .join(", ");
 
   function showTypeDroppingNullable(t: SimpleT): string {
@@ -128,27 +128,31 @@ function functionToTypescript(f: functionType): string {
   }
 
   const asExpression =
-    f.returns.kind === "record"
-      ? ` AS ${f.name.name}(${f.returns.fields
+        f.returns.kind === "record"
+        ? ` AS ${f.name.name}(${f.returns.fields
           .map(
             (f) => (f.name?.name || "") + " " + showTypeDroppingNullable(f.type)
           )
           .join(", ")})`
-      : "";
+        : "";
+
+  const funcInvocation = `${f.name.name}(${argsAsList})${asExpression}`
+
+  const recreatedSqlFunctionStatement = `
+CREATE FUNCTION ${f.name.name}(${argsForCreateFunction}) RETURNS ${
+    f.multipleRows ? "SETOF " : ""
+  }${f.returns.kind === "record" ? "RECORD" : showTypeDroppingNullable(f.returns)} AS
+$$${f.code}$$ LANGUAGE ${f.language};
+`
 
   return `
 export async function ${
     f.name.name
   }(pg: postgres.Sql<any>, args: ${argsType}): Promise<${returnTypeAsString}>{
-return (await pg\`SELECT * FROM ${f.name.name}(${argsAsList})${asExpression}\` as any)${
+/* ${recreatedSqlFunctionStatement} */
+return (await pg\`SELECT * FROM ${funcInvocation}\` as any)${
     f.multipleRows ? "" : "[0]"
-  };
-/* -- ORIGINAL --
-CREATE FUNCTION ${f.name.name}(${argsForCreateFunction}) RETURNS ${
-    f.multipleRows ? "SETOF " : ""
-  }__todo__ AS
-$$${f.code}$$ LANGUAGE ${f.language};
-*/
+  }${f.returns.kind === "record" ? "" : "?." + f.name.name};
 }
 `;
 }

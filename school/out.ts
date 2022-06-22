@@ -1,5 +1,5 @@
 import postgres from "postgres";
-export function getemailstosend(
+export async function getemailstosend(
   pg: postgres.Sql<any>,
   args: {}
 ): Promise<
@@ -17,9 +17,8 @@ export function getemailstosend(
     uw_content: Buffer | null;
   }[]
 > {
-  return pg`select getemailstosend() AS getemailstosend(uw_id bigint, uw_from text, uw_replyto text, uw_address text, uw_addressee text, uw_subject text, uw_text text, uw_html text, uw_externalid text, uw_filename text, uw_content bytea)`;
-  /* -- ORIGINAL --
-CREATE FUNCTION getemailstosend() RETURNS SETOF __todo__ AS
+  /* 
+CREATE FUNCTION getemailstosend() RETURNS SETOF RECORD AS
 $$
   SELECT 
   e.uw_id, 
@@ -39,15 +38,15 @@ $$
   WHERE s.uw_status = 'Waiting/_' 
   AND e.uw_html IS NOT NULL -- NULL = ARCHIVED
 $$ LANGUAGE sql;
-*/
+ */
+  return (await pg`SELECT * FROM getemailstosend() AS getemailstosend(uw_id bigint, uw_from text, uw_replyto text, uw_address text, uw_addressee text, uw_subject text, uw_text text, uw_html text, uw_externalid text, uw_filename text, uw_content bytea)`) as any;
 }
-export function insertnewemailstatus(
+export async function insertnewemailstatus(
   pg: postgres.Sql<any>,
   args: { uw_emailid: number; version: number; uw_status: string }
-): Promise<{ uw_emailid: number } | undefined> {
-  return pg`select insertnewemailstatus(${args.uw_emailid}, ${args.version}, ${args.uw_status}) AS insertnewemailstatus(uw_emailid bigint)`[0];
-  /* -- ORIGINAL --
-CREATE FUNCTION insertnewemailstatus(uw_emailidinteger, versioninteger, uw_statustext) RETURNS __todo__ AS
+): Promise<number | undefined> {
+  /* 
+CREATE FUNCTION insertnewemailstatus(uw_emailid integer, version integer, uw_status text) RETURNS bigint AS
 $$
   INSERT INTO uw_email_statusses 
     (uw_emailid, uw_version, uw_status, uw_stamp, uw_islastversion) 
@@ -55,5 +54,91 @@ $$
     (uw_emailid, version, uw_status, CURRENT_TIMESTAMP, TRUE)
   RETURNING uw_emailid;
 $$ LANGUAGE sql;
-*/
+ */
+  return (
+    (await pg`SELECT * FROM insertnewemailstatus(${args.uw_emailid}, ${args.version}, ${args.uw_status})`) as any
+  )[0]?.insertnewemailstatus;
+}
+export async function getstudent(
+  pg: postgres.Sql<any>,
+  args: { uw_studentid: number }
+): Promise<
+  | {
+      uw_firstname: string;
+      uw_lastname: string;
+      emails: {
+        id: number;
+        email: string;
+      }[];
+    }
+  | undefined
+> {
+  /* 
+CREATE FUNCTION getstudent(uw_studentid integer) RETURNS RECORD AS
+$$
+  SELECT s.uw_firstname, s.uw_lastname, COALESCE(emails.emails, ARRAY[]) AS emails
+  FROM uw_student_students s
+  LEFT JOIN (SELECT em.uw_studentid, array_agg(json_build_object('id', em.uw_id, 'email', em.uw_email)) as emails
+                from uw_student_studentemails em
+              group by uw_studentid
+  ) emails ON emails.uw_studentid = s.uw_id;
+  $$ LANGUAGE sql;
+ */
+  return (
+    (await pg`SELECT * FROM getstudent(${args.uw_studentid}) AS getstudent(uw_firstname text, uw_lastname text, emails [])`) as any
+  )[0];
+}
+export async function getstudentnestedjoin(
+  pg: postgres.Sql<any>,
+  args: { uw_studentid: number }
+): Promise<
+  | {
+      uw_firstname: string;
+      uw_lastname: string;
+      emails: {
+        id: number;
+        email: string;
+      }[];
+    }
+  | undefined
+> {
+  /* 
+CREATE FUNCTION getstudentnestedjoin(uw_studentid integer) RETURNS RECORD AS
+$$
+  SELECT
+  s.uw_firstname,
+  s.uw_lastname,
+  (SELECT array_agg(json_build_object('id', em.uw_id, 'email', em.uw_email)) as emails
+     from uw_student_studentemails em
+    where em.uw_studentid = s.uw_id
+    group by uw_studentid) AS emails
+  FROM uw_student_students s
+$$ LANGUAGE sql;
+ */
+  return (
+    (await pg`SELECT * FROM getstudentnestedjoin(${args.uw_studentid}) AS getstudentnestedjoin(uw_firstname text, uw_lastname text, emails [])`) as any
+  )[0];
+}
+export async function getstudentnestedjoinnojson(
+  pg: postgres.Sql<any>,
+  args: { uw_studentid: number }
+): Promise<
+  { uw_firstname: string; uw_lastname: string; emails: string[] } | undefined
+> {
+  /* 
+CREATE FUNCTION getstudentnestedjoinnojson(uw_studentid integer) RETURNS RECORD AS
+$$
+  SELECT
+  s.uw_firstname,
+  s.uw_lastname,
+  (SELECT array_agg(em.uw_email)
+      from uw_student_studentemails em
+    where em.uw_studentid = s.uw_id
+    group by uw_studentid) AS emails
+  FROM uw_student_students s
+$$ LANGUAGE sql;
+ */
+  return (
+    (await pg`SELECT * FROM getstudentnestedjoinnojson(${args.uw_studentid}) AS getstudentnestedjoinnojson(uw_firstname text, uw_lastname text, emails text[])`) as any
+  )[0];
 }

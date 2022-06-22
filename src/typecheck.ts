@@ -43,6 +43,10 @@ export type ArrayT<T> = {
   subtype: "array" | "list";
   typevar: T;
 };
+export type JsonKnownT = {
+  kind: "jsonknown";
+  record: RecordT;
+};
 export type ScalarT = {
   kind: "scalar";
   name: QName;
@@ -53,6 +57,7 @@ export type VoidT = {
 };
 export type SimpleT =
   | AnyScalarT
+  | JsonKnownT
   | ScalarT
   | NullableT<any>
   | ArrayT<any>
@@ -183,6 +188,8 @@ function eqType(t1: Type, t2: Type): boolean {
     );
   } else if (t1.kind === "scalar") {
     return t2.kind === "scalar" && eqQNames(t1.name, t2.name);
+  } else if (t1.kind === "jsonknown") {
+    return t2.kind === "jsonknown" && eqType(t1.record, t2.record);
   } else if (t1.kind === "record") {
     return (
       t2.kind === "record" &&
@@ -343,7 +350,7 @@ function castSimples(
   type: CastType
 ): void {
   // T -> Nullable<T> is a universal cast
-  if (target.kind === "nullable" && source.kind === "scalar") {
+  if (target.kind === "nullable" && source.kind !== "nullable") {
     return castSimples(e, source, target.typevar, type);
   }
 
@@ -365,6 +372,27 @@ function castSimples(
   } else if (source.kind === "scalar") {
     if (target.kind === "scalar") {
       return castScalars(e, source, target, type);
+    } else {
+      // simple - parametrized
+      throw new TypeMismatch(e, { expected: source, actual: target });
+    }
+  } else if (source.kind === "jsonknown") {
+    if (target.kind === "jsonknown") {
+      for (let field of source.record.fields) {
+        const matchingFieldInTarget = target.record.fields.find(
+          (f) => f.name === field.name
+        );
+        if (!matchingFieldInTarget) {
+          throw new TypeMismatch(
+            e,
+            { expected: source, actual: target },
+            `Missing field ${field.name}`
+          );
+        } else {
+          castSimples(e, field.type, matchingFieldInTarget.type, type);
+        }
+      }
+      return;
     } else {
       // simple - parametrized
       throw new TypeMismatch(e, { expected: source, actual: target });
@@ -884,9 +912,11 @@ export function doCreateFunction(
       const returnType = elabStatement(g, contextForBody, lastStatement);
 
       const unifiedReturnType = (function (): Type | VoidT {
+        const location =
+          s.returns?.type._location || s.name._location || s._location;
         const dummyExpr = {
           // TODO!
-          _location: s._location,
+          _location: location,
           type: "null" as const,
         };
 
@@ -926,8 +956,26 @@ export function doCreateFunction(
             );
           }
         } else {
-          const annotatedType = mkType(s.returns.type, []);
-          return unify(dummyExpr, returnType, annotatedType);
+          const annotatedType = mkType(s.returns.type, [
+            { type: "not null" } /* not sure about this one */,
+          ]);
+          try {
+            return unify(dummyExpr, returnType, annotatedType);
+          } catch (err) {
+            const mess = err instanceof Error ? err.message : "";
+            if (err instanceof TypeMismatch) {
+              throw new TypeMismatch(
+                dummyExpr,
+                { expected: err.expected, actual: err.actual },
+                "Function return type mismatch"
+              );
+            } else {
+              throw new ErrorWithLocation(
+                location,
+                "Function return type mismatch: \n" + mess
+              );
+            }
+          }
         }
       })();
 
@@ -1032,6 +1080,14 @@ export function showType(t: Type): string {
       return showType(t.typevar) + " | null";
     } else if (t.kind === "scalar") {
       return t.name.name;
+    } else if (t.kind === "jsonknown") {
+      return (
+        "{\n" +
+        t.record.fields
+          .map((f) => `  ${f.name?.name}: ${showType(f.type)}`)
+          .join(",\n") +
+        "\n}"
+      );
     } else if (t.kind === "anyscalar") {
       return "anyscalar";
     } else {
@@ -1058,6 +1114,8 @@ export function showSqlType(t: Type): string {
       return showSqlType(t.typevar) + " DEFAULT NULL";
     } else if (t.kind === "scalar") {
       return t.name.name;
+    } else if (t.kind === "jsonknown") {
+      return "json";
     } else if (t.kind === "anyscalar") {
       return "anyscalar";
     } else {
@@ -1126,6 +1184,9 @@ class KindMismatch extends ErrorWithLocation {
   }
 }
 export class TypeMismatch extends ErrorWithLocation {
+  public expected: Type;
+  public actual: Type;
+  public mess?: string;
   constructor(
     e: Expr,
     ts: {
@@ -1138,7 +1199,9 @@ export class TypeMismatch extends ErrorWithLocation {
       e._location,
       `
 TypeMismatch:
-${toSql.expr(e)} ${mess ? ": " + mess : ""}
+${toSql.expr(e)}
+
+${mess ? mess : ""}
 
 Expected:
 ${JSON.stringify(ts.expected)}
@@ -1147,6 +1210,10 @@ Actual:
 ${JSON.stringify(ts.actual)}}
 `
     );
+
+    this.expected = ts.expected;
+    this.actual = ts.actual;
+    this.mess = mess;
   }
 }
 
@@ -1530,6 +1597,42 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
 
 function elabCall(g: Global, c: Context, e: ExprCall): Type {
   const argTypes = e.args.map((arg) => elabExpr(g, c, arg));
+
+  if (
+    eqQNames(e.function, { name: "json_build_object" }) ||
+    eqQNames(e.function, { name: "jsonb_build_object" })
+  ) {
+    if (e.args.length % 2 === 0) {
+      const record: RecordT = { kind: "record", fields: [] };
+      for (let i = 0; i < e.args.length; i += 2) {
+        const key = e.args[i];
+        if (key.type !== "string") {
+          throw new TypeMismatch(
+            e.args[i],
+            { expected: BuiltinTypes.Text, actual: argTypes[i] },
+            "Json keys can only be string literals (for now?)"
+          );
+        }
+        const valT = argTypes[i + 1];
+        const valTSimple = toSimpleT(valT);
+        if (valTSimple === null) {
+          throw new CantReduceToSimpleT(e.args[i], argTypes[i]);
+        }
+        record.fields.push({ name: { name: key.value }, type: valTSimple });
+      }
+      return { kind: "jsonknown", record: record };
+    } else {
+      throw new InvalidArguments(e, e.function, argTypes);
+    }
+  }
+
+  if (eqQNames(e.function, { name: "array_agg" })) {
+    if (e.args.length === 1) {
+      return { kind: "array", subtype: "array", typevar: argTypes[0] };
+    } else {
+      throw new InvalidArguments(e, e.function, argTypes);
+    }
+  }
 
   if (
     eqQNames(e.function, { name: "any" }) ||

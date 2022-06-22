@@ -11,6 +11,7 @@ import {
   showType,
   Type,
   SimpleT,
+  JsonKnownT,
 } from "./typecheck";
 import * as prettier from "prettier";
 
@@ -78,6 +79,14 @@ export function showTypeAsTypescriptType(t: Type): string {
       } else {
         return t.name.name;
       }
+    } else if (t.kind === "jsonknown") {
+      return (
+        "{\n" +
+        t.record.fields
+          .map((f) => `  ${f.name?.name}: ${showTypeAsTypescriptType(f.type)}`)
+          .join(",\n") +
+        "\n}"
+      );
     } else if (t.kind === "anyscalar") {
       return "anyscalar";
     } else {
@@ -113,7 +122,7 @@ function functionToTypescript(f: functionType): string {
     .map((k) => k.name.name + " " + showSqlType(k.type))
     .join(", ");
 
-  function showTypeDroppingNullable(t: SimpleT): string {
+  function showTypeDroppingNullable(t: SimpleT | JsonKnownT): string {
     if (t.kind === "nullable") {
       return showTypeDroppingNullable(t.typevar);
     } else if (t.kind === "array") {
@@ -128,22 +137,30 @@ function functionToTypescript(f: functionType): string {
   }
 
   const asExpression =
-        f.returns.kind === "record"
-        ? ` AS ${f.name.name}(${f.returns.fields
+    f.returns.kind === "record"
+      ? ` AS ${f.name.name}(${f.returns.fields
           .map(
             (f) => (f.name?.name || "") + " " + showTypeDroppingNullable(f.type)
           )
           .join(", ")})`
-        : "";
+      : "";
 
-  const funcInvocation = `${f.name.name}(${argsAsList})${asExpression}`
+  const funcInvocation = `${f.name.name}(${argsAsList})${asExpression}`;
 
   const recreatedSqlFunctionStatement = `
 CREATE FUNCTION ${f.name.name}(${argsForCreateFunction}) RETURNS ${
     f.multipleRows ? "SETOF " : ""
-  }${f.returns.kind === "record" ? "RECORD" : showTypeDroppingNullable(f.returns)} AS
+  }${
+    f.returns.kind === "record"
+      ? "RECORD"
+      : f.returns.kind === "jsonknown"
+      ? "JSON"
+      : f.returns.kind === "void"
+      ? "void"
+      : showTypeDroppingNullable(f.returns)
+  } AS
 $$${f.code}$$ LANGUAGE ${f.language};
-`
+`;
 
   return `
 export async function ${

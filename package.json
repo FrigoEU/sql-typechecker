@@ -5,7 +5,7 @@
   "bin": "out/cli.js",
   "dependencies": {
     "pgsql-ast-parser": "frigoeu/pgsql-ast-parser#plpgsql",
-    "prettier": "2.2.1"
+    "prettier": "^2.7.1"
   },
   "scripts": {
     "check": "tsc -p . --noEmit",

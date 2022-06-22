@@ -983,3 +983,35 @@ CREATE OR REPLACE FUNCTION insertNewEmailStatus(uw_emailid int, version int, uw_
     (uw_emailid, version, uw_status, CURRENT_TIMESTAMP, TRUE)
   RETURNING uw_emailid;
 $$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION getStudent(uw_studentid int) RETURNS RECORD AS $$
+  SELECT s.uw_firstname, s.uw_lastname, COALESCE(emails.emails, ARRAY[]) AS emails
+  FROM uw_student_students s
+  LEFT JOIN (SELECT em.uw_studentid, array_agg(json_build_object('id', em.uw_id, 'email', em.uw_email)) as emails
+                from uw_student_studentemails em
+              group by uw_studentid
+  ) emails ON emails.uw_studentid = s.uw_id;
+  $$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION getStudentNestedJoin(uw_studentid int) RETURNS RECORD AS $$
+  SELECT
+  s.uw_firstname,
+  s.uw_lastname,
+  (SELECT array_agg(json_build_object('id', em.uw_id, 'email', em.uw_email)) as emails
+     from uw_student_studentemails em
+    where em.uw_studentid = s.uw_id
+    group by uw_studentid) AS emails
+  FROM uw_student_students s
+$$ LANGUAGE sql;
+
+
+CREATE OR REPLACE FUNCTION getStudentNestedJoinNoJson(uw_studentid int) RETURNS RECORD AS $$
+  SELECT
+  s.uw_firstname,
+  s.uw_lastname,
+  (SELECT array_agg(em.uw_email)
+      from uw_student_studentemails em
+    where em.uw_studentid = s.uw_id
+    group by uw_studentid) AS emails
+  FROM uw_student_students s
+$$ LANGUAGE sql;

@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import postgres = require("postgres");
 type studentid = number & { readonly __tag: "studentid" };
 
 export async function getemailstosend(
@@ -68,6 +68,7 @@ export async function getstudent(
   | {
       uw_firstname: string;
       uw_lastname: string;
+      uw_birthday: date | null;
       emails: {
         id: number;
         email: string;
@@ -78,7 +79,7 @@ export async function getstudent(
   /* 
 CREATE FUNCTION getstudent(uw_studentid studentid) RETURNS RECORD AS
 $$
-  SELECT s.uw_firstname, s.uw_lastname, COALESCE(emails.emails, ARRAY[]) AS emails
+  SELECT s.uw_firstname, s.uw_lastname, s.uw_birthday, COALESCE(emails.emails, ARRAY[]) AS emails
   FROM uw_student_students s
   LEFT JOIN (SELECT em.uw_studentid, array_agg(json_build_object('id', em.uw_id, 'email', em.uw_email)) as emails
                 from uw_student_studentemails em
@@ -87,7 +88,7 @@ $$
   $$ LANGUAGE sql;
  */
   return (
-    (await pg`SELECT * FROM getstudent(${args.uw_studentid}) AS getstudent(uw_firstname text, uw_lastname text, emails [])`) as any
+    (await pg`SELECT * FROM getstudent(${args.uw_studentid}) AS getstudent(uw_firstname text, uw_lastname text, uw_birthday date, emails [])`) as any
   )[0];
 }
 export async function getstudentnestedjoin(

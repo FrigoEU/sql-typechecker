@@ -4,6 +4,7 @@
   "main": "out/cli.js",
   "bin": "out/cli.js",
   "dependencies": {
+    "pg": "^8.7.3",
     "pgsql-ast-parser": "git+https://github.com/frigoeu/pgsql-ast-parser#fc22940b767f7b4de5d3e9813307cfda5b98d0dc",
     "prettier": "^2.7.1"
   },
@@ -22,10 +23,11 @@
   },
   "devDependencies": {
     "@types/node": "^14.14.10",
+    "@types/pg": "^8.6.5",
     "@types/prettier": "^2.4.2",
     "alsatian": "^3.2.1",
     "esbuild": "0.8.34",
-    "postgres": "^2.0.0-beta.5",
+    "postgres": "^3.2.4",
     "purify-ts": "^1.0.0",
     "ts-node": "^10.7.0",
     "typescript": "4.4.3"

@@ -987,7 +987,7 @@ CREATE OR REPLACE FUNCTION insertNewEmailStatus(uw_emailid int, version int, uw_
 $$ LANGUAGE sql;
 
 CREATE OR REPLACE FUNCTION getStudent(uw_studentid studentid) RETURNS RECORD AS $$
-  SELECT s.uw_firstname, s.uw_lastname, COALESCE(emails.emails, ARRAY[]) AS emails
+  SELECT s.uw_firstname, s.uw_lastname, s.uw_birthday, COALESCE(emails.emails, ARRAY[]) AS emails
   FROM uw_student_students s
   LEFT JOIN (SELECT em.uw_studentid, array_agg(json_build_object('id', em.uw_id, 'email', em.uw_email)) as emails
                 from uw_student_studentemails em

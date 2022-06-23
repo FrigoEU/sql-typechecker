@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import * as fs from "fs/promises";
 import * as path from "path";
 import { CreateFunctionStatement, parse, Statement } from "pgsql-ast-parser";
@@ -218,13 +217,29 @@ async function go() {
 
   const outfile = await prepOutFile(path.resolve(process.cwd(), outArg));
 
+  for (let dom of g.domains) {
+    await fs.appendFile(
+      outfile,
+      `type ${dom.name.name} = ${showTypeAsTypescriptType(
+        dom.type
+      )} & { readonly __tag: "${dom.name.name}" };\n`,
+      "utf-8"
+    );
+  }
+  await fs.appendFile(outfile, `\n`, "utf-8");
+
   for (let st of createFunctionStatements) {
-    const res = doCreateFunction(g, { decls: [], froms: [] }, st);
-    const writing = prettier.format(functionToTypescript(res), {
-      parser: "typescript",
-    });
-    // console.log(`Writing: ${writing}`);
-    await fs.appendFile(outfile, writing, "utf-8");
+    try {
+      const res = doCreateFunction(g, { decls: [], froms: [] }, st);
+      const writing = prettier.format(functionToTypescript(res), {
+        parser: "typescript",
+      });
+      // console.log(`Writing: ${writing}`);
+      await fs.appendFile(outfile, writing, "utf-8");
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : JSON.stringify(err));
+      return;
+    }
   }
 }
 

@@ -380,8 +380,10 @@ uw_Teacher_externalTeachersF
 AS
 SELECT T_Teachers.uw_comments AS uw_Comments, T_Teachers.uw_email AS uw_Email, T_ExternalTeachers.uw_externalTeacherId AS uw_ExternalTeacherId, T_Teachers.uw_firstName AS uw_FirstName, T_Teachers.uw_id AS uw_Id, T_Teachers.uw_lastName AS uw_LastName, T_Teachers.uw_phone AS uw_Phone FROM uw_Teacher_teachers AS T_Teachers JOIN uw_Teacher_externalTeachers AS T_ExternalTeachers ON (T_Teachers.uw_id = T_ExternalTeachers.uw_id);
 
+CREATE DOMAIN studentid AS int8;
+
 CREATE TABLE uw_Student_students(
-    uw_id int8 NOT NULL,
+    uw_id studentid NOT NULL,
     uw_firstname text NOT NULL,
     uw_lastname text NOT NULL,
     uw_comments text NOT NULL,
@@ -395,7 +397,7 @@ CREATE TABLE uw_Student_students(
 
 CREATE TABLE uw_Student_studentphones(
     uw_id int8 NOT NULL,
-    uw_studentid int8 NOT NULL,
+    uw_studentid studentid NOT NULL,
     uw_number text NOT NULL,
     uw_description text,
     CONSTRAINT uw_Student_studentphones_pkey PRIMARY KEY (uw_id),
@@ -406,7 +408,7 @@ CREATE SEQUENCE uw_Student_studentphonesSeq;
 
 CREATE TABLE uw_Student_studentemails(
     uw_id int8 NOT NULL,
-    uw_studentid int8 NOT NULL,
+    uw_studentid studentid NOT NULL,
     uw_email text NOT NULL,
     uw_wantsnotificationsformessages bool NOT NULL,
     uw_wantsnotificationsfornotes bool NOT NULL,
@@ -587,7 +589,7 @@ CREATE TABLE uw_Lesson_lessongroupinvoicelines(
 
 CREATE TABLE uw_Lesson_enrollmentsincludingstopped(
     uw_id int8 NOT NULL,
-    uw_studentid int8 NOT NULL,
+    uw_studentid studentid NOT NULL,
     uw_lessongroupid int8 NOT NULL,
     uw_status text NOT NULL,
     uw_created date NOT NULL,
@@ -600,7 +602,7 @@ CREATE TABLE uw_Lesson_enrollmentsincludingstopped(
 
 CREATE TABLE uw_Lesson_enrollmentrequests(
     uw_id int8 NOT NULL,
-    uw_studentid int8 NOT NULL,
+    uw_studentid studentid NOT NULL,
     uw_status text NOT NULL,
     uw_secret text NOT NULL,
     uw_created timestamp NOT NULL,
@@ -984,16 +986,16 @@ CREATE OR REPLACE FUNCTION insertNewEmailStatus(uw_emailid int, version int, uw_
   RETURNING uw_emailid;
 $$ LANGUAGE sql;
 
-CREATE OR REPLACE FUNCTION getStudent(uw_studentid int) RETURNS RECORD AS $$
+CREATE OR REPLACE FUNCTION getStudent(uw_studentid studentid) RETURNS RECORD AS $$
   SELECT s.uw_firstname, s.uw_lastname, COALESCE(emails.emails, ARRAY[]) AS emails
   FROM uw_student_students s
   LEFT JOIN (SELECT em.uw_studentid, array_agg(json_build_object('id', em.uw_id, 'email', em.uw_email)) as emails
                 from uw_student_studentemails em
               group by uw_studentid
-  ) emails ON emails.uw_studentid = s.uw_id;
+  ) emails ON s.uw_id = emails.uw_studentid;
   $$ LANGUAGE sql;
 
-CREATE OR REPLACE FUNCTION getStudentNestedJoin(uw_studentid int) RETURNS RECORD AS $$
+CREATE OR REPLACE FUNCTION getStudentNestedJoin(uw_studentid studentid) RETURNS RECORD AS $$
   SELECT
   s.uw_firstname,
   s.uw_lastname,
@@ -1005,7 +1007,7 @@ CREATE OR REPLACE FUNCTION getStudentNestedJoin(uw_studentid int) RETURNS RECORD
 $$ LANGUAGE sql;
 
 
-CREATE OR REPLACE FUNCTION getStudentNestedJoinNoJson(uw_studentid int) RETURNS RECORD AS $$
+CREATE OR REPLACE FUNCTION getStudentNestedJoinNoJson(uw_studentid studentid) RETURNS RECORD AS $$
   SELECT
   s.uw_firstname,
   s.uw_lastname,

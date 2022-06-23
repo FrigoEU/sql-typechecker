@@ -173,6 +173,10 @@ export type Global = {
     readonly name: QName;
     readonly rel: RecordT;
   }>;
+  readonly domains: ReadonlyArray<{
+    readonly name: QName;
+    readonly type: SimpleT;
+  }>;
 };
 
 function eqType(t1: Type, t2: Type): boolean {
@@ -997,7 +1001,6 @@ type HandledFrom = { name: QName; rel: RecordT };
 type Nullable<T> = T | null;
 
 function findRel(g: Global, c: Context, e: Expr, n: QName): Nullable<RecordT> {
-  debugger;
   const d = c.decls.find((d) => eqQNames(d.name, n));
   if (d) {
     if (d.type.kind === "record") {
@@ -1548,6 +1551,15 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
   }
 
   const found = builtinoperators
+    .concat(
+      g.domains.map((d) => ({
+        name: { schema: "pg_catalog", name: "=" },
+        left: { kind: "scalar", name: d.name },
+        right: { kind: "scalar", name: d.name },
+        result: { kind: "scalar", name: { name: "boolean" } },
+        description: "equal",
+      }))
+    )
     .filter(function (op) {
       return eqQNames(
         {
@@ -1962,11 +1974,19 @@ export function parseSetupScripts(ast: Statement[]): Global {
         return doCreateView(acc, a);
       } else if (a.type === "alter table") {
         return doAlterTable(acc, a);
+      } else if (a.type === "create domain") {
+        return {
+          ...acc,
+          domains: acc.domains.concat({
+            name: a.name,
+            type: mkType(a.dataType, [{ type: "not null" }]),
+          }),
+        };
       } else {
         return acc;
       }
     },
-    { tables: [], views: [] }
+    { tables: [], views: [], domains: [] }
   );
 }
 

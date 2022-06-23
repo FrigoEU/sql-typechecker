@@ -4,7 +4,7 @@
   "main": "out/cli.js",
   "bin": "out/cli.js",
   "dependencies": {
-    "pgsql-ast-parser": "frigoeu/pgsql-ast-parser#plpgsql",
+    "pgsql-ast-parser": "git+https://github.com/frigoeu/pgsql-ast-parser#fc22940b767f7b4de5d3e9813307cfda5b98d0dc",
     "prettier": "^2.7.1"
   },
   "scripts": {
@@ -16,6 +16,7 @@
     "start_debug": "npm run debug -- -d ./sample -o ./sample/out.ts && ts-node index.ts",
     "start_index": "ts-node index.ts",
     "start_school": "npm run build && node --enable-source-maps ./out/cli.js -d ./school -o ./school/out.ts",
+    "start_school_debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js -d ./school -o ./school/out.ts",
     "debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js ",
     "test_debug": "node --inspect-brk ./node_modules/alsatian/dist/cli/alsatian-cli.js ./test/**/*.ts -t 20000000"
   },

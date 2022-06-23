@@ -1,4 +1,6 @@
 import postgres from "postgres";
+type studentid = number & { readonly __tag: "studentid" };
+
 export async function getemailstosend(
   pg: postgres.Sql<any>,
   args: {}
@@ -61,7 +63,7 @@ $$ LANGUAGE sql;
 }
 export async function getstudent(
   pg: postgres.Sql<any>,
-  args: { uw_studentid: number }
+  args: { uw_studentid: studentid }
 ): Promise<
   | {
       uw_firstname: string;
@@ -74,14 +76,14 @@ export async function getstudent(
   | undefined
 > {
   /* 
-CREATE FUNCTION getstudent(uw_studentid integer) RETURNS RECORD AS
+CREATE FUNCTION getstudent(uw_studentid studentid) RETURNS RECORD AS
 $$
   SELECT s.uw_firstname, s.uw_lastname, COALESCE(emails.emails, ARRAY[]) AS emails
   FROM uw_student_students s
   LEFT JOIN (SELECT em.uw_studentid, array_agg(json_build_object('id', em.uw_id, 'email', em.uw_email)) as emails
                 from uw_student_studentemails em
               group by uw_studentid
-  ) emails ON emails.uw_studentid = s.uw_id;
+  ) emails ON s.uw_id = emails.uw_studentid;
   $$ LANGUAGE sql;
  */
   return (
@@ -90,7 +92,7 @@ $$
 }
 export async function getstudentnestedjoin(
   pg: postgres.Sql<any>,
-  args: { uw_studentid: number }
+  args: { uw_studentid: studentid }
 ): Promise<
   | {
       uw_firstname: string;
@@ -103,7 +105,7 @@ export async function getstudentnestedjoin(
   | undefined
 > {
   /* 
-CREATE FUNCTION getstudentnestedjoin(uw_studentid integer) RETURNS RECORD AS
+CREATE FUNCTION getstudentnestedjoin(uw_studentid studentid) RETURNS RECORD AS
 $$
   SELECT
   s.uw_firstname,
@@ -121,12 +123,12 @@ $$ LANGUAGE sql;
 }
 export async function getstudentnestedjoinnojson(
   pg: postgres.Sql<any>,
-  args: { uw_studentid: number }
+  args: { uw_studentid: studentid }
 ): Promise<
   { uw_firstname: string; uw_lastname: string; emails: string[] } | undefined
 > {
   /* 
-CREATE FUNCTION getstudentnestedjoinnojson(uw_studentid integer) RETURNS RECORD AS
+CREATE FUNCTION getstudentnestedjoinnojson(uw_studentid studentid) RETURNS RECORD AS
 $$
   SELECT
   s.uw_firstname,

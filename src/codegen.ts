@@ -3,9 +3,11 @@ import {
   checkAllCasesHandled,
   functionType,
   JsonKnownT,
+  RecordT,
   showSqlType,
   SimpleT,
   Type,
+  VoidT,
 } from "./typecheck";
 
 export function showTypeAsTypescriptType(t: Type): string {
@@ -59,6 +61,24 @@ export function showTypeAsTypescriptType(t: Type): string {
     } else {
       return checkAllCasesHandled(t);
     }
+  }
+}
+
+function genDeserializeSimpleT(t: SimpleT, literalVar: string) {}
+
+function genDeserializationFunction(returnType: SimpleT | RecordT | VoidT) {
+  if (returnType.kind === "void") {
+    return `function deserialize(cells: unknown[]): any{
+      return cells;
+    }`;
+  } else if (returnType.kind === "record") {
+    return `function deserialize(cells: unknown[]): any{
+return ${TODO};
+}`;
+  } else {
+    `function deserialize(cells: unknown[]): any{
+return ${genDeserializeSimpleT(returnType, "cells[0]")};
+}`;
   }
 }
 
@@ -118,8 +138,6 @@ CREATE FUNCTION ${f.name.name}(${argsForCreateFunction}) RETURNS ${
   }${
     f.returns.kind === "record"
       ? "RECORD"
-      : f.returns.kind === "jsonknown"
-      ? "JSON"
       : f.returns.kind === "void"
       ? "void"
       : showTypeDroppingNullable(f.returns)
@@ -137,9 +155,7 @@ export async function ${f.name.name}(pool: Pool, args: ${argsType})
 
   /* ${recreatedSqlFunctionStatement} */
 
-  function deserialize(cells: unknown[]): any{
-    return cells;
-  }
+  ${genDeserializationFunction(f.returns)}
 
   const res = await pool.query({
     text: "SELECT * FROM ${funcInvocation}",

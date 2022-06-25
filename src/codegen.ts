@@ -45,6 +45,13 @@ export function showTypeAsTypescriptType(t: Type): string {
         return "Buffer";
       } else if (t.name.name === "date") {
         return "LocalDate";
+      } else if (t.name.name === "time") {
+        return "LocalTime";
+      } else if (
+        t.name.name === "timestamp without time zone" ||
+        t.name.name === "timestamp"
+      ) {
+        return "LocalDateTime";
       } else {
         return t.name.name;
       }
@@ -64,17 +71,75 @@ export function showTypeAsTypescriptType(t: Type): string {
   }
 }
 
-function genDeserializeSimpleT(t: SimpleT, literalVar: string) {}
+function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
+  if (t.kind === "array") {
+    return `${literalVar}.map((el: any) => ${genDeserializeSimpleT(
+      t.typevar as SimpleT,
+      "el"
+    )})`;
+  } else if (t.kind === "nullable") {
+    const inner = genDeserializeSimpleT(t.typevar as SimpleT, literalVar);
+    if (inner === literalVar) {
+      return inner;
+    } else {
+      return `${literalVar} === null ? (${inner}) : null`;
+    }
+  } else if (t.kind === "anyscalar") {
+    return literalVar;
+  } else if (t.kind === "jsonknown") {
+    return (
+      "({" +
+      t.record.fields
+        .map(
+          (f) =>
+            `${f.name?.name || "?"}: ${genDeserializeSimpleT(
+              f.type,
+              literalVar + '["' + f.name?.name + '"]'
+            )}`
+        )
+        .join(",\n") +
+      "})"
+    );
+  } else if (t.kind === "scalar") {
+    if (t.name.name === "date") {
+      return `LocalDate.parse(${literalVar})`;
+    } else if (t.name.name === "time") {
+      return `LocalTime.parse(${literalVar})`;
+    } else if (t.name.name === "timestamp with time zone") {
+      return `Instant.parse(${literalVar})`;
+    } else if (
+      t.name.name === "timestamp without time zone" ||
+      t.name.name === "timestamp"
+    ) {
+      return `LocalDateTime.parse(${literalVar})`;
+    } else {
+      return literalVar;
+    }
+  } else {
+    return checkAllCasesHandled(t);
+  }
+}
 
-function genDeserializationFunction(returnType: SimpleT | RecordT | VoidT) {
+function genDeserialization(
+  returnType: SimpleT | RecordT | VoidT,
+  literalVar: string
+) {
   if (returnType.kind === "void") {
-    return `function deserialize(cells: unknown[]): any{
-      return cells;
-    }`;
+    return literalVar;
   } else if (returnType.kind === "record") {
-    return `function deserialize(cells: unknown[]): any{
-return ${TODO};
-}`;
+    return (
+      "({" +
+      returnType.fields
+        .map(
+          (f, i) =>
+            `${f.name?.name || "?"}: ${genDeserializeSimpleT(
+              f.type,
+              literalVar + "[" + i + "]"
+            )}`
+        )
+        .join(",\n") +
+      "})"
+    );
   } else {
     `function deserialize(cells: unknown[]): any{
 return ${genDeserializeSimpleT(returnType, "cells[0]")};
@@ -155,15 +220,13 @@ export async function ${f.name.name}(pool: Pool, args: ${argsType})
 
   /* ${recreatedSqlFunctionStatement} */
 
-  ${genDeserializationFunction(f.returns)}
-
   const res = await pool.query({
     text: "SELECT * FROM ${funcInvocation}",
     values: [${argsAsList}],
     rowMode: "array",
   });
+  const rows = res.rows.map(row => ${genDeserialization(f.returns, "row")});
   debugger;
-  const rows = res.rows.map(deserialize);
   return rows${f.multipleRows ? "" : "[0]"};
   }
 `;
@@ -181,6 +244,6 @@ export function genDomain(dom: {
 export function getImports() {
   return `
 import type { Pool } from "pg";
-import type { Instant, LocalDate, LocalTime, LocalDateTime, ZonedDateTime } from "@js-joda/core";
+import { Instant, LocalDate, LocalTime, LocalDateTime} from "@js-joda/core";
 `;
 }

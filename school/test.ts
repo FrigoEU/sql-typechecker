@@ -1,4 +1,9 @@
-import { getstudent, studentid } from "./out";
+import {
+  getstudent,
+  getstudentnestedjoin,
+  getstudentnestedjoinnojson,
+  studentid,
+} from "./out";
 import { Pool } from "pg";
 import { sqlTypecheckerPgTypes } from "../src/types";
 
@@ -11,8 +16,12 @@ const studentid = <studentid>1;
 
 async function go() {
   debugger;
-  const res = await getstudent(pool, { uw_studentid: studentid });
-  console.log(res);
+  const res2 = await getstudentnestedjoin(pool, { uw_studentid: studentid });
+  const res3 = await getstudentnestedjoinnojson(pool, {
+    uw_studentid: studentid,
+  });
+  console.log(res2);
+  console.log(res3);
 }
 
 go();

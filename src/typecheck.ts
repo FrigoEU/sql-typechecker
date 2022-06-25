@@ -34,11 +34,11 @@ export type Type = SimpleT | RecordT;
 export type AnyScalarT = {
   kind: "anyscalar";
 };
-export type NullableT<T> = {
+export type NullableT<T extends SimpleT> = {
   kind: "nullable";
   typevar: T;
 };
-export type ArrayT<T> = {
+export type ArrayT<T extends SimpleT> = {
   kind: "array";
   subtype: "array" | "list";
   typevar: T;
@@ -60,8 +60,7 @@ export type SimpleT =
   | JsonKnownT
   | ScalarT
   | NullableT<any>
-  | ArrayT<any>
-  | NullableT<ArrayT<any>>;
+  | ArrayT<any>;
 
 type Field = {
   name: Name | null;
@@ -143,16 +142,16 @@ function requireBoolean(e: Expr, t: Type): void {
 }
 
 export const BuiltinTypeConstructors = {
-  Nullable: <T>(t: T): NullableT<T> => ({
+  Nullable: <T extends SimpleT>(t: T): NullableT<T> => ({
     kind: "nullable",
     typevar: t,
   }),
-  Array: <T>(t: T): ArrayT<T> => ({
+  Array: <T extends SimpleT>(t: T): ArrayT<T> => ({
     kind: "array",
     subtype: "array",
     typevar: t,
   }),
-  List: <T>(t: T): ArrayT<T> => ({
+  List: <T extends SimpleT>(t: T): ArrayT<T> => ({
     kind: "array",
     subtype: "list",
     typevar: t,

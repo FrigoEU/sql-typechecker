@@ -483,10 +483,10 @@ CREATE TABLE uw_Message_messages(
     uw_id int8 NOT NULL,
     uw_senderadmin bool NOT NULL,
     uw_senderteacherid int8,
-    uw_senderstudentid int8,
+    uw_senderstudentid studentid,
     uw_receiveradmin bool NOT NULL,
     uw_receiverteacherid int8,
-    uw_receiverstudentid int8,
+    uw_receiverstudentid studentid,
     uw_date date NOT NULL,
     uw_time time NOT NULL,
     uw_read bool NOT NULL,
@@ -1002,7 +1002,11 @@ CREATE OR REPLACE FUNCTION getStudentNestedJoin(uw_studentid studentid) RETURNS 
   (SELECT array_agg(json_build_object('id', em.uw_id, 'email', em.uw_email)) as emails
      from uw_student_studentemails em
     where em.uw_studentid = s.uw_id
-    group by uw_studentid) AS emails
+    group by uw_studentid) AS emails,
+  (SELECT array_agg(json_build_object('id', mess.uw_id, 'date', uw_date ,'time', uw_time, 'text', mess.uw_text)) as messages
+     from uw_message_messages mess
+    where mess.uw_receiverstudentid = s.uw_id
+    group by uw_receiverstudentid) AS messages
   FROM uw_student_students s
 $$ LANGUAGE sql;
 

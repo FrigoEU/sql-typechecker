@@ -11,8 +11,9 @@ $$
   RETURNING id;
   $$ LANGUAGE sql;
  */
-  return ((await pg`SELECT * FROM insertintotestje(${args.id}, ${args.name})`) as any)[0]
-    ?.insertintotestje;
+  return (
+    (await pg`SELECT * FROM insertintotestje(${args.id}, ${args.name})`) as any
+  )[0]?.insertintotestje;
 }
 export async function selectfromtestje1(
   pg: postgres.Sql<any>,
@@ -25,7 +26,9 @@ $$
   FROM testje
 $$ LANGUAGE sql;
  */
-  return ((await pg`SELECT * FROM selectfromtestje1() AS selectfromtestje1(id integer, name text)`) as any)[0];
+  return (
+    (await pg`SELECT * FROM selectfromtestje1() AS selectfromtestje1(id integer, name text)`) as any
+  )[0];
 }
 export async function selectfromtestje2(
   pg: postgres.Sql<any>,

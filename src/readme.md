@@ -21,9 +21,3 @@ Type inference:
             * Eigenlijk betekent dit: Als je mij ergens een NULL geeft, geef ik NULL terug. De body wordt niet uitgevoerd. Dus inderdaad, je gaat altijd in de function body zelf not-nullable zijn! Als je zo'n functie aanroept kan je echter wel NULL terugkrijgen, als een van de argumenten NULL is. Je kan dat als speciale modifier op die functie bijhouden, en als een van de argumenten nullable is, dan is het return type ook nullable.. (NOPE ZIE VERDER)
             * Optional parameters kunnen we wel nog ondersteunen met "myvar int default NULL". NOPE toch niet, eens STRICT kan je nooit nullable parameters binnenkrijgen. . (NOPE ZIE VERDER)
             * Moeten we een optie voorzien (of gewoon default zo doen) dat input params aan STRICT functions nooit NULL mogen zijn?
-
-TODO:
-* interpret + check RETURNS:
-  * bvb "int": krijg je echt int terug, geen record
-  * "record": krijg je een record met fields terug
-  * setof {record,"int"}: krijg je meerdere lijnen terug

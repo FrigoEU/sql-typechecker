@@ -1,8 +1,10 @@
-import postgres = require("postgres");
-type studentid = number & { readonly __tag: "studentid" };
+import type { LocalDate } from "@js-joda/core";
+import type { Pool } from "pg";
+
+export type studentid = number & { readonly __tag: "studentid" };
 
 export async function getemailstosend(
-  pg: postgres.Sql<any>,
+  pool: Pool,
   args: {}
 ): Promise<
   {
@@ -41,10 +43,22 @@ $$
   AND e.uw_html IS NOT NULL -- NULL = ARCHIVED
 $$ LANGUAGE sql;
  */
-  return (await pg`SELECT * FROM getemailstosend() AS getemailstosend(uw_id bigint, uw_from text, uw_replyto text, uw_address text, uw_addressee text, uw_subject text, uw_text text, uw_html text, uw_externalid text, uw_filename text, uw_content bytea)`) as any;
+
+  function deserialize(cells: unknown[]): any {
+    return cells;
+  }
+
+  const res = await pool.query({
+    text: "SELECT * FROM getemailstosend() AS getemailstosend(uw_id bigint, uw_from text, uw_replyto text, uw_address text, uw_addressee text, uw_subject text, uw_text text, uw_html text, uw_externalid text, uw_filename text, uw_content bytea)",
+    values: [],
+    rowMode: "array",
+  });
+  debugger;
+  const rows = res.rows.map(deserialize);
+  return rows;
 }
 export async function insertnewemailstatus(
-  pg: postgres.Sql<any>,
+  pool: Pool,
   args: { uw_emailid: number; version: number; uw_status: string }
 ): Promise<number | undefined> {
   /* 
@@ -57,29 +71,41 @@ $$
   RETURNING uw_emailid;
 $$ LANGUAGE sql;
  */
-  return (
-    (await pg`SELECT * FROM insertnewemailstatus(${args.uw_emailid}, ${args.version}, ${args.uw_status})`) as any
-  )[0]?.insertnewemailstatus;
+
+  function deserialize(cells: unknown[]): any {
+    return cells;
+  }
+
+  const res = await pool.query({
+    text: "SELECT * FROM insertnewemailstatus($1::integer,$2::integer,$3::text)",
+    values: [args.uw_emailid, args.version, args.uw_status],
+    rowMode: "array",
+  });
+  debugger;
+  const rows = res.rows.map(deserialize);
+  return rows[0];
 }
 export async function getstudent(
-  pg: postgres.Sql<any>,
+  pool: Pool,
   args: { uw_studentid: studentid }
 ): Promise<
   | {
       uw_firstname: string;
       uw_lastname: string;
-      uw_birthday: date | null;
-      emails: {
-        id: number;
-        email: string;
-      }[];
+      uw_birthday: LocalDate | null;
+      emails:
+        | {
+            id: number;
+            email: string;
+          }[]
+        | null;
     }
   | undefined
 > {
   /* 
 CREATE FUNCTION getstudent(uw_studentid studentid) RETURNS RECORD AS
 $$
-  SELECT s.uw_firstname, s.uw_lastname, s.uw_birthday, COALESCE(emails.emails, ARRAY[]) AS emails
+  SELECT s.uw_firstname, s.uw_lastname, s.uw_birthday, emails.emails AS emails
   FROM uw_student_students s
   LEFT JOIN (SELECT em.uw_studentid, array_agg(json_build_object('id', em.uw_id, 'email', em.uw_email)) as emails
                 from uw_student_studentemails em
@@ -87,12 +113,22 @@ $$
   ) emails ON s.uw_id = emails.uw_studentid;
   $$ LANGUAGE sql;
  */
-  return (
-    (await pg`SELECT * FROM getstudent(${args.uw_studentid}) AS getstudent(uw_firstname text, uw_lastname text, uw_birthday date, emails [])`) as any
-  )[0];
+
+  function deserialize(cells: unknown[]): any {
+    return cells;
+  }
+
+  const res = await pool.query({
+    text: "SELECT * FROM getstudent($1::studentid) AS getstudent(uw_firstname text, uw_lastname text, uw_birthday date, emails json[])",
+    values: [args.uw_studentid],
+    rowMode: "array",
+  });
+  debugger;
+  const rows = res.rows.map(deserialize);
+  return rows[0];
 }
 export async function getstudentnestedjoin(
-  pg: postgres.Sql<any>,
+  pool: Pool,
   args: { uw_studentid: studentid }
 ): Promise<
   | {
@@ -118,12 +154,22 @@ $$
   FROM uw_student_students s
 $$ LANGUAGE sql;
  */
-  return (
-    (await pg`SELECT * FROM getstudentnestedjoin(${args.uw_studentid}) AS getstudentnestedjoin(uw_firstname text, uw_lastname text, emails [])`) as any
-  )[0];
+
+  function deserialize(cells: unknown[]): any {
+    return cells;
+  }
+
+  const res = await pool.query({
+    text: "SELECT * FROM getstudentnestedjoin($1::studentid) AS getstudentnestedjoin(uw_firstname text, uw_lastname text, emails json[])",
+    values: [args.uw_studentid],
+    rowMode: "array",
+  });
+  debugger;
+  const rows = res.rows.map(deserialize);
+  return rows[0];
 }
 export async function getstudentnestedjoinnojson(
-  pg: postgres.Sql<any>,
+  pool: Pool,
   args: { uw_studentid: studentid }
 ): Promise<
   { uw_firstname: string; uw_lastname: string; emails: string[] } | undefined
@@ -141,7 +187,17 @@ $$
   FROM uw_student_students s
 $$ LANGUAGE sql;
  */
-  return (
-    (await pg`SELECT * FROM getstudentnestedjoinnojson(${args.uw_studentid}) AS getstudentnestedjoinnojson(uw_firstname text, uw_lastname text, emails text[])`) as any
-  )[0];
+
+  function deserialize(cells: unknown[]): any {
+    return cells;
+  }
+
+  const res = await pool.query({
+    text: "SELECT * FROM getstudentnestedjoinnojson($1::studentid) AS getstudentnestedjoinnojson(uw_firstname text, uw_lastname text, emails text[])",
+    values: [args.uw_studentid],
+    rowMode: "array",
+  });
+  debugger;
+  const rows = res.rows.map(deserialize);
+  return rows[0];
 }

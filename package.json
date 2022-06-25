@@ -5,7 +5,9 @@
   "bin": "out/cli.js",
   "dependencies": {
     "pg": "^8.7.3",
-    "pgsql-ast-parser": "git+https://github.com/frigoeu/pgsql-ast-parser#fc22940b767f7b4de5d3e9813307cfda5b98d0dc",
+    "@js-joda/core": "^4.3.1",
+    "postgres-range": "^1.1.2",
+    "pgsql-ast-parser": "git+https://github.com/frigoeu/pgsql-ast-parser#b675dc860429ae6749b54b688caae836d510054",
     "prettier": "^2.7.1"
   },
   "scripts": {
@@ -19,7 +21,8 @@
     "start_school": "npm run build && node --enable-source-maps ./out/cli.js -d ./school -o ./school/out.ts",
     "start_school_debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js -d ./school -o ./school/out.ts",
     "debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js ",
-    "test_debug": "node --inspect-brk ./node_modules/alsatian/dist/cli/alsatian-cli.js ./test/**/*.ts -t 20000000"
+    "test_debug": "node --inspect-brk ./node_modules/alsatian/dist/cli/alsatian-cli.js ./test/**/*.ts -t 20000000",
+    "start_school_test_debug": "node --inspect-brk -r ts-node/register school/test.ts"
   },
   "devDependencies": {
     "@types/node": "^14.14.10",

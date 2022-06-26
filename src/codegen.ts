@@ -218,8 +218,6 @@ $$${f.code}$$ LANGUAGE ${f.language};
 export async function ${f.name.name}(pool: Pool, args: ${argsType})
   : Promise<${returnTypeAsString}>{
 
-  /* ${recreatedSqlFunctionStatement} */
-
   const res = await pool.query({
     text: "SELECT * FROM ${funcInvocation}",
     values: [${argsAsList}],

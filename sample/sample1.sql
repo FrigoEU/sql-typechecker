@@ -12,7 +12,7 @@ $$ LANGUAGE sql;
 CREATE OR REPLACE FUNCTION selectAllFromTestje()
 RETURNS SETOF record
 AS $$
-  SELECT id, name
+  SELECT id, name 
   FROM testje
 $$ LANGUAGE sql;
 

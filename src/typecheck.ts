@@ -572,6 +572,8 @@ function doAlterTable(_g: Global, s: AlterTableStatement): Global {
 function deriveNameFromExpr(expr: Expr): Name | null {
   if (expr.type === "ref") {
     return { name: expr.name };
+  } else if (expr.type === "call") {
+    return expr.function;
   } else if (expr.type === "parameter") {
     return null;
   } else {
@@ -594,8 +596,16 @@ export function elabSelect(
       requireBoolean(s.where, t);
     }
 
+    const names: string[] = [];
     const fields = (s.columns || []).flatMap((c: SelectedColumn): Field[] => {
       const n = c.alias ? c.alias : deriveNameFromExpr(c.expr);
+      if (n === null) {
+        throw new UnableToDeriveFieldName(c.expr);
+      }
+      if (names.includes(n.name)) {
+        throw new DuplicateFieldNames(c.expr, n.name);
+      }
+      names.push(n.name);
 
       const t = elabExpr(g, newC, c.expr);
 
@@ -897,7 +907,8 @@ export function doCreateFunction(
       decls: c.decls.concat(inputs),
     };
 
-    const body = parse(s.code);
+    // TODO adjust locations based on location of "s.code"
+    const body = parse(s.code, { locationTracking: true });
 
     if (body.length === 0) {
       // empty function body
@@ -1183,6 +1194,32 @@ class ColumnsMismatch extends ErrorWithLocation {
 class KindMismatch extends ErrorWithLocation {
   constructor(e: Expr, type: Type | VoidT, errormsg: string) {
     super(e._location, `KindMismatch: ${e}: ${type}: ${errormsg}}`);
+  }
+}
+class UnableToDeriveFieldName extends ErrorWithLocation {
+  constructor(e: Expr) {
+    super(
+      e._location,
+      `Unable to derive field name for expression ${e}, please provide an alias with <expr> AS <name>`
+    );
+  }
+}
+class DuplicateFieldNames extends ErrorWithLocation {
+  constructor(e: Expr, name: string) {
+    super(
+      e._location,
+      `Duplicate column names: expression:
+
+${toSql.expr(e)}
+
+has field name
+
+"${name}"
+
+but this name already exists in the statement. Alias this column with
+
+<expr> AS <name>`
+    );
   }
 }
 export class TypeMismatch extends ErrorWithLocation {
@@ -1716,7 +1753,11 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
   } else if (e.type === "boolean") {
     return BuiltinTypes.Boolean;
   } else if (e.type === "string") {
-    return BuiltinTypes.Text;
+    if (e.value.trim() === "{}") {
+      return BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar);
+    } else {
+      return BuiltinTypes.Text;
+    }
   } else if (e.type === "unary") {
     return elabUnaryOp(g, c, e);
   } else if (e.type === "binary") {

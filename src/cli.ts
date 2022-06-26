@@ -61,7 +61,9 @@ async function go() {
   for (let sqlFile of allSqlFiles) {
     console.log("Processing file ${sqlFile}");
     const fileContents = await fs.readFile(sqlFile, "utf-8");
-    const statements: Statement[] = parse(fileContents);
+    const statements: Statement[] = parse(fileContents, {
+      locationTracking: true,
+    });
     allStatements.push(...statements);
   }
 

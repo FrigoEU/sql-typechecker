@@ -2,7 +2,12 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { CreateFunctionStatement, parse, Statement } from "pgsql-ast-parser";
 import * as prettier from "prettier";
-import { functionToTypescript, genDomain, getImports } from "./codegen";
+import {
+  functionToTypescript,
+  genCrudOperations,
+  genDomain,
+  getImports,
+} from "./codegen";
 import { doCreateFunction, parseSetupScripts } from "./typecheck";
 
 go();
@@ -77,12 +82,15 @@ async function go() {
     isCreateFunctionStatement
   );
 
-  const outfile = await prepOutFile(path.resolve(process.cwd(), outArg));
+  await fs.mkdir(path.resolve(process.cwd(), outArg), { recursive: true });
+  const functionsOutFile = await prepOutFile(
+    path.join(path.resolve(process.cwd(), outArg), "functions.ts")
+  );
 
   for (let dom of g.domains) {
-    await fs.appendFile(outfile, genDomain(dom) + "\n", "utf-8");
+    await fs.appendFile(functionsOutFile, genDomain(dom) + "\n", "utf-8");
   }
-  await fs.appendFile(outfile, `\n`, "utf-8");
+  await fs.appendFile(functionsOutFile, `\n`, "utf-8");
 
   for (let st of createFunctionStatements) {
     try {
@@ -91,11 +99,27 @@ async function go() {
         parser: "typescript",
       });
       // console.log(`Writing: ${writing}`);
-      await fs.appendFile(outfile, writing, "utf-8");
+      await fs.appendFile(functionsOutFile, writing, "utf-8");
     } catch (err) {
       console.error(err instanceof Error ? err.message : JSON.stringify(err));
       return;
     }
+  }
+
+  const crudDir = path.join(path.resolve(process.cwd(), outArg), "crud");
+  await fs.mkdir(crudDir, { recursive: true });
+
+  for (let table of g.tables) {
+    const tableOutFile = await prepOutFile(
+      path.join(crudDir, table.name.name + ".ts")
+    );
+    const text = genCrudOperations(table);
+    await fs.appendFile(
+      tableOutFile,
+      // text,
+      prettier.format(text, { parser: "typescript" }),
+      "utf-8"
+    );
   }
 }
 

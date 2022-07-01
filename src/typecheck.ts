@@ -166,7 +166,8 @@ export type Global = {
   readonly tables: ReadonlyArray<{
     readonly name: QName;
     readonly rel: RecordT;
-    // readonly defaults: Name[];
+    readonly primaryKey: Name[];
+    readonly defaults: Name[];
   }>;
   readonly views: ReadonlyArray<{
     readonly name: QName;
@@ -547,10 +548,50 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
       });
     }
   }, []);
+
+  const primaryKey = (function () {
+    const primaryKeyConstraint = mapPartial(s.constraints || [], (c) =>
+      c.type === "primary key" ? c : null
+    );
+    if (primaryKeyConstraint.length > 0) {
+      return primaryKeyConstraint[0].columns;
+    }
+    const columnWithPrimaryKey = mapPartial(s.columns, (c) =>
+      c.kind === "column" &&
+      (c.constraints || []).some(
+        (constr: ColumnConstraint) => constr.type === "primary key"
+      )
+        ? c
+        : null
+    );
+    if (columnWithPrimaryKey.length > 0) {
+      return columnWithPrimaryKey.map((c) => c.name);
+    } else {
+      return [];
+    }
+  })();
+
+  const defaults = mapPartial(s.columns, (col) => {
+    if (col.kind !== "column") {
+      return null;
+    }
+    const t = mkType(col.dataType, col.constraints || []);
+    if (t.kind === "scalar" && t.name.name.toLowerCase() === "serial") {
+      return col;
+    }
+    if ((col.constraints || []).some((constr) => constr.type === "default")) {
+      return col;
+    } else {
+      return null;
+    }
+  });
+
   return {
     ...g,
     tables: g.tables.concat({
       name: s.name,
+      primaryKey,
+      defaults: defaults.map((c) => c.name),
       rel: {
         kind: "record",
         fields,
@@ -2060,7 +2101,7 @@ export function checkAllCasesHandled(_: never): any {
   throw new Error("Oops didn't expect that");
 }
 
-function showQName(n: QName): string {
+export function showQName(n: QName): string {
   return n.schema ? n.schema + "." + n.name : n.name;
 }
 

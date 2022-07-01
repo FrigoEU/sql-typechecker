@@ -1,9 +1,10 @@
-import { QName } from "pgsql-ast-parser";
+import { Name, QName } from "pgsql-ast-parser";
 import {
   checkAllCasesHandled,
   functionType,
   JsonKnownT,
   RecordT,
+  showQName,
   showSqlType,
   SimpleT,
   Type,
@@ -244,4 +245,140 @@ export function getImports() {
 import type { Pool } from "pg";
 import { Instant, LocalDate, LocalTime, LocalDateTime} from "@js-joda/core";
 `;
+}
+
+export function genCrudOperations(table: {
+  readonly name: QName;
+  readonly rel: RecordT;
+  readonly primaryKey: Name[];
+  readonly defaults: Name[];
+}): string {
+  const selectAll = `
+export async function getAll(pool: Pool): Promise<${showTypeAsTypescriptType(
+    table.rel
+  )}[]>{
+
+const res = await pool.query({
+text: "SELECT * FROM ${showQName(table.name)}",
+values: [],
+rowMode: "array",
+});
+const rows = res.rows.map(row => ${genDeserialization(table.rel, "row")});
+return rows;
+}`;
+
+  const primaryKeySingleCol: null | { name: Name; type: SimpleT } =
+    (function getPrimaryKey() {
+      if (table.primaryKey.length === 1) {
+        return {
+          name: table.primaryKey[0],
+          type: table.rel.fields.find(
+            (f) => f.name?.name === table.primaryKey[0].name
+          )?.type!,
+        };
+      } else {
+        return null;
+      }
+    })();
+
+  if (!primaryKeySingleCol) {
+    return selectAll;
+  } else {
+    const relWithoutPrim = table.rel.fields.filter(
+      (f) => f.name?.name !== primaryKeySingleCol.name.name
+    );
+    const mandatoryFields = table.rel.fields.filter(
+      (c) => !table.defaults.some((def) => def.name === c.name?.name)
+    );
+    const optionalFields = table.rel.fields.filter((c) =>
+      table.defaults.some((def) => def.name === c.name?.name)
+    );
+    const inputRow =
+      mandatoryFields
+        .map(
+          (f) => `
+${f.name?.name}: ${showTypeAsTypescriptType(f.type)}`
+        )
+        .join(",") +
+      optionalFields
+        .map(
+          (f) => `
+${f.name?.name}?: ${showTypeAsTypescriptType(f.type)}`
+        )
+        .join(",");
+    const insert = `
+export async function insert(pool: Pool, row: {${inputRow}}): Promise<{${
+      primaryKeySingleCol.name.name
+    }: ${showTypeAsTypescriptType(primaryKeySingleCol.type)}} | null>{
+
+  const providedFields = Object.keys(row);
+
+  const res = await pool.query({
+  text: "INSERT INTO ${showQName(
+    table.name
+  )} (" + (providedFields.join(", ")) + ") VALUES (" + providedFields.map((_, i) => "$" + (i + 1)).join(", ") +") RETURNING ${
+      primaryKeySingleCol.name.name
+    }",
+  values: providedFields.map(f => row[f]),
+  rowMode: "array",
+  });
+  if (res && res[0]){
+    return {${primaryKeySingleCol.name.name}: res[0][0]};
+  } else {
+    return null;
+  }
+}`;
+
+    const inputRowForUpdate = relWithoutPrim
+      .map(
+        (f) => `
+${f.name?.name}?: ${showTypeAsTypescriptType(f.type)}`
+      )
+      .join(",");
+    const update = `
+export async function update(pool: Pool, pk: {${
+      primaryKeySingleCol.name.name
+    }: ${showTypeAsTypescriptType(
+      primaryKeySingleCol.type
+    )}}, row: {${inputRowForUpdate}}): Promise<null>{
+
+  const providedFields = Object.keys(row);
+  if (providedFields.length === 0){ return null; }
+
+  await pool.query({
+  text: "UPDATE ${showQName(
+    table.name
+  )} SET " + providedFields.map((f, i) => f + " = $" + (i + 2)).join(", ") + " WHERE ${
+      primaryKeySingleCol.name.name
+    } = $1",
+values: [pk.${
+      primaryKeySingleCol.name.name
+    }].concat(providedFields.map(f => row[f])),
+  rowMode: "array",
+  });
+  return null;
+}`;
+
+    const del = `
+export async function del(pool: Pool, pk: {${
+      primaryKeySingleCol.name.name
+    }: ${showTypeAsTypescriptType(primaryKeySingleCol.type)}}): Promise<null>{
+
+await pool.query({
+text: "DELETE FROM ${showQName(table.name)} WHERE ${
+      primaryKeySingleCol.name.name
+    } = $1",
+values: [pk.${primaryKeySingleCol.name.name}],
+rowMode: "array",
+});
+return null;
+}`;
+
+    return `
+${selectAll}
+${insert}
+${update}
+${del}
+`;
+  }
 }

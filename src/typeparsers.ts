@@ -17,7 +17,6 @@ export function registerSqlTypecheckerTypeParsers() {
   // "timestamp with time zone" 2022-06-23T15:52:39.77314+00:00
   types.setTypeParser(types.builtins.TIMESTAMPTZ, (val) => val);
 
-  types.setTypeParser(types.builtins.TIMESTAMPTZ, (val) => val);
   types.setTypeParser(1115, array.parse); // timestamp without time zone[]
   types.setTypeParser(1182, array.parse); // date[]
   types.setTypeParser(1185, array.parse); // timestamp with time zone[]

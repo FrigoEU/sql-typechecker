@@ -1,12 +1,12 @@
 const esbuild = require("esbuild");
 
 const buildOptions = {
-  entryPoints: ["src/cli.ts"],
+  entryPoints: ["src/cli.ts", "src/typeparsers.ts"],
   bundle: true,
   sourcemap: true,
   platform: "node",
-  outdir: 'out'
+  outdir: 'out',
+  external: ["pg-native"]
 };
 
-esbuild.build(buildOptions)
-  .catch(() => process.exit(1));
+esbuild.build(buildOptions).catch(() => process.exit(1));

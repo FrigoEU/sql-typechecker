@@ -225,7 +225,6 @@ export async function ${f.name.name}(pool: Pool, args: ${argsType})
     rowMode: "array",
   });
   const rows = res.rows.map(row => ${genDeserialization(f.returns, "row")});
-  debugger;
   return rows${f.multipleRows ? "" : "[0]"};
   }
 `;

@@ -2,3 +2,5 @@
 /.log/
 /out/
 /school/out/
+/school/db/
+/school/**/*.ts

@@ -6,6 +6,7 @@ const buildOptions = {
   sourcemap: true,
   platform: "node",
   outdir: 'out',
+  banner: '#!/usr/bin/env node' ,
   external: ["pg-native"]
 };
 

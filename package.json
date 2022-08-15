@@ -16,7 +16,7 @@
     "build:types": "tsc --emitDeclarationOnly --declaration --outDir ./out --module commonjs --target ES2019 --esModuleInterop src/typeparsers.ts",
     "test": "alsatian ./test/**/*.ts",
     "start": "npm run build && node --enable-source-maps ./out/cli.js -d ./sample -o ./sample/out.ts && ts-node index.ts",
-    "start_debug": "npm run debug -- -d ./sample -o ./sample/out.ts && ts-node index.ts",
+    "start_debug": "npm run debug -- -d ./sample -o ./sample/out.ts && ts-node index.ts", 
     "start_index": "ts-node index.ts",
     "start_school": "npm run build && node --enable-source-maps ./out/cli.js -d ./school -o ./school/db",
     "start_school_debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js -d ./school -o ./school/out",

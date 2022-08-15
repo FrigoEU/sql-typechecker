@@ -1,13 +1,13 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "main": "out/typeparsers.js",
   "files": ["out/**"],
   "bin": "out/cli.js",
   "dependencies": {
     "@js-joda/core": "^4.3.1",
     "pg": "^8.7.3",
-    "pgsql-ast-parser": "git+https://github.com/frigoeu/pgsql-ast-parser#b675dc860429ae6749b54b688caae836d510054",
+    "pgsql-ast-parser": "git+https://github.com/frigoeu/pgsql-ast-parser#75da5fa1cddd9ef774805ee264a5f3eebc824ae",
     "postgres-range": "^1.1.2"
   },
   "scripts": {

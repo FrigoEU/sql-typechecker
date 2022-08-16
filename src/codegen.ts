@@ -329,7 +329,7 @@ export async function insert(pool: Pool, row: {${inputRow}}): Promise<{${
       primaryKeySingleCol.name.name
     }: ${showTypeAsTypescriptType(primaryKeySingleCol.type)}} | null>{
 
-  const providedFields = Object.keys(row);
+  const providedFields = Object.keys(row)  as (keyof typeof row)[];
 
   const res = await pool.query({
   text: "INSERT INTO ${showQName(
@@ -340,8 +340,8 @@ export async function insert(pool: Pool, row: {${inputRow}}): Promise<{${
   values: providedFields.map(f => row[f]),
   rowMode: "array",
   });
-  if (res && res[0]){
-    return {${primaryKeySingleCol.name.name}: res[0][0]};
+  if (res && res.rows[0]){
+    return {${primaryKeySingleCol.name.name}: res.rows[0][0]};
   } else {
     return null;
   }
@@ -360,7 +360,7 @@ export async function update(pool: Pool, pk: {${
       primaryKeySingleCol.type
     )}}, row: {${inputRowForUpdate}}): Promise<null>{
 
-  const providedFields = Object.keys(row);
+  const providedFields = Object.keys(row) as (keyof typeof row)[] ;
   if (providedFields.length === 0){ return null; }
 
   await pool.query({
@@ -369,9 +369,9 @@ export async function update(pool: Pool, pk: {${
   )} SET " + providedFields.map((f, i) => f + " = $" + (i + 2)).join(", ") + " WHERE ${
       primaryKeySingleCol.name.name
     } = $1",
-values: [pk.${
+values: ([pk.${
       primaryKeySingleCol.name.name
-    }].concat(providedFields.map(f => row[f])),
+    }] as any[]).concat(providedFields.map(f => row[f])),
   rowMode: "array",
   });
   return null;

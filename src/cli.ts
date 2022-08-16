@@ -155,11 +155,10 @@ async function go() {
         await fs.appendFile(functionsOutFile, writing, "utf-8");
       } catch (err) {
         if (err instanceof ErrorWithLocation && err.l !== undefined) {
-          debugger;
           const found = findCode(st.code || "", err.l);
           if (found) {
             console.error("");
-            console.error(`Found error at line ${found.lineNumber}`);
+            console.error(`Typechecking error`);
             console.error("");
             console.error(found.line);
             console.error(

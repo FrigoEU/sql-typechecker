@@ -80,3 +80,47 @@ CREATE OR REPLACE FUNCTION getSyncedUnpaidInvoices() RETURNS SETOF RECORD AS $$
   WHERE uw_accountingsoftwareidentifier IS NOT NULL
   AND lines.uw_amount - COALESCE(credited.uw_amount, 0) - COALESCE(paid.uw_amount, 0) <> 0
 $$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION insertNewEmail(prefix text, subject text, tex text, html text, frm text, replyto text, addressee text, address text) RETURNS SETOF RECORD AS $$
+
+  WITH newid AS (SELECT nextval('uw_emailid_seq') AS id),
+        newemail AS (
+                      INSERT
+                        INTO uw_email_emails (
+                                              uw_id,
+                                              uw_externalid,
+                                              uw_subject,
+                                              uw_text,
+                                              uw_html,
+                                              uw_from,
+                                              uw_replyto,
+                                              uw_addressee,
+                                              uw_address
+                                            )
+                      SELECT newid.id,
+                             prefix || CAST(newid.id AS text) AS text,
+                             subject,
+                             tex,
+                             html,
+                             frm,
+                             replyto,
+                             addressee,
+                             address
+                        FROM newid
+                  ),
+        newstatus AS (
+                      INSERT
+                        INTO uw_email_statusses (
+                                                  uw_emailid,
+                                                  uw_version,
+                                                  uw_status,
+                                                  uw_stamp,
+                                                  uw_islastversion
+                                                )
+                      SELECT id, 1, 'WAITING', now(), true
+                        FROM newid
+                  )
+  SELECT id
+  FROM newid
+
+$$ LANGUAGE sql;

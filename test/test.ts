@@ -1,4 +1,5 @@
 import { Expect, Focus, IgnoreTest, Test, TestFixture } from "alsatian";
+import { isObject, isPlainObject, mapValues, omit } from "lodash";
 import { Name, parse, QName } from "pgsql-ast-parser";
 import { Either, Left, Right } from "purify-ts";
 import {
@@ -71,7 +72,8 @@ function expectInputs(
 function expectReturnType<T>(
   setupStr: string,
   queryStr: string,
-  expectedReturnType: RecordT | ScalarT | ArrayT<T> | VoidT
+  expectedReturnType: RecordT | ScalarT | ArrayT<T> | VoidT,
+  opts?: { multipleRows: boolean }
 ) {
   testCreateFunction(setupStr, queryStr, (res) => {
     res.caseOf({
@@ -79,7 +81,19 @@ function expectReturnType<T>(
         throw err;
       },
       Right: (res) => {
-        Expect(res.returns).toEqual(expectedReturnType);
+        function removeLocation(obj: Object): any {
+          if (isPlainObject(obj)) {
+            const mapped = mapValues(obj, (inner) => removeLocation(inner));
+            return omit(mapped, "_location");
+          } else if (Array.isArray(obj)) {
+            return obj.map((inner) => removeLocation(inner));
+          }
+          return obj;
+        }
+        Expect(removeLocation(res.returns)).toEqual(expectedReturnType);
+        if (opts) {
+          Expect(res.multipleRows).toEqual(opts.multipleRows);
+        }
       },
     });
   });
@@ -109,13 +123,13 @@ export class TypecheckerTests {
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
   SELECT id, name
   FROM testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -134,13 +148,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT mytest.id as myid
 FROM testje as mytest
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "myid" },
@@ -156,7 +170,7 @@ $$ LANGUAGE sql;
     expectInputs(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect(myid int, myname text default null) RETURNS SETOF AS $$
+CREATE FUNCTION myselect(myid int, myname text default null) RETURNS SETOF RECORD AS $$
   SELECT id, name
   FROM testje
   WHERE id = myid
@@ -181,7 +195,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect(myname text) RETURNS SETOF AS $$
+CREATE FUNCTION myselect(myname text) RETURNS SETOF RECORD AS $$
   SELECT id, name
   FROM testje
   WHERE id = myname;
@@ -196,14 +210,14 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT testje.id as id1, testje2.id as id2, testje.name
 FROM testje
 JOIN testje AS testje2 ON testje.name = testje2.name
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id1" },
@@ -227,14 +241,14 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT testje.id as id1, testje2.id as id2
 FROM testje
 LEFT OUTER JOIN testje AS testje2 ON testje.name = testje2.name
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id1" },
@@ -254,14 +268,14 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT testje.id as id1, testje2.id as id2
 FROM testje
 RIGHT JOIN testje AS testje2 ON testje.name = testje2.name
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id1" },
@@ -281,7 +295,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT name
 FROM testje
 JOIN testje AS testje2 ON testje.name = testje2.name
@@ -299,14 +313,14 @@ create table testje ( id int not null, name text );
 create table testje2 ( id2 int not null, name2 text );
 `,
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT *
 FROM testje
 JOIN testje2 ON testje.id = testje2.id2
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -337,14 +351,14 @@ create table testje ( id int not null, name text );
 create table testje2 ( id2 int not null, name2 text );
 `,
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT testje2.*
 FROM testje
 JOIN testje2 ON testje.id = testje2.id2
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id2" },
@@ -364,7 +378,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id
 FROM testje
 WHERE id = NULL
@@ -379,14 +393,14 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id
 FROM testje
 WHERE id IS NULL
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -398,18 +412,64 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public isNull2() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+SELECT name
+FROM testje
+WHERE name IS NULL
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "name" },
+            type: BuiltinTypes.Null,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public isNotNull() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+SELECT name
+FROM testje
+WHERE name IS NOT NULL
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "name" },
+            type: BuiltinTypes.Text,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public operators() {
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT -id + 2 as id
 FROM testje
 WHERE id + 5 < 7
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -425,14 +485,14 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id
 FROM testje
 WHERE id IN (1, 2, 3)
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -448,7 +508,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect(mylist int[]) RETURNS SETOF AS $$
+CREATE FUNCTION myselect(mylist int[]) RETURNS SETOF RECORD AS $$
 SELECT id
 FROM testje
 WHERE id IN ('hello')
@@ -463,7 +523,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect(mylist int[]) RETURNS SETOF AS $$
+CREATE FUNCTION myselect(mylist int[]) RETURNS SETOF RECORD AS $$
 SELECT id
 FROM testje
 WHERE id IN mylist
@@ -478,7 +538,7 @@ $$ LANGUAGE sql;
     expectInputs(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect(mylist int[]) RETURNS SETOF AS $$
+CREATE FUNCTION myselect(mylist int[]) RETURNS SETOF RECORD AS $$
 SELECT id
 FROM testje
 WHERE id = ANY(mylist)
@@ -498,7 +558,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect(mylist text[]) RETURNS SETOF AS $$
+CREATE FUNCTION myselect(mylist text[]) RETURNS SETOF RECORD AS $$
 SELECT id
 FROM testje
 WHERE id = ANY(mylist)
@@ -513,19 +573,20 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT ARRAY[1, 2]
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: null,
             type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
           },
         ],
-      }
+      },
+      { multipleRows: true }
     );
   }
 
@@ -534,12 +595,12 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT ARRAY(SELECT id from testje)
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: null,
@@ -555,7 +616,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT ARRAY(SELECT id, name from testje)
 $$ LANGUAGE sql;
 `,
@@ -568,13 +629,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, mystamp timestamp not null);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT EXTRACT(DAY FROM mystamp)
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: null,
@@ -590,7 +651,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT EXTRACT(DAY FROM name)
 from testje
 $$ LANGUAGE sql;
@@ -604,7 +665,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, mytime time not null);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT EXTRACT(DAY FROM mytime)
 from testje
 $$ LANGUAGE sql;
@@ -618,13 +679,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, myjson json);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT myjson->'bleb'
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: null,
@@ -640,7 +701,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT name->'bleb'
 from testje
 $$ LANGUAGE sql;
@@ -654,16 +715,16 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT COALESCE(name, 'hello')
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
-            name: null,
+            name: { name: "coalesce" },
             type: BuiltinTypes.Text,
           },
         ],
@@ -676,16 +737,16 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT NULLIF(name, 'hello')
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
-            name: null,
+            name: { name: "nullif" },
             type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
           },
         ],
@@ -698,7 +759,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT COALESCE(name, 2)
 from testje
 $$ LANGUAGE sql;
@@ -712,12 +773,12 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT CURRENT_TIMESTAMP
 from testje
 $$ LANGUAGE sql;
 `,
-      { kind: "set", fields: [{ name: null, type: BuiltinTypes.Timestamp }] }
+      { kind: "record", fields: [{ name: null, type: BuiltinTypes.Timestamp }] }
     );
   }
 
@@ -726,13 +787,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text[]);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT name[1]
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: null,
@@ -748,7 +809,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT name[1]
 from testje
 $$ LANGUAGE sql;
@@ -762,13 +823,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT CASE name WHEN '' THEN 2 ELSE 5 END
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: null,
@@ -784,7 +845,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT CASE name WHEN 7 THEN 2 ELSE 5 END
 from testje
 $$ LANGUAGE sql;
@@ -798,7 +859,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT CASE name WHEN '' THEN 2 ELSE 'bleb' END
 from testje
 $$ LANGUAGE sql;
@@ -812,13 +873,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT CASE WHEN name = '' THEN 2 ELSE 5 END
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: null,
@@ -834,7 +895,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT CASE WHEN name THEN 2 ELSE 5 END
 from testje
 $$ LANGUAGE sql;
@@ -848,7 +909,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT CASE WHEN name = '' THEN 2 ELSE 'bleb' END
 from testje
 $$ LANGUAGE sql;
@@ -862,13 +923,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT (SELECT t2.id from testje as t2)
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: null,
@@ -884,7 +945,7 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id, name
 FROM testje
 UNION
@@ -893,7 +954,7 @@ FROM testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -913,7 +974,7 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id, name
 FROM testje
 UNION ALL
@@ -922,7 +983,7 @@ FROM testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -943,13 +1004,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id + 1
 FROM testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -965,7 +1026,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id, name
 FROM testje
 UNION
@@ -982,12 +1043,12 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT * FROM (VALUES (1, 'one'), (2, 'two')) AS vals
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: null,
@@ -1007,7 +1068,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-  CREATE FUNCTION myselect() RETURNS SETOF AS $$
+  CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
   SELECT * FROM (VALUES (1, 'one'), (2)) AS vals
   $$ LANGUAGE sql;
   `,
@@ -1020,7 +1081,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-  CREATE FUNCTION myselect() RETURNS SETOF AS $$
+  CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
   SELECT * FROM (VALUES (1, 'one'), (2, 5)) AS vals
   $$ LANGUAGE sql;
   `,
@@ -1033,14 +1094,14 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id
 FROM testje
 WHERE id BETWEEN 2 AND 5
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
       }
     );
@@ -1051,7 +1112,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id
 FROM testje
 WHERE id BETWEEN 2 AND '5'
@@ -1066,14 +1127,14 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT SUBSTRING(name from 5 for 7) as name
 FROM testje
 WHERE id BETWEEN 2 AND 5
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "name" },
@@ -1089,14 +1150,14 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text not null);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT SUBSTRING(name from 5 for 7) as name
 FROM testje
 WHERE id BETWEEN 2 AND 5
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "name" },
@@ -1112,7 +1173,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT SUBSTRING(name from 5 for 'b') as name
 FROM testje
 $$ LANGUAGE sql;
@@ -1126,13 +1187,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id::int as id, name::text as name
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -1152,13 +1213,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int not null, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id + NULL as id
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -1174,13 +1235,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int );",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id + 5 as id
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -1196,13 +1257,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int NOT NULL);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id + 5 as id
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -1218,13 +1279,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int NOT NULL, id2 int);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT id + id2 as id
 from testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -1240,13 +1301,13 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int NOT NULL, id2 int);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT CASE id WHEN 0 THEN 5 ELSE 6.5 END as mynumber
 FROM testje
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "mynumber" },
@@ -1262,7 +1323,7 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int NOT NULL, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() AS $$
 INSERT INTO testje (id, name) VALUES (1, 'hello');
 $$ LANGUAGE sql;
 `,
@@ -1275,7 +1336,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int NOT NULL, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() AS $$
 INSERT INTO testje (id, name) VALUES (1, 2);
 $$ LANGUAGE sql;
 `,
@@ -1288,12 +1349,12 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int NOT NULL, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 INSERT INTO testje (id, name) VALUES (1, 'hello') RETURNING id;
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -1309,12 +1370,12 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int NOT NULL default 5, name text);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 INSERT INTO testje (id, name) VALUES (default, 'hello') RETURNING id;
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [
           {
             name: { name: "id" },
@@ -1330,7 +1391,7 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int NOT NULL);",
       `
-CREATE FUNCTION myselect() RETURNS SETOF AS $$
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 WITH mycte AS (
   SELECT id from testje
 )
@@ -1338,7 +1399,7 @@ SELECT * from mycte
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
       }
     );
@@ -1349,16 +1410,17 @@ $$ LANGUAGE sql;
     expectReturnType(
       "create table testje ( id int NOT NULL);",
       `
-CREATE FUNCTION mydelete() RETURNS SETOF AS $$
+CREATE FUNCTION mydelete() RETURNS SETOF RECORD AS $$
 DELETE FROM testje
 WHERE id = 5
 RETURNING id
 $$ LANGUAGE sql;
 `,
       {
-        kind: "set",
+        kind: "record",
         fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
-      }
+      },
+      { multipleRows: true }
     );
   }
 
@@ -1367,7 +1429,7 @@ $$ LANGUAGE sql;
     expectThrowLike(
       "create table testje ( id int NOT NULL);",
       `
-CREATE FUNCTION mydelete() RETURNS SETOF AS $$
+CREATE FUNCTION mydelete() AS $$
 DELETE FROM testje
 WHERE id = ''
 $$ LANGUAGE sql;

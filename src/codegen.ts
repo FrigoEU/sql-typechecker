@@ -202,7 +202,10 @@ export function functionToTypescript(f: functionType): string {
     f.returns.kind === "record"
       ? ` AS ${f.name.name}(${f.returns.fields
           .map(
-            (f) => (f.name?.name || "") + " " + showTypeDroppingNullable(f.type)
+            (f, i) =>
+              (f.name?.name || "field" + i) +
+              " " +
+              showTypeDroppingNullable(f.type)
           )
           .join(", ")})`
       : "";

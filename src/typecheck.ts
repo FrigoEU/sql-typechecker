@@ -1,4 +1,5 @@
 import assert from "assert";
+import { isNil } from "lodash";
 import {
   AlterTableStatement,
   ColumnConstraint,
@@ -41,7 +42,7 @@ export type NullableT<T extends SimpleT> = {
   kind: "nullable";
   typevar: T;
 };
-export type ArrayT<T extends SimpleT> = {
+export type ArrayT<T> = {
   kind: "array";
   subtype: "array" | "list";
   typevar: T;
@@ -145,6 +146,10 @@ export const BuiltinTypes = {
   Jsonb: {
     kind: "scalar",
     name: { name: "jsonb" },
+  },
+  Null: {
+    kind: "scalar", // correct?
+    name: { name: "null" },
   },
 } as const;
 
@@ -519,26 +524,57 @@ function castScalars(
 ): void {
   // list casts = \dC+
 
+  const matchingCast = findMatchingCast([source.name], source, target, type);
+  if (matchingCast === null) {
+    throw new TypeMismatch(e, { expected: target, actual: source });
+  }
+}
+
+function findMatchingCast(
+  visited: QName[],
+  from: ScalarT,
+  to: ScalarT,
+  type: CastType
+): {
+  source: ScalarT;
+  target: ScalarT;
+  type: CastType;
+} | null {
   const casts = builtincasts;
 
-  if (eqQNames(source.name, target.name)) {
-    return;
+  if (eqQNames(from.name, to.name)) {
+    return { source: from, target: to, type: "implicit" };
   } else {
-    const matchingCast = casts.find(
+    const halfMatching = casts.filter(
       (c) =>
-        eqQNames(c.source.name, source.name) &&
-        eqQNames(c.target.name, target.name) &&
-        // Implicit casts can always be done explicitly as well
-        // Not the other way around: some casts are dangerous so you need to ASK for them
+        eqQNames(c.source.name, from.name) &&
         (c.type === type ||
           (c.type === "implicit" && type === "assignment") ||
-          (c.type === "implicit" && type === "explicit"))
+          (c.type === "implicit" && type === "explicit")) &&
+        !visited.some((v) => eqQNames(v, c.target.name))
     );
-    if (matchingCast) {
+
+    const matchingCast = halfMatching.find((c) =>
+      eqQNames(c.target.name, to.name)
+    );
+    if (!isNil(matchingCast)) {
       // ok
-      return;
+      return matchingCast;
+    } else if (type === "explicit") {
+      for (let halfM of halfMatching) {
+        const found = findMatchingCast(
+          visited.concat(from.name),
+          halfM.target,
+          to,
+          type
+        );
+        if (!isNil(found)) {
+          return found;
+        }
+      }
+      return null;
     } else {
-      throw new TypeMismatch(e, { expected: target, actual: source });
+      return null;
     }
   }
 }
@@ -711,12 +747,15 @@ export function elabSelect(
                   eqQNames(inf.fromName, fr.name) &&
                   inf.fieldName === fi.name?.name
               );
-              const t = foundNullabilityInference
-                ? foundNullabilityInference.isNull === true
-                  ? nullify(fi.type)
-                  : unnullify(fi.type)
-                : fi.type;
-              return { name: fi.name, type: t };
+              if (foundNullabilityInference && isNullable(fi.type)) {
+                const t =
+                  foundNullabilityInference.isNull === true
+                    ? BuiltinTypes.Null
+                    : unnullify(fi.type);
+                return { name: fi.name, type: t };
+              } else {
+                return fi;
+              }
             }),
           },
         })),
@@ -731,13 +770,15 @@ export function elabSelect(
     const names: string[] = [];
     const fields = (s.columns || []).flatMap((c: SelectedColumn): Field[] => {
       const n = c.alias ? c.alias : deriveNameFromExpr(c.expr);
-      if (n === null) {
-        throw new UnableToDeriveFieldName(c.expr);
+      // if (n === null) {
+      //   throw new UnableToDeriveFieldName(c.expr);
+      // }
+      if (!isNil(n)) {
+        if (names.includes(n.name)) {
+          throw new DuplicateFieldNames(c.expr, n.name);
+        }
+        names.push(n.name);
       }
-      if (names.includes(n.name)) {
-        throw new DuplicateFieldNames(c.expr, n.name);
-      }
-      names.push(n.name);
 
       const t = elabExpr(g, newC, c.expr);
 
@@ -1334,7 +1375,18 @@ class ColumnsMismatch extends ErrorWithLocation {
 }
 class KindMismatch extends ErrorWithLocation {
   constructor(e: Expr, type: Type | VoidT, errormsg: string) {
-    super(e._location, `KindMismatch: ${e}: ${type}: ${errormsg}}`);
+    super(
+      e._location,
+      `
+KindMismatch:
+${toSql.expr(e)}
+
+${errormsg}}
+
+Type: 
+${JSON.stringify(type)}
+`
+    );
   }
 }
 class UnableToDeriveFieldName extends ErrorWithLocation {
@@ -1363,6 +1415,7 @@ but this name already exists in the statement. Alias this column with
     );
   }
 }
+
 export class TypeMismatch extends ErrorWithLocation {
   public expected: Type;
   public actual: Type;
@@ -1394,6 +1447,35 @@ ${JSON.stringify(ts.actual)}}
     this.expected = ts.expected;
     this.actual = ts.actual;
     this.mess = mess;
+  }
+}
+
+export class CannotCast extends ErrorWithLocation {
+  public from: Type;
+  public to: Type;
+  constructor(
+    e: Expr,
+    ts: {
+      from: Type;
+      to: Type;
+    }
+  ) {
+    super(
+      e._location,
+      `
+Cannot cast:
+${JSON.stringify(ts.from)}
+
+to
+${JSON.stringify(ts.to)}}
+
+in expr:
+${toSql.expr(e)}
+`
+    );
+
+    this.from = ts.from;
+    this.to = ts.to;
   }
 }
 
@@ -1867,6 +1949,10 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     );
   }
 
+  if (eqQNames(e.function, { name: "now" })) {
+    return unifyCallGeneral(e, argTypes, [], BuiltinTypes.Timestamp);
+  }
+
   if (
     eqQNames(e.function, { name: "any" }) ||
     eqQNames(e.function, { name: "some" }) ||
@@ -1945,7 +2031,6 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     eqQNames(e.function, { name: "coalesce" }) ||
     eqQNames(e.function, { name: "nullif" })
   ) {
-    debugger;
     // nullable<A> -> A -> A
     if (e.args.length === 0) {
       throw new InvalidArguments(e, e.function, []);
@@ -2209,7 +2294,11 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
   } else if (e.type === "cast") {
     const operandT = elabExpr(g, c, e.operand);
     const toT = mkType(e.to, []);
-    cast(e, operandT, nullify(toT), "explicit");
+    try {
+      cast(e, operandT, toT, "explicit");
+    } catch (err) {
+      throw new CannotCast(e, { from: operandT, to: toT });
+    }
     if (isNullable(operandT)) {
       return toT;
     } else {

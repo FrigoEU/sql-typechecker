@@ -1858,6 +1858,15 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     }
   }
 
+  if (eqQNames(e.function, { name: "nextval" })) {
+    return unifyCallGeneral(
+      e,
+      argTypes,
+      [BuiltinTypes.Text],
+      BuiltinTypes.Bigint
+    );
+  }
+
   if (
     eqQNames(e.function, { name: "any" }) ||
     eqQNames(e.function, { name: "some" }) ||

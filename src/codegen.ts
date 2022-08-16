@@ -31,9 +31,17 @@ export function showTypeAsTypescriptType(t: Type): string {
       return showTypeAsTypescriptType(t.typevar) + " | null";
     } else if (t.kind === "scalar") {
       if (
-        ["numeric", "bigint", "smallint", "integer", "real", "double"].includes(
-          t.name.name
-        )
+        [
+          "numeric",
+          "bigint",
+          "smallint",
+          "integer",
+          "real",
+          "double",
+          "float2",
+          "float4",
+          "float8",
+        ].includes(t.name.name)
       ) {
         return "number";
       } else if (

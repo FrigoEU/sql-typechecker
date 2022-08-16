@@ -1,6 +1,6 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "main": "out/typeparsers.js",
   "files": [
     "out/**"
@@ -16,6 +16,7 @@
   "scripts": {
     "check": "tsc -p . --noEmit",
     "build": "node esbuild.js && npm run build:types",
+    "prepare": "npm run build",
     "build:types": "tsc --emitDeclarationOnly --declaration --outDir ./out --module commonjs --target ES2019 --esModuleInterop src/typeparsers.ts",
     "test": "alsatian ./test/**/*.ts",
     "start": "npm run build && node --enable-source-maps ./out/cli.js -d ./sample -o ./sample/out.ts && ts-node index.ts",

@@ -1,6 +1,6 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "main": "out/typeparsers.js",
   "files": [
     "out/**"
@@ -21,8 +21,8 @@
     "start": "npm run build && node --enable-source-maps ./out/cli.js -d ./sample -o ./sample/out.ts && ts-node index.ts",
     "start_debug": "npm run debug -- -d ./sample -o ./sample/out.ts && ts-node index.ts",
     "start_index": "ts-node index.ts",
-    "start_school": "npm run build && node --enable-source-maps ./out/cli.js -d ./school -o ./school/db",
-    "start_school_debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js -d ./school -o ./school/out",
+    "start_school": "npm run build && node --enable-source-maps ./out/cli.js -d ./school -o ./school/funcs",
+    "start_school_debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js -d ./school -o ./school/db",
     "debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js ",
     "test_debug": "node --inspect-brk ./node_modules/alsatian/dist/cli/alsatian-cli.js ./test/**/*.ts -t 20000000",
     "start_school_test_debug": "node --inspect-brk -r ts-node/register school/test.ts"

@@ -1,3 +1,4 @@
+import assert from "assert";
 import { Name, QName } from "pgsql-ast-parser";
 import {
   checkAllCasesHandled,
@@ -223,6 +224,14 @@ $$${f.code}$$ LANGUAGE ${f.language};
     (inp, i) => "$" + (i + 1) + "::" + showTypeDroppingNullable(inp.type)
   )})${asExpression}`;
 
+  const deserializationAndReturn =
+    f.returns.kind === "void"
+      ? ""
+      : `
+const rows = res.rows.map(row => ${genDeserialization(f.returns, "row")});
+return rows${f.multipleRows ? "" : "[0]"};
+`;
+
   return `
 export async function ${f.name.name}(pool: Pool, args: ${argsType})
   : Promise<${returnTypeAsString}>{
@@ -232,8 +241,7 @@ export async function ${f.name.name}(pool: Pool, args: ${argsType})
     values: [${argsAsList}],
     rowMode: "array",
   });
-  const rows = res.rows.map(row => ${genDeserialization(f.returns, "row")});
-  return rows${f.multipleRows ? "" : "[0]"};
+  ${deserializationAndReturn}
   }
 `;
 }

@@ -103,15 +103,7 @@ async function go() {
   }
   await fs.appendFile(domainFile, `\n`, "utf-8");
 
-  // Generating a global file with re-exports for every table
-  const tablesIndexFile = path.format({
-    dir: outDir,
-    name: "tables",
-    ext: ".ts",
-  });
   await fs.mkdir(path.join(outDir, "tables"), { recursive: true });
-  await prepOutFile(tablesIndexFile);
-
   // Generating a file per table with crud operations
   for (let table of g.tables) {
     const tableOutFile = path.format({
@@ -131,10 +123,6 @@ async function go() {
       // text,
       prettier.format(text, { parser: "typescript" }),
       "utf-8"
-    );
-    await fs.appendFile(
-      tablesIndexFile,
-      `export * as ${table.name.name} from "./tables/${table.name.name}";\n`
     );
   }
 
@@ -168,7 +156,7 @@ async function go() {
       } catch (err) {
         if (err instanceof ErrorWithLocation && err.l !== undefined) {
           debugger;
-          const found = findCode(st.code, err.l);
+          const found = findCode(st.code || "", err.l);
           if (found) {
             console.error("");
             console.error(`Found error at line ${found.lineNumber}`);
@@ -244,7 +232,7 @@ function mkImportDomainsStatement(
 ): string {
   const p = path.relative(path.dirname(thisFile), path.dirname(domainFile));
   const formatted = path.format({
-    dir: p,
+    dir: p || ".",
     name: "domains",
     ext: "",
   });

@@ -103,6 +103,14 @@ async function go() {
   }
   await fs.appendFile(domainFile, `\n`, "utf-8");
 
+  // Generating a "tables" file to reexport all tables from
+  const tablesIndexFile = path.format({
+    dir: outDir,
+    name: "tables",
+    ext: ".ts",
+  });
+  await prepOutFile(tablesIndexFile);
+
   await fs.mkdir(path.join(outDir, "tables"), { recursive: true });
   // Generating a file per table with crud operations
   for (let table of g.tables) {
@@ -123,6 +131,10 @@ async function go() {
       // text,
       prettier.format(text, { parser: "typescript" }),
       "utf-8"
+    );
+    await fs.appendFile(
+      tablesIndexFile,
+      `export * as ${table.name.name} from "./tables/${table.name.name}";\n`
     );
   }
 

@@ -54,3 +54,29 @@ CREATE OR REPLACE FUNCTION getStudentWithCtes(uw_studentid studentid) RETURNS RE
   WHERE s.uw_id = uw_studentid ;
 
 $$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION getSyncedUnpaidInvoices() RETURNS SETOF RECORD AS $$
+  WITH
+  total_lines_per_invoice AS
+  (SELECT uw_invoiceid, SUM(uw_amount) as uw_amount
+     FROM uw_lesson_finance_invoicelines
+    GROUP by uw_invoiceid
+  ),
+  total_credited_per_invoice AS
+  (SELECT uw_invoiceid, SUM(uw_amount) as uw_amount
+     FROM uw_lesson_finance_creditnotes
+    GROUP by uw_invoiceid
+  ),
+  total_paid_per_invoice AS
+  (SELECT uw_invoiceid, SUM(uw_amount) as uw_amount
+     FROM uw_lesson_finance_payments
+    GROUP by uw_invoiceid
+  )
+  SELECT inv.uw_id, inv.uw_accountingsoftwareidentifier
+  FROM uw_lesson_finance_invoices inv
+  JOIN total_lines_per_invoice AS lines ON inv.uw_id = lines.uw_invoiceid
+  LEFT OUTER JOIN total_credited_per_invoice AS credited ON inv.uw_id = credited.uw_invoiceid
+  LEFT OUTER JOIN total_paid_per_invoice AS paid ON inv.uw_id = paid.uw_invoiceid
+  WHERE uw_accountingsoftwareidentifier IS NOT NULL
+  AND lines.uw_amount - COALESCE(credited.uw_amount, 0) - COALESCE(paid.uw_amount, 0) <> 0
+$$ LANGUAGE sql;

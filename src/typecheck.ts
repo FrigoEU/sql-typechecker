@@ -26,9 +26,11 @@ import {
   toSql,
   UpdateStatement,
 } from "pgsql-ast-parser";
+import { Either, Left } from "purify-ts";
 import { builtincasts } from "./builtincasts";
 import { builtinoperators } from "./builtinoperators";
 import { builtinUnaryOperators } from "./builtinunaryoperators";
+import { normalizeOperatorName, normalizeTypeName } from "./normalize";
 
 export type Type = SimpleT | RecordT;
 export type AnyScalarT = {
@@ -92,6 +94,26 @@ export const BuiltinTypes = {
     kind: "scalar",
     name: { name: "bigint" },
   },
+  Float2: {
+    kind: "scalar",
+    name: { name: "float2" },
+  },
+  Float4: {
+    kind: "scalar",
+    name: { name: "float4" },
+  },
+  Float8: {
+    kind: "scalar",
+    name: { name: "float8" },
+  },
+  Real: {
+    kind: "scalar",
+    name: { name: "real" },
+  },
+  Double: {
+    kind: "scalar",
+    name: { name: "double" },
+  },
   Text: {
     kind: "scalar",
     name: { name: "text" },
@@ -124,6 +146,18 @@ export const BuiltinTypes = {
     name: { name: "jsonb" },
   },
 } as const;
+
+const allNumericBuiltinTypes = [
+  BuiltinTypes.Smallint,
+  BuiltinTypes.Integer,
+  BuiltinTypes.Bigint,
+  BuiltinTypes.Real,
+  BuiltinTypes.Double,
+  BuiltinTypes.Numeric,
+  BuiltinTypes.Float2,
+  BuiltinTypes.Float4,
+  BuiltinTypes.Float8,
+];
 
 function requireBoolean(e: Expr, t: Type): void {
   if (
@@ -417,6 +451,52 @@ function unifySimples(e: Expr, source: SimpleT, target: SimpleT): SimpleT {
   }
 }
 
+function unifyOverloadedCall(
+  call: ExprCall,
+  argTypes: Type[],
+  overloads: {
+    expectedArgs: SimpleT[];
+    returnT: SimpleT;
+  }[]
+): SimpleT {
+  // This is probably bad, among others for performance, as we use error handling for control flow here
+  for (let overload of overloads) {
+    try {
+      const res = unifyCallGeneral(
+        call,
+        argTypes,
+        overload.expectedArgs,
+        overload.returnT
+      );
+      return res;
+    } catch (err) {
+      // do nothing, we try the next one
+    }
+  }
+  throw new InvalidArguments(call, call.function, argTypes);
+}
+
+function unifyCallGeneral(
+  call: ExprCall,
+  argTypes: Type[],
+  expectedArgs: SimpleT[],
+  returnT: SimpleT
+): SimpleT {
+  if (argTypes.length !== expectedArgs.length) {
+    throw new InvalidArguments(call, call.function, argTypes);
+  }
+  for (let i = 0; i < expectedArgs.length; i++) {
+    const arg = argTypes[i];
+    const expectedArg = expectedArgs[i];
+    const simplifiedArg = toSimpleT(arg);
+    if (simplifiedArg === null) {
+      throw new CantReduceToSimpleT(call.args[i], arg);
+    }
+    unifySimples(call, simplifiedArg, expectedArg);
+  }
+  return returnT;
+}
+
 //www.postgresql.org/docs/current/sql-createcast.html
 // If they "fit into" eachother, you get the "biggest" type back
 // eg: smallint fits into integer
@@ -482,25 +562,6 @@ export type Context = {
 
 export function notImplementedYet(node: PGNode | null): any {
   throw new NotImplementedYet(node);
-}
-
-function normalizeTypeName(s: string): string {
-  if (s === "int8") {
-    return "bigint";
-  }
-  if (s === "int" || s === "int4") {
-    return "integer";
-  }
-  if (s === "int2") {
-    return "smallint";
-  }
-  if (s === "decimal") {
-    return "numeric";
-  }
-  if (s === "bool") {
-    return "boolean";
-  }
-  return s;
 }
 
 function mkType(t: DataTypeDef, cs: ColumnConstraint[]): SimpleT {
@@ -1082,9 +1143,11 @@ function showLocation(loc: NodeLocation | undefined): string {
   }
 }
 
-class ErrorWithLocation extends Error {
+export class ErrorWithLocation extends Error {
+  public l: NodeLocation | undefined;
   constructor(l: NodeLocation | undefined, m: string) {
-    super(`${showLocation(l)}: ${m}`);
+    super(m);
+    this.l = l;
   }
 }
 
@@ -1640,7 +1703,7 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
     .filter(function (op) {
       return eqQNames(
         {
-          name: e.op,
+          name: normalizeOperatorName(e.op),
           schema: e.opSchema,
         },
         op.name
@@ -1691,6 +1754,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     eqQNames(e.function, { name: "json_build_object" }) ||
     eqQNames(e.function, { name: "jsonb_build_object" })
   ) {
+    // string -> any -> {[string]: any} (+-)
     if (e.args.length % 2 === 0) {
       const record: RecordT = { kind: "record", fields: [] };
       for (let i = 0; i < e.args.length; i += 2) {
@@ -1716,6 +1780,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "array_agg" })) {
+    // any -> any[]
     if (e.args.length === 1) {
       return { kind: "array", subtype: "array", typevar: argTypes[0] };
     } else {
@@ -1728,6 +1793,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     eqQNames(e.function, { name: "some" }) ||
     eqQNames(e.function, { name: "all" })
   ) {
+    // any[] -> any
     if (e.args.length !== 1) {
       throw new InvalidArguments(e, e.function, argTypes);
     }
@@ -1747,10 +1813,61 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       return unifiedT.typevar;
     }
   }
+
+  if (eqQNames(e.function, { name: "sum" })) {
+    return unifyOverloadedCall(e, argTypes, [
+      { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Bigint },
+      { expectedArgs: [BuiltinTypes.Smallint], returnT: BuiltinTypes.Bigint },
+      { expectedArgs: [BuiltinTypes.Bigint], returnT: BuiltinTypes.Numeric },
+      { expectedArgs: [BuiltinTypes.Numeric], returnT: BuiltinTypes.Numeric },
+      { expectedArgs: [BuiltinTypes.Real], returnT: BuiltinTypes.Real },
+      { expectedArgs: [BuiltinTypes.Double], returnT: BuiltinTypes.Double },
+      { expectedArgs: [BuiltinTypes.Float2], returnT: BuiltinTypes.Double },
+      { expectedArgs: [BuiltinTypes.Float4], returnT: BuiltinTypes.Double },
+      { expectedArgs: [BuiltinTypes.Float8], returnT: BuiltinTypes.Double },
+    ]);
+  }
+
+  if (eqQNames(e.function, { name: "avg" })) {
+    return unifyOverloadedCall(e, argTypes, [
+      { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Numeric },
+      { expectedArgs: [BuiltinTypes.Smallint], returnT: BuiltinTypes.Numeric },
+      { expectedArgs: [BuiltinTypes.Bigint], returnT: BuiltinTypes.Numeric },
+      { expectedArgs: [BuiltinTypes.Numeric], returnT: BuiltinTypes.Numeric },
+      { expectedArgs: [BuiltinTypes.Real], returnT: BuiltinTypes.Real },
+      { expectedArgs: [BuiltinTypes.Double], returnT: BuiltinTypes.Double },
+      { expectedArgs: [BuiltinTypes.Float2], returnT: BuiltinTypes.Double },
+      { expectedArgs: [BuiltinTypes.Float4], returnT: BuiltinTypes.Double },
+      { expectedArgs: [BuiltinTypes.Float8], returnT: BuiltinTypes.Double },
+    ]);
+  }
+
+  if (
+    eqQNames(e.function, { name: "max" }) ||
+    eqQNames(e.function, { name: "min" })
+  ) {
+    return unifyOverloadedCall(
+      e,
+      argTypes,
+      allNumericBuiltinTypes.map((t) => ({ expectedArgs: [t], returnT: t }))
+    );
+  }
+
+  if (eqQNames(e.function, { name: "count" })) {
+    return unifyCallGeneral(
+      e,
+      argTypes,
+      [BuiltinTypes.AnyScalar],
+      BuiltinTypes.Boolean
+    );
+  }
+
   if (
     eqQNames(e.function, { name: "coalesce" }) ||
     eqQNames(e.function, { name: "nullif" })
   ) {
+    debugger;
+    // nullable<A> -> A -> A
     if (e.args.length === 0) {
       throw new InvalidArguments(e, e.function, []);
     }

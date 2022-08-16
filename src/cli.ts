@@ -1,7 +1,9 @@
 import * as fs from "fs/promises";
+import { min, repeat } from "lodash";
 import * as path from "path";
 import {
   CreateFunctionStatement,
+  NodeLocation,
   parse,
   QName,
   Statement,
@@ -13,7 +15,11 @@ import {
   genDomain,
   getImports,
 } from "./codegen";
-import { doCreateFunction, parseSetupScripts } from "./typecheck";
+import {
+  doCreateFunction,
+  ErrorWithLocation,
+  parseSetupScripts,
+} from "./typecheck";
 
 go();
 
@@ -160,8 +166,21 @@ async function go() {
         // console.log(`Writing: ${writing}`);
         await fs.appendFile(functionsOutFile, writing, "utf-8");
       } catch (err) {
+        if (err instanceof ErrorWithLocation && err.l !== undefined) {
+          debugger;
+          const found = findCode(st.code, err.l);
+          if (found) {
+            console.error("");
+            console.error(`Found error at line ${found.lineNumber}`);
+            console.error("");
+            console.error(found.line);
+            console.error(
+              repeat(" ", found.range[0]) +
+                repeat("^", found.range[1] - found.range[0])
+            );
+          }
+        }
         console.error(err instanceof Error ? err.message : JSON.stringify(err));
-        return;
       }
     }
 
@@ -169,6 +188,31 @@ async function go() {
   }
 
   console.log("Done!");
+}
+
+function findCode(
+  s: string,
+  l: NodeLocation
+): { line: string; lineNumber: number; range: [number, number] } | null {
+  let counted = 0;
+  let lineNumber = 0;
+  const lines = s.split("\n");
+  for (let line of lines) {
+    const lineLength = line.length;
+    if (counted <= l.start && l.start <= counted + lineLength) {
+      return {
+        line,
+        lineNumber,
+        range: [
+          l.start - counted,
+          min([lineLength, l.end - counted]) || lineLength,
+        ],
+      };
+    }
+    lineNumber++;
+    counted += lineLength + 1 /* 1 for newline */;
+  }
+  return null;
 }
 
 async function prepOutFile(path: string): Promise<string> {

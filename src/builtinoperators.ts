@@ -1,3 +1,4 @@
+import { normalizeOperatorName } from "./normalize";
 import { binaryOp } from "./typecheck";
 
 const builtinoperatorsFromSyntax: binaryOp[] = [

@@ -1,4 +1,3 @@
-
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE SEQUENCE uw_AjaxUpload_handles;
@@ -56,16 +55,46 @@ CREATE TABLE uw_Allowhomeandonlinelocations_tab(
     uw_islastversion bool NOT NULL,
     uw_stamp timestamp NOT NULL);
 
+CREATE TABLE uw_Publicplanningamountofweeksinfuture_tab(
+    uw_version int8 NOT NULL,
+    uw_value int8 NOT NULL,
+    uw_islastversion bool NOT NULL,
+    uw_stamp timestamp NOT NULL);
+
 CREATE TABLE uw_Oauth_authorizerequests(
     uw_stamp timestamp NOT NULL,
     uw_csrftoken text NOT NULL);
 
 CREATE TABLE uw_Oauth_accesstokens(
-    uw_refreshtoken text NOT NULL,
+    uw_tokensuri text NOT NULL,
     uw_accesstoken text NOT NULL,
     uw_createdat timestamp NOT NULL,
     uw_expiresin int8 NOT NULL,
-    CONSTRAINT uw_Oauth_accesstokens_pkey PRIMARY KEY (uw_refreshToken));
+    CONSTRAINT uw_Oauth_accesstokens_pkey PRIMARY KEY (uw_tokensUri));
+
+CREATE TABLE uw_Oauth_refreshtokens(
+    uw_tokensuri text NOT NULL,
+    uw_refreshtoken text NOT NULL,
+    uw_createdat timestamp NOT NULL,
+    CONSTRAINT uw_Oauth_refreshtokens_pkey PRIMARY KEY (uw_tokensUri));
+
+CREATE TABLE uw_Accountingsoftwarelink_Software_tab(
+    uw_version int8 NOT NULL,
+    uw_value text,
+    uw_islastversion bool NOT NULL,
+    uw_stamp timestamp NOT NULL);
+
+CREATE TABLE uw_Accountingsoftwarelink_Extraid_tab(
+    uw_version int8 NOT NULL,
+    uw_value text,
+    uw_islastversion bool NOT NULL,
+    uw_stamp timestamp NOT NULL);
+
+CREATE TABLE uw_Mollieprofileid_tab(
+    uw_version int8 NOT NULL,
+    uw_value text,
+    uw_islastversion bool NOT NULL,
+    uw_stamp timestamp NOT NULL);
 
 CREATE TABLE uw_B2bucket_ID_tab(
     uw_version int8 NOT NULL,
@@ -79,25 +108,19 @@ CREATE TABLE uw_B2bucket_Name__tab(
     uw_islastversion bool NOT NULL,
     uw_stamp timestamp NOT NULL);
 
-CREATE TABLE uw_Invoiceduedate_tab(
-    uw_version int8 NOT NULL,
-    uw_value int8 NOT NULL,
-    uw_islastversion bool NOT NULL,
-    uw_stamp timestamp NOT NULL);
-
-CREATE TABLE uw_Invoicepayduringenrollment_tab(
+CREATE TABLE uw_Demoinstance_tab(
     uw_version int8 NOT NULL,
     uw_value bool NOT NULL,
     uw_islastversion bool NOT NULL,
     uw_stamp timestamp NOT NULL);
 
-CREATE TABLE uw_Periodfeeduedate_tab(
+CREATE TABLE uw_Invoiceduedate_tab(
     uw_version int8 NOT NULL,
     uw_value text NOT NULL,
     uw_islastversion bool NOT NULL,
     uw_stamp timestamp NOT NULL);
 
-CREATE TABLE uw_Periodfeepayduringenrollment_tab(
+CREATE TABLE uw_Invoicepayduringenrollment_Mysetting_tab(
     uw_version int8 NOT NULL,
     uw_value bool NOT NULL,
     uw_islastversion bool NOT NULL,
@@ -115,6 +138,14 @@ CREATE TABLE uw_Alwaysshowwireinstructions_tab(
     uw_islastversion bool NOT NULL,
     uw_stamp timestamp NOT NULL);
 
+CREATE SEQUENCE uw_Teacherid_seq;
+
+CREATE SEQUENCE uw_Teacherid_internal_seq;
+
+CREATE SEQUENCE uw_Teacherid_external_seq;
+
+CREATE SEQUENCE uw_Studentid_seq;
+
 CREATE SEQUENCE uw_Audit_trails;
 
 CREATE TABLE uw_Audit_trail(
@@ -124,14 +155,6 @@ CREATE TABLE uw_Audit_trail(
     uw_description text NOT NULL,
     uw_extratechnicalinfo text NOT NULL,
     uw_stamp timestamp NOT NULL);
-
-CREATE SEQUENCE uw_Teacherid_seq;
-
-CREATE SEQUENCE uw_Teacherid_internal_seq;
-
-CREATE SEQUENCE uw_Teacherid_external_seq;
-
-CREATE SEQUENCE uw_Studentid_seq;
 
 CREATE SEQUENCE uw_Messageonstudentprofiles_MessageonstudentprofileId_seq;
 
@@ -143,12 +166,6 @@ CREATE TABLE uw_Messageonstudentprofiles_messageonstudentprofiles(
     uw_islastversion bool NOT NULL,
     CONSTRAINT uw_Messageonstudentprofiles_messageonstudentprofiles_pkey
     PRIMARY KEY (uw_id));
-
-CREATE TABLE uw_Demoinstance_tab(
-    uw_version int8 NOT NULL,
-    uw_value bool NOT NULL,
-    uw_islastversion bool NOT NULL,
-    uw_stamp timestamp NOT NULL);
 
 CREATE TABLE uw_Schoolname_SchoolnameSetting_tab(
     uw_version int8 NOT NULL,
@@ -168,6 +185,8 @@ CREATE TABLE uw_Adminaccounts_adminaccounts(
     uw_wantsccfornotes bool NOT NULL,
     uw_wantsccformessages bool NOT NULL,
     uw_sawwelcome bool NOT NULL,
+    uw_wantsenrollmentnotifications bool NOT NULL,
+    uw_wantsabsencerequestnotifications bool NOT NULL,
     CONSTRAINT uw_Adminaccounts_adminaccounts_pkey PRIMARY KEY (uw_email));
 
 CREATE TABLE uw_Schoolhours_Schoolhoursserialized_tab(
@@ -218,25 +237,15 @@ CREATE TABLE uw_Invoicedetails_tab(
     uw_islastversion bool NOT NULL,
     uw_stamp timestamp NOT NULL);
 
-CREATE TABLE uw_Mollierefreshtoken_tab(
-    uw_version int8 NOT NULL,
-    uw_value text,
-    uw_islastversion bool NOT NULL,
-    uw_stamp timestamp NOT NULL);
-
-CREATE TABLE uw_Mollieprofileid_tab(
-    uw_version int8 NOT NULL,
-    uw_value text,
-    uw_islastversion bool NOT NULL,
-    uw_stamp timestamp NOT NULL);
-
 CREATE SEQUENCE uw_Config_periodsSeq;
 
 CREATE TABLE uw_Config_periods(
     uw_id int8 NOT NULL,
     uw_firstday date NOT NULL,
     uw_lastday date NOT NULL,
-    uw_lastdaytoenroll date NOT NULL,
+    uw_earliestpublicplanningdate date NOT NULL,
+    uw_openpublicenrollments date,
+    uw_closepublicenrollments date NOT NULL,
     CONSTRAINT uw_Config_periods_pkey PRIMARY KEY (uw_id));
 
 CREATE TABLE uw_Config_holidays(
@@ -263,18 +272,18 @@ CREATE TABLE uw_Config_formulas(
     uw_numberoflessons int8 NOT NULL,
     uw_lessonduration int8 NOT NULL,
     uw_startsfromperiod bool NOT NULL,
-    uw_manualplanning bool NOT NULL,
     uw_description text NOT NULL,
     uw_comments text NOT NULL,
     uw_showonpublicplanning bool NOT NULL,
     uw_type_ text NOT NULL,
     uw_id int8 NOT NULL,
     uw_color text NOT NULL,
+    uw_planningmode text NOT NULL,
     CONSTRAINT uw_Config_formulas_pkey PRIMARY KEY (uw_id),
     CONSTRAINT uw_Config_formulas_NumberOfLessons
     CHECK (uw_numberOfLessons > 0::int8),
     CONSTRAINT uw_Config_formulas_LessonDuration
-    CHECK ((uw_lessonDuration = 20::int8) OR ((uw_lessonDuration = 30::int8) OR ((uw_lessonDuration = 40::int8) OR ((uw_lessonDuration = 45::int8) OR ((uw_lessonDuration = 60::int8) OR ((uw_lessonDuration = 90::int8) OR ((uw_lessonDuration = 120::int8) OR ((uw_lessonDuration = 150::int8) OR (uw_lessonDuration = 180::int8))))))))));
+    CHECK ((uw_lessonDuration = 20::int8) OR ((uw_lessonDuration = 30::int8) OR ((uw_lessonDuration = 40::int8) OR ((uw_lessonDuration = 45::int8) OR ((uw_lessonDuration = 50::int8) OR ((uw_lessonDuration = 60::int8) OR ((uw_lessonDuration = 90::int8) OR ((uw_lessonDuration = 120::int8) OR ((uw_lessonDuration = 150::int8) OR (uw_lessonDuration = 180::int8)))))))))));
 
 CREATE TABLE uw_Config_formulainvoicelines(
     uw_formulaid int8 NOT NULL,
@@ -300,12 +309,22 @@ CREATE TABLE uw_Config_formulainstruments(
     CONSTRAINT uw_Config_formulainstruments_InstrumentId
     FOREIGN KEY (uw_instrumentId) REFERENCES uw_Config_instruments (uw_id) ON DELETE CASCADE);
 
+CREATE SEQUENCE uw_Site_sitesseq;
+
+CREATE TABLE uw_Site_sites(
+    uw_id int8 NOT NULL,
+    uw_description text NOT NULL,
+    CONSTRAINT uw_Site_sites_pkey PRIMARY KEY (uw_id));
+
 CREATE SEQUENCE uw_Room_roomsseq;
 
 CREATE TABLE uw_Room_rooms(
     uw_id int8 NOT NULL,
     uw_description text NOT NULL,
-    CONSTRAINT uw_Room_rooms_pkey PRIMARY KEY (uw_id));
+    uw_siteid int8 NOT NULL,
+    CONSTRAINT uw_Room_rooms_pkey PRIMARY KEY (uw_id),
+    CONSTRAINT uw_Room_rooms_SiteId
+    FOREIGN KEY (uw_siteId) REFERENCES uw_Site_sites (uw_id) ON DELETE CASCADE);
 
 CREATE TABLE uw_Room_roominstruments(
     uw_roomid int8 NOT NULL,
@@ -326,6 +345,8 @@ CREATE TABLE uw_Teacher_teachers(
     uw_phone text NOT NULL,
     uw_wantsnotificationsformessages bool NOT NULL,
     uw_wantsnotificationsfornotes bool NOT NULL,
+    uw_wantsenrollmentnotifications bool NOT NULL,
+    uw_wantsabsencerequestnotifications bool NOT NULL,
     CONSTRAINT uw_Teacher_teachers_pkey PRIMARY KEY (uw_id));
 
 CREATE TABLE uw_Teacher_internalTeachers(
@@ -370,6 +391,16 @@ CREATE TABLE uw_Teacher_teaches(
     CONSTRAINT uw_Teacher_teaches_InternalTeacherId
     FOREIGN KEY (uw_internalTeacherId) REFERENCES uw_Teacher_internalTeachers (uw_internalTeacherId) ON DELETE CASCADE);
 
+CREATE TABLE uw_Teacher_teacherAbsences(
+    uw_date date NOT NULL,
+    uw_time time NOT NULL,
+    uw_duration int8 NOT NULL,
+    uw_internalteacherid int8 NOT NULL,
+    CONSTRAINT uw_Teacher_teacherAbsences_pkey PRIMARY KEY
+    (uw_time, uw_internalTeacherId, uw_date),
+    CONSTRAINT uw_Teacher_teacherAbsences_InternalTeacherId
+    FOREIGN KEY (uw_internalTeacherId) REFERENCES uw_Teacher_internalTeachers (uw_internalTeacherId) ON DELETE CASCADE);
+
 CREATE VIEW
 uw_Teacher_internalTeachersF
 AS
@@ -380,10 +411,8 @@ uw_Teacher_externalTeachersF
 AS
 SELECT T_Teachers.uw_comments AS uw_Comments, T_Teachers.uw_email AS uw_Email, T_ExternalTeachers.uw_externalTeacherId AS uw_ExternalTeacherId, T_Teachers.uw_firstName AS uw_FirstName, T_Teachers.uw_id AS uw_Id, T_Teachers.uw_lastName AS uw_LastName, T_Teachers.uw_phone AS uw_Phone FROM uw_Teacher_teachers AS T_Teachers JOIN uw_Teacher_externalTeachers AS T_ExternalTeachers ON (T_Teachers.uw_id = T_ExternalTeachers.uw_id);
 
-CREATE DOMAIN studentid AS int8;
-
 CREATE TABLE uw_Student_students(
-    uw_id studentid NOT NULL,
+    uw_id int8 NOT NULL,
     uw_firstname text NOT NULL,
     uw_lastname text NOT NULL,
     uw_comments text NOT NULL,
@@ -397,7 +426,7 @@ CREATE TABLE uw_Student_students(
 
 CREATE TABLE uw_Student_studentphones(
     uw_id int8 NOT NULL,
-    uw_studentid studentid NOT NULL,
+    uw_studentid int8 NOT NULL,
     uw_number text NOT NULL,
     uw_description text,
     CONSTRAINT uw_Student_studentphones_pkey PRIMARY KEY (uw_id),
@@ -408,7 +437,7 @@ CREATE SEQUENCE uw_Student_studentphonesSeq;
 
 CREATE TABLE uw_Student_studentemails(
     uw_id int8 NOT NULL,
-    uw_studentid studentid NOT NULL,
+    uw_studentid int8 NOT NULL,
     uw_email text NOT NULL,
     uw_wantsnotificationsformessages bool NOT NULL,
     uw_wantsnotificationsfornotes bool NOT NULL,
@@ -442,6 +471,7 @@ CREATE SEQUENCE uw_Messagequeue_seq;
 CREATE TABLE uw_Messagequeue_queuedMessages(
     uw_id int8 NOT NULL,
     uw_content text NOT NULL,
+    uw_queuedbyteacher int8,
     CONSTRAINT uw_Messagequeue_queuedMessages_pkey PRIMARY KEY (uw_id));
 
 CREATE SEQUENCE uw_Email_AttachmentId_seq;
@@ -483,10 +513,10 @@ CREATE TABLE uw_Message_messages(
     uw_id int8 NOT NULL,
     uw_senderadmin bool NOT NULL,
     uw_senderteacherid int8,
-    uw_senderstudentid studentid,
+    uw_senderstudentid int8,
     uw_receiveradmin bool NOT NULL,
     uw_receiverteacherid int8,
-    uw_receiverstudentid studentid,
+    uw_receiverstudentid int8,
     uw_date date NOT NULL,
     uw_time time NOT NULL,
     uw_read bool NOT NULL,
@@ -589,7 +619,7 @@ CREATE TABLE uw_Lesson_lessongroupinvoicelines(
 
 CREATE TABLE uw_Lesson_enrollmentsincludingstopped(
     uw_id int8 NOT NULL,
-    uw_studentid studentid NOT NULL,
+    uw_studentid int8 NOT NULL,
     uw_lessongroupid int8 NOT NULL,
     uw_status text NOT NULL,
     uw_created date NOT NULL,
@@ -602,7 +632,7 @@ CREATE TABLE uw_Lesson_enrollmentsincludingstopped(
 
 CREATE TABLE uw_Lesson_enrollmentrequests(
     uw_id int8 NOT NULL,
-    uw_studentid studentid NOT NULL,
+    uw_studentid int8 NOT NULL,
     uw_status text NOT NULL,
     uw_secret text NOT NULL,
     uw_created timestamp NOT NULL,
@@ -710,6 +740,7 @@ CREATE TABLE uw_Lesson_finance_invoices(
     uw_enrollmentrequestid int8,
     uw_enrollmentid int8,
     uw_externalidstring text NOT NULL,
+    uw_accountingsoftwareidentifier text,
     CONSTRAINT uw_Lesson_finance_invoices_pkey PRIMARY KEY (uw_id),
     CONSTRAINT uw_Lesson_finance_invoices_ExternalId_Valid
     CHECK (uw_externalId > 0::int8),
@@ -751,6 +782,7 @@ CREATE TABLE uw_Lesson_finance_creditnotes(
     uw_date date NOT NULL,
     uw_id int8 NOT NULL,
     uw_invoiceid int8 NOT NULL,
+    uw_accountingsoftwareidentifier text,
     CONSTRAINT uw_Lesson_finance_creditnotes_pkey PRIMARY KEY (uw_id),
     CONSTRAINT uw_Lesson_finance_creditnotes_InvoiceId
     FOREIGN KEY (uw_invoiceId) REFERENCES uw_Lesson_finance_invoices (uw_id) ON DELETE CASCADE,
@@ -792,7 +824,7 @@ SELECT T_Payments.uw_invoiceId AS uw_InvoiceId, SUM(T_Payments.uw_amount) AS uw_
 CREATE VIEW
 uw_Lesson_finance_invoicelinesT
 AS
-SELECT T_Invoicelines.uw_invoiceId AS uw_InvoiceId, SUM(T_Invoicelines.uw_amount) AS uw_TotalAmount FROM uw_Lesson_finance_invoicelines AS T_Invoicelines GROUP BY T_Invoicelines.uw_InvoiceId;
+SELECT T_Invoicelines.uw_invoiceId AS uw_InvoiceId, SUM(T_Invoicelines.uw_amount) AS uw_TotalAmount, SUM((T_Invoicelines.uw_amount * (T_Invoicelines.uw_vAT / (100::float8 + T_Invoicelines.uw_vAT)))) AS uw_TotalVAT FROM uw_Lesson_finance_invoicelines AS T_Invoicelines GROUP BY T_Invoicelines.uw_InvoiceId;
 
 CREATE VIEW
 uw_Lesson_finance_creditnotesT
@@ -818,7 +850,7 @@ CREATE TABLE uw_Lesson_status_studentpresences(
 CREATE VIEW
 uw_Lesson_extended_extendedLessonsView
 AS
-SELECT T_Lessonsincludingremoved.uw_creation AS uw_Creation, T_Lessonsincludingremoved.uw_date AS uw_Date, T_Lessongroups.uw_lessonDuration AS uw_Duration, T_Enrollmentsincludingstopped.uw_id AS uw_EnrollmentId, T_Enrollmentsincludingstopped.uw_status AS uw_EnrollmentStatus, T_Lessonsincludingremoved.uw_id AS uw_Id, T_Instruments.uw_description AS uw_InstrumentDescription, T_Instruments.uw_id AS uw_InstrumentId, T_Lessonsincludingremoved.uw_lessongroupId AS uw_LessongroupId, T_Lessongroups.uw_lastLesson AS uw_Lessongroups_LastLesson, T_Lessonsincludingremoved.uw_location AS uw_Location, T_PT.uw_firstName AS uw_PlannedTeacherFirstName, T_PT.uw_id AS uw_PlannedTeacherId, T_PT.uw_lastName AS uw_PlannedTeacherLastName, T_Lessonsincludingremoved.uw_removedReason AS uw_RemovedReason, T_Repl.uw_date AS uw_ReplacementDate, T_Repl.uw_time AS uw_ReplacementTime, T_Rooms.uw_description AS uw_RoomDescription, T_Lessonsincludingremoved.uw_roomId AS uw_RoomId, T_Studentpresences.uw_status AS uw_Status, T_Studentpresences.uw_comments AS uw_StatusComments, T_Studentpresences.uw_createdBy AS uw_StatusCreatedBy, T_Studentpresences.uw_createdOn AS uw_StatusCreatedOn, T_Studentpresences.uw_needsAdminCheck AS uw_StatusNeedsAdminCheck, T_Studentpresences.uw_storageFileId AS uw_StatusStorageFileId, T_Students.uw_firstName AS uw_StudentFirstName, T_Students.uw_id AS uw_StudentId, T_Students.uw_lastName AS uw_StudentLastName, T_TE.uw_firstName AS uw_TeacherFirstName, T_TE.uw_id AS uw_TeacherId, T_TE.uw_lastName AS uw_TeacherLastName, T_Lessonsincludingremoved.uw_time AS uw_Time, T_Lessongroups.uw_type_ AS uw_Type_ FROM uw_Lesson_lessonsincludingremoved AS T_Lessonsincludingremoved JOIN uw_Lesson_lessongroups AS T_Lessongroups ON (T_Lessonsincludingremoved.uw_lessongroupId = T_Lessongroups.uw_id) LEFT JOIN uw_Lesson_enrollmentsincludingstopped AS T_Enrollmentsincludingstopped ON (T_Enrollmentsincludingstopped.uw_lessongroupId = T_Lessongroups.uw_id) LEFT JOIN uw_Student_students AS T_Students ON ((T_Enrollmentsincludingstopped.uw_studentId = T_Students.uw_id) OR ((T_Enrollmentsincludingstopped.uw_studentId) IS NULL AND (T_Students.uw_id) IS NULL)) JOIN uw_Teacher_teachers AS T_TE ON (T_TE.uw_id = T_Lessonsincludingremoved.uw_teacherId) JOIN uw_Teacher_teachers AS T_PT ON (T_PT.uw_id = T_Lessonsincludingremoved.uw_plannedTeacherId) JOIN uw_Config_instruments AS T_Instruments ON (T_Instruments.uw_id = T_Lessongroups.uw_instrumentId) LEFT JOIN uw_Room_rooms AS T_Rooms ON ((T_Lessonsincludingremoved.uw_roomId = T_Rooms.uw_id) OR ((T_Lessonsincludingremoved.uw_roomId) IS NULL AND (T_Rooms.uw_id) IS NULL)) LEFT JOIN uw_Lesson_status_studentpresences AS T_Studentpresences ON ((T_Studentpresences.uw_lessonId = T_Lessonsincludingremoved.uw_id) AND ((T_Studentpresences.uw_studentId = T_Enrollmentsincludingstopped.uw_studentId) OR ((T_Studentpresences.uw_studentId) IS NULL AND (T_Enrollmentsincludingstopped.uw_studentId) IS NULL))) LEFT JOIN uw_Lesson_lessonsincludingremoved AS T_Repl ON ((T_Repl.uw_id = T_Lessonsincludingremoved.uw_replacement) OR ((T_Repl.uw_id) IS NULL AND (T_Lessonsincludingremoved.uw_replacement) IS NULL));
+SELECT T_Lessonsincludingremoved.uw_creation AS uw_Creation, T_Lessonsincludingremoved.uw_date AS uw_Date, T_Lessongroups.uw_lessonDuration AS uw_Duration, T_Enrollmentsincludingstopped.uw_id AS uw_EnrollmentId, T_Enrollmentsincludingstopped.uw_status AS uw_EnrollmentStatus, T_Lessonsincludingremoved.uw_id AS uw_Id, T_Instruments.uw_description AS uw_InstrumentDescription, T_Instruments.uw_id AS uw_InstrumentId, T_Lessonsincludingremoved.uw_lessongroupId AS uw_LessongroupId, T_Lessongroups.uw_lastLesson AS uw_Lessongroups_LastLesson, T_Lessonsincludingremoved.uw_location AS uw_Location, T_PT.uw_firstName AS uw_PlannedTeacherFirstName, T_PT.uw_id AS uw_PlannedTeacherId, T_PT.uw_lastName AS uw_PlannedTeacherLastName, T_Lessonsincludingremoved.uw_removedReason AS uw_RemovedReason, T_Repl.uw_date AS uw_ReplacementDate, T_Repl.uw_time AS uw_ReplacementTime, T_Rooms.uw_description AS uw_RoomDescription, T_Lessonsincludingremoved.uw_roomId AS uw_RoomId, T_Rooms.uw_siteId AS uw_RoomSiteId, T_Studentpresences.uw_status AS uw_Status, T_Studentpresences.uw_comments AS uw_StatusComments, T_Studentpresences.uw_createdBy AS uw_StatusCreatedBy, T_Studentpresences.uw_createdOn AS uw_StatusCreatedOn, T_Studentpresences.uw_needsAdminCheck AS uw_StatusNeedsAdminCheck, T_Studentpresences.uw_storageFileId AS uw_StatusStorageFileId, T_Students.uw_firstName AS uw_StudentFirstName, T_Students.uw_id AS uw_StudentId, T_Students.uw_lastName AS uw_StudentLastName, T_TE.uw_firstName AS uw_TeacherFirstName, T_TE.uw_id AS uw_TeacherId, T_TE.uw_lastName AS uw_TeacherLastName, T_Lessonsincludingremoved.uw_time AS uw_Time, T_Lessongroups.uw_type_ AS uw_Type_ FROM uw_Lesson_lessonsincludingremoved AS T_Lessonsincludingremoved JOIN uw_Lesson_lessongroups AS T_Lessongroups ON (T_Lessonsincludingremoved.uw_lessongroupId = T_Lessongroups.uw_id) LEFT JOIN uw_Lesson_enrollmentsincludingstopped AS T_Enrollmentsincludingstopped ON (T_Enrollmentsincludingstopped.uw_lessongroupId = T_Lessongroups.uw_id) LEFT JOIN uw_Student_students AS T_Students ON ((T_Enrollmentsincludingstopped.uw_studentId = T_Students.uw_id) OR ((T_Enrollmentsincludingstopped.uw_studentId) IS NULL AND (T_Students.uw_id) IS NULL)) JOIN uw_Teacher_teachers AS T_TE ON (T_TE.uw_id = T_Lessonsincludingremoved.uw_teacherId) JOIN uw_Teacher_teachers AS T_PT ON (T_PT.uw_id = T_Lessonsincludingremoved.uw_plannedTeacherId) JOIN uw_Config_instruments AS T_Instruments ON (T_Instruments.uw_id = T_Lessongroups.uw_instrumentId) LEFT JOIN uw_Room_rooms AS T_Rooms ON ((T_Lessonsincludingremoved.uw_roomId = T_Rooms.uw_id) OR ((T_Lessonsincludingremoved.uw_roomId) IS NULL AND (T_Rooms.uw_id) IS NULL)) LEFT JOIN uw_Lesson_status_studentpresences AS T_Studentpresences ON ((T_Studentpresences.uw_lessonId = T_Lessonsincludingremoved.uw_id) AND ((T_Studentpresences.uw_studentId = T_Enrollmentsincludingstopped.uw_studentId) OR ((T_Studentpresences.uw_studentId) IS NULL AND (T_Enrollmentsincludingstopped.uw_studentId) IS NULL))) LEFT JOIN uw_Lesson_lessonsincludingremoved AS T_Repl ON ((T_Repl.uw_id = T_Lessonsincludingremoved.uw_replacement) OR ((T_Repl.uw_id) IS NULL AND (T_Lessonsincludingremoved.uw_replacement) IS NULL));
 
 CREATE TABLE uw_Note_textnotes(
     uw_id int8 NOT NULL,
@@ -957,43 +989,3 @@ CREATE TABLE uw_Payenrollment_onlinepayments(
     CONSTRAINT uw_Payenrollment_onlinepayments_pkey PRIMARY KEY (uw_paymentId),
     CONSTRAINT uw_Payenrollment_onlinepayments_EnrollmentOrRequest
     CHECK (((uw_enrollmentId IS NULL) AND (NOT (uw_enrollmentrequestId IS NULL))) OR ((uw_enrollmentrequestId IS NULL) AND (NOT (uw_enrollmentId IS NULL)))));
-
-CREATE OR REPLACE FUNCTION getEmailsToSend() RETURNS SETOF RECORD AS $$
-  SELECT 
-  e.uw_id, 
-  e.uw_from, 
-  e.uw_replyto, 
-  e.uw_address, 
-  e.uw_addressee, 
-  e.uw_subject, 
-  e.uw_text, 
-  e.uw_html, 
-  e.uw_externalid, 
-  a.uw_filename, 
-  a.uw_content 
-  FROM uw_email_emails e 
-  JOIN uw_email_statusses s ON e.uw_id = s.uw_emailid AND s.uw_islastversion = TRUE 
-  LEFT OUTER JOIN uw_email_attachments a ON a.uw_emailid = e.uw_id 
-  WHERE s.uw_status = 'Waiting/_' 
-  AND e.uw_html IS NOT NULL -- NULL = ARCHIVED
-$$ LANGUAGE sql;
-
-CREATE OR REPLACE FUNCTION insertNewEmailStatus(uw_emailid int, version int, uw_status text) RETURNS bigint AS $$
-  INSERT INTO uw_email_statusses 
-    (uw_emailid, uw_version, uw_status, uw_stamp, uw_islastversion) 
-  VALUES
-    (uw_emailid, version, uw_status, CURRENT_TIMESTAMP, TRUE)
-  RETURNING uw_emailid;
-$$ LANGUAGE sql;
-
-CREATE OR REPLACE FUNCTION getStudent(uw_studentid studentid) RETURNS RECORD AS $$
-
-  SELECT s.uw_firstname, s.uw_lastname, s.uw_birthday, emails.emails AS emails
-  FROM uw_student_students s
-  LEFT JOIN (SELECT em.uw_studentid, array_agg(json_build_object('id', em.uw_id, 'email', em.uw_email)) as emails
-                from uw_student_studentemails em
-              group by uw_studentid
-  ) emails ON s.uw_id = emails.uw_studentid;
-
-$$ LANGUAGE sql;
-

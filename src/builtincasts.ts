@@ -1,3 +1,4 @@
+import { normalizeTypeName } from "./normalize";
 import { CastType, ScalarT } from "./typecheck";
 
 export const builtincasts: {
@@ -270,8 +271,8 @@ export const builtincasts: {
   { source: "xml", target: "character varying", type: "in assignment" },
   { source: "xml", target: "text", type: "in assignment" },
 ].map((s) => ({
-  source: { kind: "scalar", name: { name: s.source } },
-  target: { kind: "scalar", name: { name: s.target } },
+  source: { kind: "scalar", name: { name: normalizeTypeName(s.source) } },
+  target: { kind: "scalar", name: { name: normalizeTypeName(s.target) } },
   type:
     s.type === "no" ? "explicit" : s.type === "yes" ? "implicit" : "assignment",
 }));

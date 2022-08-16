@@ -1,3 +1,4 @@
+import assert from "assert";
 import {
   AlterTableStatement,
   ColumnConstraint,
@@ -691,7 +692,36 @@ export function elabSelect(
   s: SelectStatement
 ): RecordT | VoidT {
   if (s.type === "select") {
-    const newC: Context = addFromsToScope(g, c, s, s.from || []);
+    const newC = ((): Context => {
+      const newC_: Context = addFromsToScope(g, c, s, s.from || []);
+
+      const inferredNullability = s.where
+        ? inferNullability(newC_, s.where)
+        : [];
+
+      return {
+        ...newC_,
+        froms: newC_.froms.map((fr) => ({
+          name: fr.name,
+          type: {
+            kind: "record",
+            fields: fr.type.fields.map((fi) => {
+              const foundNullabilityInference = inferredNullability.find(
+                (inf) =>
+                  eqQNames(inf.fromName, fr.name) &&
+                  inf.fieldName === fi.name?.name
+              );
+              const t = foundNullabilityInference
+                ? foundNullabilityInference.isNull === true
+                  ? nullify(fi.type)
+                  : unnullify(fi.type)
+                : fi.type;
+              return { name: fi.name, type: t };
+            }),
+          },
+        })),
+      };
+    })();
 
     if (s.where) {
       const t = elabExpr(g, newC, s.where);
@@ -736,6 +766,7 @@ export function elabSelect(
 
       return [{ name: n, type: t }];
     });
+
     return {
       kind: "record",
       fields,
@@ -980,6 +1011,12 @@ export function doCreateFunction(
   if (!s.language) {
     throw new Error(
       "Please provide language for function at " + showLocation(s._location)
+    );
+  }
+  if (s.code === undefined) {
+    throw new ErrorWithLocation(
+      s._location,
+      "Function definition without body"
     );
   }
   if (s.language && s.language.name.toLowerCase() === "sql") {
@@ -1491,60 +1528,93 @@ function elabRef(c: Context, e: ExprRef): Type {
       };
     }
   } else {
-    const tableName = e.table;
-    if (tableName) {
-      const table = c.froms.find((d) => eqQNames(d.name, tableName));
-      if (!table) {
-        throw new UnknownIdentifier(e, tableName);
-      }
-      if (!(table.type.kind === "record")) {
-        throw new KindMismatch(e, table.type, "Expecting Record");
-      }
-      const field = lookupInRecord(table.type, e);
-      if (!field) {
-        throw new UnknownField(e, table.type, e);
-      }
-      return field;
+    const found = lookupRef(c, e);
+    if (found instanceof Error) {
+      throw found;
     } else {
-      const foundFields: {
-        record: QName;
-        field: Name;
-        type: SimpleT;
-      }[] = mapPartial(c.froms, (t) => {
-        const foundfield = lookupInRecord(t.type, e);
-        return foundfield
-          ? { record: t.name, field: e, type: foundfield }
-          : null;
-      });
+      return found.type;
+    }
+  }
+}
 
-      const foundIdentifiers = mapPartial(c.decls, (t) => {
-        if (t.type.kind === "record" || t.type.kind === "void") {
-          return null;
-        } else {
-          return t.name.name === e.name
-            ? { name: t.name.name, type: t.type }
-            : null;
-        }
-      });
+function lookupRef(
+  c: Context,
+  e: ExprRef
+):
+  | Error
+  | {
+      from: null | {
+        fromName: QName;
+        fieldName: string;
+      };
+      type: SimpleT;
+    } {
+  assert(e.name !== "*");
+  const tableName = e.table;
+  if (tableName) {
+    const table = c.froms.find((d) => eqQNames(d.name, tableName));
+    if (!table) {
+      return new UnknownIdentifier(e, tableName);
+    }
+    if (!(table.type.kind === "record")) {
+      return new KindMismatch(e, table.type, "Expecting Record");
+    }
+    const field = lookupInRecord(table.type, e);
+    if (!field) {
+      return new UnknownField(e, table.type, e);
+    }
+    return {
+      type: field,
+      from: {
+        fromName: tableName,
+        fieldName: e.name,
+      },
+    };
+  } else {
+    const foundFields: {
+      fromName: QName;
+      field: Name;
+      type: SimpleT;
+    }[] = mapPartial(c.froms, (t) => {
+      const foundfield = lookupInRecord(t.type, e);
+      return foundfield
+        ? { fromName: t.name, field: e, type: foundfield }
+        : null;
+    });
 
-      // Fields seem to have precedence over eg: function params in postgres?
-      if (foundFields.length === 0) {
-        if (foundIdentifiers.length === 0) {
-          throw new UnknownIdentifier(e, e);
-        } else if (foundIdentifiers.length === 1) {
-          return foundIdentifiers[0].type;
-        } else {
-          throw new AmbiguousIdentifier(e, e, []);
-        }
-      } else if (foundFields.length === 1) {
-        return foundFields[0].type;
+    const foundIdentifiers = mapPartial(c.decls, (t) => {
+      if (t.type.kind === "record" || t.type.kind === "void") {
+        return null;
       } else {
-        throw new AmbiguousIdentifier(
-          e,
-          e,
-          foundFields.map((f) => f.record)
-        );
+        return t.name.name === e.name
+          ? { name: t.name.name, type: t.type }
+          : null;
       }
+    });
+
+    // Fields seem to have precedence over eg: function params in postgres?
+    if (foundFields.length === 0) {
+      if (foundIdentifiers.length === 0) {
+        return new UnknownIdentifier(e, e);
+      } else if (foundIdentifiers.length === 1) {
+        return { type: foundIdentifiers[0].type, from: null };
+      } else {
+        return new AmbiguousIdentifier(e, e, []);
+      }
+    } else if (foundFields.length === 1) {
+      return {
+        type: foundFields[0].type,
+        from: {
+          fromName: foundFields[0].fromName,
+          fieldName: foundFields[0].field.name,
+        },
+      };
+    } else {
+      return new AmbiguousIdentifier(
+        e,
+        e,
+        foundFields.map((f) => f.fromName)
+      );
     }
   }
 }
@@ -2138,6 +2208,41 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     }
   } else {
     return checkAllCasesHandled(e.type);
+  }
+}
+
+function inferNullability(
+  c: Context,
+  e: Expr
+): { fromName: QName; fieldName: string; isNull: boolean }[] {
+  if (e.type === "unary") {
+    if (e.op === "NOT") {
+      return inferNullability(c, e).map((judg) => ({
+        ...judg,
+        isNull: !judg.isNull,
+      }));
+    }
+    if (e.op === "IS NULL" || e.op === "IS NOT NULL") {
+      if (e.operand.type === "ref") {
+        const found = lookupRef(c, e.operand);
+        if (found instanceof Error) {
+          return [];
+        } else {
+          if (found.from === null) {
+            return [];
+          } else {
+            return [
+              { ...found.from, isNull: e.op === "IS NULL" ? true : false },
+            ];
+          }
+        }
+      }
+    }
+    return [];
+  } else if (e.type === "binary" && e.op === "AND") {
+    return inferNullability(c, e.left).concat(inferNullability(c, e.right));
+  } else {
+    return [];
   }
 }
 

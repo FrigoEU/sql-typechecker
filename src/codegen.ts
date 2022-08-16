@@ -38,9 +38,9 @@ export function showTypeAsTypescriptType(t: Type): string {
           "integer",
           "real",
           "double",
-          "float2",
-          "float4",
           "float8",
+          "float4",
+          "float2",
         ].includes(t.name.name)
       ) {
         return "number";

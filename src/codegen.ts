@@ -230,11 +230,15 @@ $$${f.code}$$ LANGUAGE ${f.language};
   const deserializationAndReturn =
     f.returns.kind === "void"
       ? ""
+      : f.multipleRows === true
+      ? `return res.rows.map(row => ${genDeserialization(f.returns, "row")});`
       : `
-const rows = res.rows.map(row => ${genDeserialization(f.returns, "row")});
-return rows${f.multipleRows ? "" : "[0]"};
-`;
-
+const row = res.rows[0];
+if (row.some(f => f !== null)){
+  return ${genDeserialization(f.returns, "row")}
+} else {
+  return undefined;
+}`;
   return `
 export async function ${f.name.name}(pool: Pool, args: ${argsType})
   : Promise<${returnTypeAsString}>{

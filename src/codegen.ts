@@ -121,7 +121,7 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
       t.name.name === "timestamp without time zone" ||
       t.name.name === "timestamp"
     ) {
-      return `LocalDateTime.parse(${literalVar})`;
+      return `LocalDateTime.parse(${literalVar}.replace(" ", "T"))`;
     } else {
       return literalVar;
     }

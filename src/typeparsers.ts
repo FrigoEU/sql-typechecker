@@ -29,4 +29,6 @@ export function registerSqlTypecheckerTypeParsers() {
   types.setTypeParser(3908, range.parse); // tsrange
   types.setTypeParser(3910, range.parse); // tstzrange
   types.setTypeParser(3912, range.parse); // daterange
+
+  return types;
 }

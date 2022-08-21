@@ -1115,7 +1115,11 @@ export function doCreateFunction(
         };
 
         if (returnType.kind === "void") {
-          if (!s.returns) {
+          if (
+            !s.returns ||
+            (s.returns.type.kind === undefined &&
+              s.returns.type.name === "void")
+          ) {
             return { kind: "void" };
           } else if (s.returns.type.kind === "table") {
             throw new Error("RETURNS TABLE is not supported yet");

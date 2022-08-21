@@ -1437,4 +1437,18 @@ $$ LANGUAGE sql;
       "Can't apply operator"
     );
   }
+
+  @Test()
+  public returnsVoid() {
+    expectReturnType(
+      "create table testje ( id int NOT NULL);",
+      `
+CREATE FUNCTION mydelete() RETURNS void AS $$
+DELETE FROM testje
+$$ LANGUAGE sql;
+`,
+      { kind: "void" },
+      { multipleRows: false }
+    );
+  }
 }

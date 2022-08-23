@@ -2027,7 +2027,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       e,
       argTypes,
       [BuiltinTypes.AnyScalar],
-      BuiltinTypes.Boolean
+      BuiltinTypes.Bigint
     );
   }
 

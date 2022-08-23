@@ -1451,4 +1451,92 @@ $$ LANGUAGE sql;
       { multipleRows: false }
     );
   }
+
+  @Test()
+  public selectWithArrayAggAndJsonBuildObject() {
+    expectReturnType(
+      `
+create table first ( id int not null, name text );
+create table second ( firstid int not null, name text not null, price int );
+create table third ( firstid int not null, name text not null, price int );
+`,
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+
+SELECT id, name, seconds.secondstuff, thirds.thirdstuff
+FROM first
+LEFT JOIN (
+  SELECT s.firstid, array_agg(json_build_object('name', s.name, 'price', s.price)) as secondstuff
+  FROM second s
+  GROUP BY s.firstid
+) seconds ON seconds.firstid = first.id
+JOIN (
+  SELECT t.firstid, array_agg(json_build_object('name', t.name, 'price', t.price)) as thirdstuff
+  FROM third t
+  GROUP BY t.firstid
+) thirds ON thirds.firstid = first.id
+
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "name" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+          {
+            name: { name: "secondstuff" },
+            type: BuiltinTypeConstructors.Nullable(
+              BuiltinTypeConstructors.Array({
+                kind: "jsonknown",
+                record: {
+                  kind: "record",
+                  fields: [
+                    {
+                      name: { name: "name" },
+                      type: { kind: "scalar", name: { name: "text" } },
+                    },
+                    {
+                      name: { name: "price" },
+                      type: {
+                        kind: "nullable",
+                        typevar: { kind: "scalar", name: { name: "integer" } },
+                      },
+                    },
+                  ],
+                },
+              })
+            ),
+          },
+          {
+            name: { name: "thirdstuff" },
+            type: BuiltinTypeConstructors.Array({
+              kind: "jsonknown",
+              record: {
+                kind: "record",
+                fields: [
+                  {
+                    name: { name: "name" },
+                    type: { kind: "scalar", name: { name: "text" } },
+                  },
+                  {
+                    name: { name: "price" },
+                    type: {
+                      kind: "nullable",
+                      typevar: { kind: "scalar", name: { name: "integer" } },
+                    },
+                  },
+                ],
+              },
+            }),
+          },
+        ],
+      }
+    );
+  }
 }

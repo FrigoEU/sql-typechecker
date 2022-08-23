@@ -162,7 +162,7 @@ export function functionToTypescript(f: functionType): string {
     f.returns.kind === "void"
       ? "void"
       : showTypeAsTypescriptType(f.returns) +
-        (f.multipleRows ? "[]" : " | undefined");
+        (f.multipleRows ? "[]" : " | null");
 
   const argsType =
     "{" +
@@ -237,7 +237,7 @@ const row = res.rows[0];
 if (row.some(f => f !== null)){
   return ${genDeserialization(f.returns, "row")}
 } else {
-  return undefined;
+  return null;
 }`;
   return `
 export async function ${f.name.name}(pool: Pool, args: ${argsType})
@@ -351,6 +351,27 @@ export async function insert(pool: Pool, row: {${inputRow}}): Promise<{${
   }
 }`;
 
+    const selectOne = `
+export async function getOne(pool: Pool, pk: {${
+      primaryKeySingleCol.name.name
+    }: ${showTypeAsTypescriptType(
+      primaryKeySingleCol.type
+    )}}): Promise<${showTypeAsTypescriptType(table.rel)} | null>{
+
+const res = await pool.query({
+text: "SELECT * FROM ${showQName(table.name)} WHERE ${
+      primaryKeySingleCol.name.name
+    } = $1",
+values: [pk.${primaryKeySingleCol.name.name}] as any[],
+rowMode: "array",
+});
+if (res.rows[0]){
+return ${genDeserialization(table.rel, "res.rows[0]")};
+} else {
+return null;
+}
+}`;
+
     const inputRowForUpdate = relWithoutPrim
       .map(
         (f) => `
@@ -398,6 +419,7 @@ return null;
 
     return `
 ${selectAll}
+${selectOne}
 ${insert}
 ${update}
 ${del}

@@ -169,12 +169,13 @@ async function go() {
         if (err instanceof ErrorWithLocation && err.l !== undefined) {
           const found = findCode(st.code || "", err.l);
           if (found) {
+            const prefix = found.lineNumber.toString() + "  ";
             console.error("");
             console.error(`Typechecking error`);
             console.error("");
-            console.error(found.line);
+            console.error(prefix + found.line);
             console.error(
-              repeat(" ", found.range[0]) +
+              repeat(" ", found.range[0] + prefix.length) +
                 repeat("^", found.range[1] - found.range[0])
             );
           }

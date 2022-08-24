@@ -69,6 +69,7 @@ export type SimpleT =
 type Field = {
   name: Name | null;
   type: SimpleT;
+  expr: Expr | null;
 };
 export type RecordT = {
   kind: "record";
@@ -303,11 +304,12 @@ function unifyRecords(e: Expr, source: RecordT, target: RecordT): RecordT {
     throw new TypeMismatch(e, { expected: source, actual: target });
   }
   const newFields = source.fields.map((sf, i) => {
-    const tf = target.fields[i];
-    const t = unifySimples(e, sf.type, tf.type);
+    const tf: Field = target.fields[i];
+    const t = unifySimples(tf.expr || e, sf.type, tf.type);
     return {
       name: sf.name || tf.name,
       type: t,
+      expr: tf.expr,
     };
   });
   return {
@@ -643,6 +645,7 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
       return acc.concat({
         name: c.name,
         type: mkType(c.dataType, c.constraints || []),
+        expr: null,
       });
     }
   }, []);
@@ -752,7 +755,7 @@ export function elabSelect(
                   foundNullabilityInference.isNull === true
                     ? BuiltinTypes.Null
                     : unnullify(fi.type);
-                return { name: fi.name, type: t };
+                return { name: fi.name, type: t, expr: fi.expr };
               } else {
                 return fi;
               }
@@ -789,7 +792,7 @@ export function elabSelect(
           if (c.expr.type === "ref" && c.expr.name === "*") {
             return t.fields;
           } else {
-            return [{ name: n, type: t.fields[0].type }];
+            return [{ name: n, type: t.fields[0].type, expr: c.expr }];
           }
         } else {
           // AFAIK, * is the only way to introduce multiple fields with one expression
@@ -805,7 +808,7 @@ export function elabSelect(
         }
       }
 
-      return [{ name: n, type: t }];
+      return [{ name: n, type: t, expr: c.expr }];
     });
 
     return {
@@ -838,7 +841,7 @@ export function elabSelect(
         if (t === null) {
           throw new CantReduceToSimpleT(exp, t_);
         } else {
-          return { name: null, type: t };
+          return { name: null, type: t, expr: exp };
         }
       });
       return {
@@ -869,6 +872,7 @@ export function elabSelect(
           {
             name: null,
             type: res,
+            expr: s,
           },
         ],
       };
@@ -957,6 +961,7 @@ function elabInsert(
           return {
             name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
             type: t,
+            expr: selectedCol.expr,
           };
         }
       }),
@@ -1012,6 +1017,7 @@ function elabDeleteOrUpdate(
           return {
             name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
             type: t,
+            expr: selectedCol.expr,
           };
         }
       }),
@@ -1927,7 +1933,11 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
         if (valTSimple === null) {
           throw new CantReduceToSimpleT(e.args[i], argTypes[i]);
         }
-        record.fields.push({ name: { name: key.value }, type: valTSimple });
+        record.fields.push({
+          name: { name: key.value },
+          type: valTSimple,
+          expr: e.args[i],
+        });
       }
       return { kind: "jsonknown", record: record };
     } else {
@@ -2399,7 +2409,7 @@ function nullifyRecord(s: RecordT): RecordT {
   return {
     kind: "record",
     fields: s.fields.map((c) => ({
-      name: c.name,
+      ...c,
       type: nullify(c.type),
     })),
   };

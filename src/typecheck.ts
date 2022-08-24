@@ -645,7 +645,10 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
       return acc.concat({
         name: c.name,
         type: mkType(c.dataType, c.constraints || []),
-        expr: null,
+        expr: {
+          type: "null",
+          _location: c._location,
+        },
       });
     }
   }, []);
@@ -942,7 +945,12 @@ function elabInsert(
   insertT.fields.forEach((insertField, i) => {
     const col = columns[i];
 
-    cast(s.insert, insertField.type, col.type, "assignment");
+    cast(
+      insertField.expr || s.insert,
+      insertField.type,
+      col.type,
+      "assignment"
+    );
   });
 
   if (s.returning) {

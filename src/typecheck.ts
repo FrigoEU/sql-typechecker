@@ -1962,6 +1962,44 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     }
   }
 
+  if (eqQNames(e.function, { name: "to_char" })) {
+    if (isNullable(argTypes[0])) {
+      return nullify(
+        unifyOverloadedCall(
+          e,
+          [unnullify(argTypes[0] as SimpleT)],
+          [
+            {
+              expectedArgs: [BuiltinTypes.Numeric],
+              returnT: BuiltinTypes.Text,
+            },
+            {
+              expectedArgs: [BuiltinTypes.Interval],
+              returnT: BuiltinTypes.Text,
+            },
+            {
+              expectedArgs: [BuiltinTypes.Timestamp],
+              returnT: BuiltinTypes.Text,
+            },
+          ]
+        )
+      );
+    } else {
+      return unifyOverloadedCall(
+        e,
+        [argTypes[0]],
+        [
+          { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Text },
+          { expectedArgs: [BuiltinTypes.Interval], returnT: BuiltinTypes.Text },
+          {
+            expectedArgs: [BuiltinTypes.Timestamp],
+            returnT: BuiltinTypes.Text,
+          },
+        ]
+      );
+    }
+  }
+
   if (eqQNames(e.function, { name: "nextval" })) {
     return unifyCallGeneral(
       e,

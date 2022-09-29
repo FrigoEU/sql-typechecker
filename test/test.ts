@@ -84,7 +84,7 @@ function expectReturnType<T>(
         function removeLocation(obj: Object): any {
           if (isPlainObject(obj)) {
             const mapped = mapValues(obj, (inner) => removeLocation(inner));
-            return omit(mapped, "_location");
+            return omit(omit(mapped, "_location"), "expr");
           } else if (Array.isArray(obj)) {
             return obj.map((inner) => removeLocation(inner));
           }
@@ -1290,6 +1290,34 @@ $$ LANGUAGE sql;
           {
             name: { name: "id" },
             type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public toChar() {
+    expectReturnType(
+      "create table testje ( id int, d timestamp not null);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+SELECT
+  to_char(id, '999') as id,
+  to_char(d, 'HH:dd') as date
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+          {
+            name: { name: "date" },
+            type: BuiltinTypes.Text,
           },
         ],
       }

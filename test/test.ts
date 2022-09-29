@@ -1341,11 +1341,11 @@ $$ LANGUAGE sql;
         fields: [
           {
             name: { name: "int_range" },
-            type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+            type: BuiltinTypes.Integer,
           },
           {
             name: { name: "date_range" },
-            type: BuiltinTypeConstructors.Array(BuiltinTypes.Date),
+            type: BuiltinTypes.Date,
           },
         ],
       }

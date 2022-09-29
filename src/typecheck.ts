@@ -1969,10 +1969,11 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "generate_series" })) {
+    // Generate_series doesn't return an array, but rather makes extra rows!
     return unifyOverloadedCall(e, argTypes, [
       {
         expectedArgs: [BuiltinTypes.Integer, BuiltinTypes.Integer],
-        returnT: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+        returnT: BuiltinTypes.Integer,
       },
       {
         expectedArgs: [
@@ -1980,7 +1981,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
           BuiltinTypes.Integer,
           BuiltinTypes.Integer,
         ],
-        returnT: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+        returnT: BuiltinTypes.Integer,
       },
       {
         expectedArgs: [
@@ -1988,7 +1989,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
           BuiltinTypes.Timestamp,
           BuiltinTypes.Interval,
         ],
-        returnT: BuiltinTypeConstructors.Array(BuiltinTypes.Timestamp),
+        returnT: BuiltinTypes.Timestamp,
       },
       {
         expectedArgs: [
@@ -1996,7 +1997,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
           BuiltinTypes.Date,
           BuiltinTypes.Interval,
         ],
-        returnT: BuiltinTypeConstructors.Array(BuiltinTypes.Date),
+        returnT: BuiltinTypes.Date,
       },
     ]);
   }

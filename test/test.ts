@@ -1325,6 +1325,34 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public generateSeries() {
+    expectReturnType(
+      "create table testje ( id int, d1 date not null, d2 date not null);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+SELECT
+  generate_series(1, 5) as int_range,
+  generate_series(d1, d2, interval '1 day') as date_range
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "int_range" },
+            type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+          },
+          {
+            name: { name: "date_range" },
+            type: BuiltinTypeConstructors.Array(BuiltinTypes.Date),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public unification() {
     expectReturnType(
       "create table testje ( id int NOT NULL, id2 int);",

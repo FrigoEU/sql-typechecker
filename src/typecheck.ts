@@ -526,6 +526,12 @@ function castScalars(
 ): void {
   // list casts = \dC+
 
+  // You can cast text to anything, but it might throw
+  // We need this for literal input, like '1 day'::interval
+  if (type === "explicit" && eqType(source, BuiltinTypes.Text)) {
+    return;
+  }
+
   const matchingCast = findMatchingCast([source.name], source, target, type);
   if (matchingCast === null) {
     throw new TypeMismatch(e, { expected: target, actual: source });
@@ -1960,6 +1966,39 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     } else {
       throw new InvalidArguments(e, e.function, argTypes);
     }
+  }
+
+  if (eqQNames(e.function, { name: "generate_series" })) {
+    return unifyOverloadedCall(e, argTypes, [
+      {
+        expectedArgs: [BuiltinTypes.Integer, BuiltinTypes.Integer],
+        returnT: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+      },
+      {
+        expectedArgs: [
+          BuiltinTypes.Integer,
+          BuiltinTypes.Integer,
+          BuiltinTypes.Integer,
+        ],
+        returnT: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+      },
+      {
+        expectedArgs: [
+          BuiltinTypes.Timestamp,
+          BuiltinTypes.Timestamp,
+          BuiltinTypes.Interval,
+        ],
+        returnT: BuiltinTypeConstructors.Array(BuiltinTypes.Timestamp),
+      },
+      {
+        expectedArgs: [
+          BuiltinTypes.Date,
+          BuiltinTypes.Date,
+          BuiltinTypes.Interval,
+        ],
+        returnT: BuiltinTypeConstructors.Array(BuiltinTypes.Date),
+      },
+    ]);
   }
 
   if (eqQNames(e.function, { name: "to_char" })) {

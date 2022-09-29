@@ -154,7 +154,7 @@ export const BuiltinTypes = {
   },
 } as const;
 
-const allNumericBuiltinTypes = [
+const allNumericBuiltinTypes: ScalarT[] = [
   BuiltinTypes.Smallint,
   BuiltinTypes.Integer,
   BuiltinTypes.Bigint,
@@ -2133,7 +2133,9 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     return unifyOverloadedCall(
       e,
       argTypes,
-      allNumericBuiltinTypes.map((t) => ({ expectedArgs: [t], returnT: t }))
+      allNumericBuiltinTypes
+        .concat([BuiltinTypes.Date, BuiltinTypes.Time, BuiltinTypes.Timestamp])
+        .map((t) => ({ expectedArgs: [t], returnT: t }))
     );
   }
 

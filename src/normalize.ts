@@ -29,5 +29,11 @@ export function normalizeOperatorName(s: BinaryOperator): string {
   if (s === "!=") {
     return "<>";
   }
+  if (s === "LIKE") {
+    return "~~";
+  }
+  if (s === "ILIKE") {
+    return "~~*";
+  }
   return s;
 }

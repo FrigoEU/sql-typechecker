@@ -1963,6 +1963,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "to_char" })) {
+    // TODO dedup
     if (isNullable(argTypes[0])) {
       return nullify(
         unifyOverloadedCall(
@@ -1981,6 +1982,10 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
               expectedArgs: [BuiltinTypes.Timestamp],
               returnT: BuiltinTypes.Text,
             },
+            {
+              expectedArgs: [BuiltinTypes.Date],
+              returnT: BuiltinTypes.Text,
+            },
           ]
         )
       );
@@ -1993,6 +1998,10 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
           { expectedArgs: [BuiltinTypes.Interval], returnT: BuiltinTypes.Text },
           {
             expectedArgs: [BuiltinTypes.Timestamp],
+            returnT: BuiltinTypes.Text,
+          },
+          {
+            expectedArgs: [BuiltinTypes.Date],
             returnT: BuiltinTypes.Text,
           },
         ]

@@ -151,9 +151,7 @@ function genDeserialization(
       "})"
     );
   } else {
-    `function deserialize(cells: unknown[]): any{
-return ${genDeserializeSimpleT(returnType, "cells[0]")};
-}`;
+    return genDeserializeSimpleT(returnType, literalVar);
   }
 }
 

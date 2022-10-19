@@ -1,3 +1,11 @@
+
+CREATE OR REPLACE FUNCTION getMaxStudentId() RETURNS int AS $$
+
+  SELECT MAX(s.uw_id) as max_id
+  FROM uw_student_students s
+
+$$ LANGUAGE sql;
+
 CREATE OR REPLACE FUNCTION getStudentNestedJoin(uw_studentid studentid) RETURNS RECORD AS $$
 
   SELECT

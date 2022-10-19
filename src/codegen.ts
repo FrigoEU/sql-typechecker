@@ -122,6 +122,12 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
       t.name.name === "timestamp"
     ) {
       return `LocalDateTime.parse(${literalVar}.replace(" ", "T"))`;
+    } else if (
+      t.name.name === "bigint" ||
+      t.name.name === "smallint" ||
+      t.name.name.startsWith("int")
+    ) {
+      return `parseInt(${literalVar})`;
     } else {
       return literalVar;
     }

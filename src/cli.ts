@@ -7,7 +7,7 @@ import {
   parse,
   QName,
   Statement,
-} from "pgsql-ast-parser";
+} from "trader-pgsql-ast-parser";
 import * as prettier from "prettier";
 import {
   functionToTypescript,

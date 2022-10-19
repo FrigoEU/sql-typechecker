@@ -27,7 +27,7 @@ import {
   Statement,
   toSql,
   UpdateStatement,
-} from "pgsql-ast-parser";
+} from "trader-pgsql-ast-parser";
 import { Either, Left } from "purify-ts";
 import { builtincasts } from "./builtincasts";
 import { builtinoperators } from "./builtinoperators";

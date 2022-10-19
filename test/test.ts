@@ -1,6 +1,6 @@
 import { Expect, Focus, IgnoreTest, Test, TestFixture } from "alsatian";
 import { isObject, isPlainObject, mapValues, omit } from "lodash";
-import { Name, parse, QName } from "pgsql-ast-parser";
+import { Name, parse, QName } from "trader-pgsql-ast-parser";
 import { Either, Left, Right } from "purify-ts";
 import {
   ArrayT,

@@ -1,5 +1,5 @@
 import assert from "assert";
-import { Name, QName } from "pgsql-ast-parser";
+import { Name, QName } from "trader-pgsql-ast-parser";
 import {
   checkAllCasesHandled,
   functionType,

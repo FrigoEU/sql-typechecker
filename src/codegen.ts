@@ -269,6 +269,10 @@ import { Instant, LocalDate, LocalTime, LocalDateTime} from "@js-joda/core";
 `;
 }
 
+function genSelectColumnsFromTable(t: RecordT) {
+  return t.fields.map((f) => f.name?.name || "?").join(", ");
+}
+
 export function genCrudOperations(table: {
   readonly name: QName;
   readonly rel: RecordT;
@@ -281,7 +285,9 @@ export async function getAll(pool: Pool): Promise<${showTypeAsTypescriptType(
   )}[]>{
 
 const res = await pool.query({
-text: "SELECT * FROM ${showQName(table.name)}",
+text: "SELECT ${genSelectColumnsFromTable(table.rel)} FROM ${showQName(
+    table.name
+  )}",
 values: [],
 rowMode: "array",
 });
@@ -289,19 +295,21 @@ const rows = res.rows.map(row => ${genDeserialization(table.rel, "row")});
 return rows;
 }`;
 
-  const primaryKeySingleCol: null | { name: Name; type: SimpleT } =
-    (function getPrimaryKey() {
-      if (table.primaryKey.length === 1) {
-        return {
-          name: table.primaryKey[0],
-          type: table.rel.fields.find(
-            (f) => f.name?.name === table.primaryKey[0].name
-          )?.type!,
-        };
-      } else {
-        return null;
-      }
-    })();
+  const primaryKeySingleCol: null | {
+    name: Name;
+    type: SimpleT;
+  } = (function getPrimaryKey() {
+    if (table.primaryKey.length === 1) {
+      return {
+        name: table.primaryKey[0],
+        type: table.rel.fields.find(
+          (f) => f.name?.name === table.primaryKey[0].name
+        )?.type!,
+      };
+    } else {
+      return null;
+    }
+  })();
 
   if (!primaryKeySingleCol) {
     return selectAll;
@@ -359,9 +367,9 @@ export async function getOne(pool: Pool, pk: {${
     )}}): Promise<${showTypeAsTypescriptType(table.rel)} | null>{
 
 const res = await pool.query({
-text: "SELECT * FROM ${showQName(table.name)} WHERE ${
-      primaryKeySingleCol.name.name
-    } = $1",
+text: "SELECT ${genSelectColumnsFromTable(table.rel)} FROM ${showQName(
+      table.name
+    )} WHERE ${primaryKeySingleCol.name.name} = $1",
 values: [pk.${primaryKeySingleCol.name.name}] as any[],
 rowMode: "array",
 });

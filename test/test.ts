@@ -625,6 +625,72 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public count() {
+    expectReturnType(
+      "create table testje ( id int not null, mystamp timestamp not null);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+SELECT COUNT(*) AS my_count
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "my_count" },
+            type: BuiltinTypes.Bigint,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public countField() {
+    expectReturnType(
+      "create table testje ( id int not null, mystamp timestamp not null);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+SELECT COUNT(id) AS my_count
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "my_count" },
+            type: BuiltinTypes.Bigint,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public countDistinctField() {
+    expectReturnType(
+      "create table testje ( id int not null, mystamp timestamp not null);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+SELECT COUNT(DISTINCT id) AS my_count
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "my_count" },
+            type: BuiltinTypes.Bigint,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public extract() {
     expectReturnType(
       "create table testje ( id int not null, mystamp timestamp not null);",

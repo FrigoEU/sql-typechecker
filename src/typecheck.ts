@@ -2140,12 +2140,13 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "count" })) {
-    return unifyCallGeneral(
-      e,
-      argTypes,
-      [BuiltinTypes.AnyScalar],
-      BuiltinTypes.Bigint
-    );
+    return BuiltinTypes.Bigint;
+    // return unifyCallGeneral(
+    //   e,
+    //   argTypes,
+    //   [BuiltinTypes.AnyScalar],
+    //   BuiltinTypes.Bigint
+    // );
   }
 
   if (

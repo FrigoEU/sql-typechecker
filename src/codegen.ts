@@ -92,7 +92,7 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
     if (inner === literalVar) {
       return inner;
     } else {
-      return `${literalVar} === null ? (${inner}) : null`;
+      return `${literalVar} === null ? null :  (${inner})`;
     }
   } else if (t.kind === "anyscalar") {
     return literalVar;

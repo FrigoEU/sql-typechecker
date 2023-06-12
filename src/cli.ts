@@ -1,24 +1,21 @@
 import * as fs from "fs/promises";
 import { min, repeat } from "lodash";
 import * as path from "path";
+import * as prettier from "prettier";
 import {
   CreateFunctionStatement,
+  Name,
   NodeLocation,
   parse,
   QName,
   Statement,
 } from "trader-pgsql-ast-parser";
-import * as prettier from "prettier";
+import { genCrudOperations, genDomain, getImports } from "./codegen";
 import {
-  functionToTypescript,
-  genCrudOperations,
-  genDomain,
-  getImports,
-} from "./codegen";
-import {
-  doCreateFunction,
+  doQuery,
   ErrorWithLocation,
   parseSetupScripts,
+  UnifVar,
 } from "./typecheck";
 
 go();
@@ -43,54 +40,87 @@ async function findSqlFilesInDir(dir: string): Promise<string[]> {
   return res;
 }
 
-function isCreateFunctionStatement(
-  st: Statement
-): st is CreateFunctionStatement {
-  return st.type === "create function";
-}
-
 async function go() {
-  const outArgs = findInArgs({ argv: process.argv, flags: ["-o", "--out"] });
-  const outArg = outArgs[0];
-  if (!outArg) {
-    throw new Error(
-      "Please provide -o/--out parameter for the domain and crud files"
-    );
-  }
+  const setupdirs = findInArgs({
+    argv: process.argv,
+    flags: ["-sd", "--setupdir"],
+  });
+  const setupfiles = findInArgs({
+    argv: process.argv,
+    flags: ["-sf", "--setupfile"],
+  });
+  const querydirs = findInArgs({
+    argv: process.argv,
+    flags: ["-qd", "--querydir"],
+  });
 
-  const dirs = findInArgs({ argv: process.argv, flags: ["-d", "--dir"] });
-  const files = findInArgs({ argv: process.argv, flags: ["-f", "--file"] });
+  const queryfiles = findInArgs({
+    argv: process.argv,
+    flags: ["-qf", "--queryfile"],
+  });
 
-  const allSqlFiles = (
+  const globaldirs = findInArgs({
+    argv: process.argv,
+    flags: ["-gd", "--globaldir"],
+  });
+
+  const allSetupFiles = (
     await Promise.all(
-      dirs.map((dir) => findSqlFilesInDir(path.resolve(process.cwd(), dir)))
+      setupdirs.map((dir) =>
+        findSqlFilesInDir(path.resolve(process.cwd(), dir))
+      )
     )
   )
     .flat()
-    .concat(files);
+    .concat(setupfiles);
 
-  if (allSqlFiles.length === 0) {
+  const allQueryFiles = (
+    await Promise.all(
+      querydirs.map((dir) =>
+        findSqlFilesInDir(path.resolve(process.cwd(), dir))
+      )
+    )
+  )
+    .flat()
+    .concat(queryfiles);
+
+  if (allSetupFiles.length === 0) {
     throw new Error(
-      "Please provide at least one SQL file with flags -f/--file or -d/--dir"
+      "Please provide at least one SQL setup file with flags -sf/--setupfile or -sd/--setupdir"
     );
   }
 
-  const allStatements: { fileName: string; statements: Statement[] }[] = [];
-  for (let sqlFile of allSqlFiles) {
+  if (allQueryFiles.length === 0) {
+    throw new Error(
+      "Please provide at least one SQL query file with flags -qf/--queryfile or -qd/--querydir"
+    );
+  }
+
+  const globaldir = globaldirs[0] || null;
+
+  if (globaldir === null) {
+    throw new Error(
+      'Please provide a directory for the "global" file with flag -gd/--globaldir'
+    );
+  }
+
+  const allSetupStatements: { fileName: string; statements: Statement[] }[] =
+    [];
+  for (let sqlFile of allSetupFiles) {
     console.log(`Processing file ${sqlFile}`);
     const fileContents = await fs.readFile(sqlFile, "utf-8");
     const statements: Statement[] = parse(fileContents, {
       locationTracking: true,
     });
-    allStatements.push({ fileName: sqlFile, statements });
+    allSetupStatements.push({ fileName: sqlFile, statements });
   }
 
-  console.log(`Processing ${allStatements.length} statements`);
+  console.log(`Processing ${allSetupStatements.length} setup statements`);
 
-  const g = parseSetupScripts(allStatements.flatMap((f) => f.statements));
+  const g = parseSetupScripts(allSetupStatements.flatMap((f) => f.statements));
 
   // Generating global file with domains = newtypes
-  const outDir = path.resolve(process.cwd(), outArg);
+  const outDir = path.resolve(process.cwd(), globaldir);
   await fs.mkdir(outDir, { recursive: true });
   const domainFile = path.format({
     dir: outDir,
@@ -138,36 +168,92 @@ async function go() {
     );
   }
 
-  // Generating a file for each SQL file that contains at least one CREATE FUNCTION statement
-  for (let f of allStatements) {
-    const createFunctionStatements = f.statements.filter(
-      isCreateFunctionStatement
-    );
-    const fParsed = path.parse(f.fileName);
-    const outFileName = path.format({
-      dir: fParsed.dir,
-      name: fParsed.name,
-      ext: ".ts",
-    });
-    const functionsOutFile = await prepOutFile(outFileName);
-    await fs.appendFile(
-      outFileName,
-      mkImportDomainsStatement(g.domains, outFileName, domainFile),
-      "utf8"
-    );
-    console.log(`Writing functions to ${outFileName}`);
+  // Generating a file for each query file
+  // Can do this in parallel
+  await Promise.all(
+    allQueryFiles.map(async function (sqlFile) {
+      const contents_ = await fs.readFile(sqlFile, "utf-8");
+      // Replacing :myvar with myvar
+      // :myvar is not valid syntax, $1 is
+      // Regex makes sure we don't replace type annotations (eg: "::int[]")
+      let decls: {
+        readonly name: Name;
+        readonly type: UnifVar;
+      }[] = [];
+      const contents = contents_.replace(
+        /[^:](:[_A-Za-z0-9]+)/g,
+        function (match: string) {
+          const varname = match.substring(2);
+          decls.push({
+            name: { name: varname },
+            type: { kind: "unifvar", val: { kind: "unknown" } },
+          });
+          return match[0] + varname;
+        }
+      );
+      const statements = parse(contents, {
+        locationTracking: true,
+      });
+      if (statements.length !== 1) {
+        throw new Error(
+          `Failed to parse query @ ${sqlFile}: Please include exactly ONE statement in the query file`
+        );
+      }
+      const query = statements[0];
 
-    for (let st of createFunctionStatements) {
+      const fParsed = path.parse(sqlFile);
+      const queryOutFileName = path.format({
+        dir: fParsed.dir,
+        name: fParsed.name,
+        ext: ".ts",
+      });
+      const queryOutFile = await prepOutFile(queryOutFileName);
+      await fs.appendFile(
+        queryOutFileName,
+        mkImportDomainsStatement(g.domains, queryOutFileName, domainFile),
+        "utf8"
+      );
+
+      console.log(`Writing result to ${queryOutFileName}`);
+
       try {
-        const res = doCreateFunction(g, { decls: [], froms: [] }, st);
-        const writing = prettier.format(functionToTypescript(res), {
-          parser: "typescript",
-        });
-        // console.log(`Writing: ${writing}`);
-        await fs.appendFile(functionsOutFile, writing, "utf-8");
+        debugger;
+        if (query.type === "select" || query.type === "insert") {
+          console.log(`Typechecking query @ ${sqlFile}`);
+          const res = doQuery(g, { decls: decls, froms: [] }, query);
+          console.log(`
+Typechecked:
+${contents}
+
+Inputs:
+${JSON.stringify(res.inputs)}
+
+Returns:
+${JSON.stringify(res.returns)}
+`);
+          const writing = `
+/*
+Typechecked:
+${contents}
+
+Inputs:
+${JSON.stringify(res.inputs)}
+
+Returns:
+${JSON.stringify(res.returns)}
+*/
+`;
+          // functionToTypescript(res), {
+          //   parser: "typescript",
+          // }
+          // console.log(`Writing: ${writing}`);
+          await fs.appendFile(queryOutFile, writing, "utf-8");
+        } else {
+          throw new Error(`Statement type ${query.type} not supported`);
+        }
       } catch (err) {
         if (err instanceof ErrorWithLocation && err.l !== undefined) {
-          const found = findCode(st.code || "", err.l);
+          const found = findCode(contents || "", err.l);
           if (found) {
             const prefix = found.lineNumber.toString() + "  ";
             console.error("");
@@ -182,10 +268,10 @@ async function go() {
         }
         console.error(err instanceof Error ? err.message : JSON.stringify(err));
       }
-    }
 
-    await fs.appendFile(functionsOutFile, `\n`, "utf-8");
-  }
+      await fs.appendFile(queryOutFile, `\n`, "utf-8");
+    })
+  );
 
   console.log("Done!");
 }

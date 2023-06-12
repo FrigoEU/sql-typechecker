@@ -1,4 +1,3 @@
-import assert from "assert";
 import { Name, QName } from "trader-pgsql-ast-parser";
 import {
   checkAllCasesHandled,
@@ -9,11 +8,17 @@ import {
   showSqlType,
   SimpleT,
   Type,
+  UnifVar,
+  UnknownT,
   VoidT,
 } from "./typecheck";
 
-export function showTypeAsTypescriptType(t: Type): string {
-  if (t.kind === "record") {
+export function showTypeAsTypescriptType(t: Type | UnknownT | UnifVar): string {
+  if (t.kind === "unknown") {
+    return "any";
+  } else if (t.kind === "unifvar") {
+    return showTypeAsTypescriptType(t.val);
+  } else if (t.kind === "record") {
     return (
       "{" +
       t.fields
@@ -102,7 +107,7 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
       t.record.fields
         .map(
           (f) =>
-            `${f.name?.name || "?"}: ${genDeserializeSimpleT(
+            `${f.name?.name || "?"}: ${genDeserialization(
               f.type,
               literalVar + '["' + f.name?.name + '"]'
             )}`
@@ -137,10 +142,16 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
 }
 
 function genDeserialization(
-  returnType: SimpleT | RecordT | VoidT,
+  returnType: SimpleT | RecordT | VoidT | UnifVar,
   literalVar: string
-) {
-  if (returnType.kind === "void") {
+): string {
+  if (returnType.kind === "unifvar") {
+    if (returnType.val.kind === "unknown") {
+      return literalVar;
+    } else {
+      return genDeserialization(returnType.val, literalVar);
+    }
+  } else if (returnType.kind === "void") {
     return literalVar;
   } else if (returnType.kind === "record") {
     return (
@@ -148,7 +159,7 @@ function genDeserialization(
       returnType.fields
         .map(
           (f, i) =>
-            `${f.name?.name || "?"}: ${genDeserializeSimpleT(
+            `${f.name?.name || "?"}: ${genDeserialization(
               f.type,
               literalVar + "[" + i + "]"
             )}`
@@ -186,8 +197,14 @@ export function functionToTypescript(f: functionType): string {
     .map((k) => k.name.name + " " + showSqlType(k.type))
     .join(", ");
 
-  function showTypeDroppingNullable(t: SimpleT | JsonKnownT): string {
-    if (t.kind === "nullable") {
+  function showTypeDroppingNullable(t: UnifVar | SimpleT | JsonKnownT): string {
+    if (t.kind === "unifvar") {
+      if (t.val.kind === "unknown") {
+        return "any";
+      } else {
+        return showTypeDroppingNullable(t.val);
+      }
+    } else if (t.kind === "nullable") {
       return showTypeDroppingNullable(t.typevar);
     } else if (t.kind === "array") {
       return showTypeDroppingNullable(t.typevar) + "[]";
@@ -279,23 +296,36 @@ function genSelectColumnsFromTable(t: RecordT) {
 
 export function genCrudOperations(table: {
   readonly name: QName;
-  readonly rel: RecordT;
+  readonly rel: {
+    fields: {
+      name: Name | null;
+      type: SimpleT;
+    }[];
+  };
   readonly primaryKey: Name[];
   readonly defaults: Name[];
 }): string {
   const selectAll = `
-export async function getAll(pool: Pool): Promise<${showTypeAsTypescriptType(
-    table.rel
-  )}[]>{
+export async function getAll(pool: Pool): Promise<${showTypeAsTypescriptType({
+    kind: "record",
+    ...table.rel,
+  })}[]>{
 
 const res = await pool.query({
-text: "SELECT ${genSelectColumnsFromTable(table.rel)} FROM ${showQName(
-    table.name
-  )}",
+text: "SELECT ${genSelectColumnsFromTable({
+    kind: "record",
+    ...table.rel,
+  })} FROM ${showQName(table.name)}",
 values: [],
 rowMode: "array",
 });
-const rows = res.rows.map(row => ${genDeserialization(table.rel, "row")});
+const rows = res.rows.map(row => ${genDeserialization(
+    {
+      kind: "record",
+      ...table.rel,
+    },
+    "row"
+  )});
 return rows;
 }`;
 
@@ -368,17 +398,29 @@ export async function getOne(pool: Pool, pk: {${
       primaryKeySingleCol.name.name
     }: ${showTypeAsTypescriptType(
       primaryKeySingleCol.type
-    )}}): Promise<${showTypeAsTypescriptType(table.rel)} | null>{
+    )}}): Promise<${showTypeAsTypescriptType({
+      kind: "record",
+      ...table.rel,
+    })} | null>{
 
 const res = await pool.query({
-text: "SELECT ${genSelectColumnsFromTable(table.rel)} FROM ${showQName(
-      table.name
-    )} WHERE ${primaryKeySingleCol.name.name} = $1",
+text: "SELECT ${genSelectColumnsFromTable({
+      kind: "record",
+      ...table.rel,
+    })} FROM ${showQName(table.name)} WHERE ${
+      primaryKeySingleCol.name.name
+    } = $1",
 values: [pk.${primaryKeySingleCol.name.name}] as any[],
 rowMode: "array",
 });
 if (res.rows[0]){
-return ${genDeserialization(table.rel, "res.rows[0]")};
+return ${genDeserialization(
+      {
+        kind: "record",
+        ...table.rel,
+      },
+      "res.rows[0]"
+    )};
 } else {
 return null;
 }

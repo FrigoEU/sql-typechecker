@@ -18,10 +18,13 @@
     "build:types": "tsc --emitDeclarationOnly --declaration --outDir ./out --module commonjs --target ES2019 --esModuleInterop src/typeparsers.ts",
     "test": "alsatian ./test/**/*.ts",
     "start": "npm run build && node --enable-source-maps ./out/cli.js -d ./sample -o ./sample/out.ts && ts-node index.ts",
+    "start_v2": "npm run run -- -sf ./sample_v2/setup.sql -qd ./sample_v2/queries -gd ./sample_v2",
+    "start_v2_debug": "npm run debug -- -sf ./sample_v2/setup.sql -qd ./sample_v2/queries -gd ./sample_v2",
     "start_debug": "npm run debug -- -d ./sample -o ./sample/out.ts && ts-node index.ts",
     "start_index": "ts-node index.ts",
     "start_school": "npm run build && node --enable-source-maps ./out/cli.js -d ./school -o ./school/funcs",
     "start_school_debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js -d ./school -o ./school/db",
+    "run": "npm run build && node --enable-source-maps ./out/cli.js ",
     "debug": "npm run build && node --inspect-brk --enable-source-maps ./out/cli.js ",
     "test_debug": "node --inspect-brk ./node_modules/alsatian/dist/cli/alsatian-cli.js ./test/**/*.ts -t 20000000",
     "start_school_test_debug": "node --inspect-brk -r ts-node/register school/test.ts"

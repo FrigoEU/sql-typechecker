@@ -1,9 +1,8 @@
 import assert from "assert";
-import { isNil } from "lodash";
+import { isNil, map } from "lodash";
 import {
   AlterTableStatement,
   ColumnConstraint,
-  CreateFunctionStatement,
   CreateMaterializedViewStatement,
   CreateTableStatement,
   CreateViewStatement,
@@ -19,7 +18,6 @@ import {
   Name,
   // astVisitor,
   NodeLocation,
-  parse,
   PGNode,
   QName,
   SelectedColumn,
@@ -28,7 +26,6 @@ import {
   toSql,
   UpdateStatement,
 } from "trader-pgsql-ast-parser";
-import { Either, Left } from "purify-ts";
 import { builtincasts } from "./builtincasts";
 import { builtinoperators } from "./builtinoperators";
 import { builtinUnaryOperators } from "./builtinunaryoperators";
@@ -38,7 +35,7 @@ export type Type = SimpleT | RecordT;
 export type AnyScalarT = {
   kind: "anyscalar";
 };
-export type NullableT<T extends SimpleT> = {
+export type NullableT<T extends SimpleT | UnifVar> = {
   kind: "nullable";
   typevar: T;
 };
@@ -66,10 +63,19 @@ export type SimpleT =
   | NullableT<any>
   | ArrayT<any>;
 
+export type UnknownT = {
+  kind: "unknown";
+};
+
+export type UnifVar = {
+  kind: "unifvar";
+  val: SimpleT | UnknownT;
+};
+
 type Field = {
   name: Name | null;
-  type: SimpleT;
-  expr: Expr | null;
+  type: SimpleT | UnifVar;
+  expr?: Expr | null;
 };
 export type RecordT = {
   kind: "record";
@@ -166,33 +172,41 @@ const allNumericBuiltinTypes: ScalarT[] = [
   BuiltinTypes.Float8,
 ];
 
-function requireBoolean(e: Expr, t: Type): void {
-  if (
-    (t.kind === "scalar" && eqQNames(t.name, BuiltinTypes.Boolean.name)) ||
-    (t.kind === "nullable" &&
-      t.typevar.kind === "scalar" &&
-      eqQNames(t.typevar.name, BuiltinTypes.Boolean.name))
-  ) {
-    return;
+function requireBoolean(e: Expr, t: Type | UnifVar): void {
+  if (t.kind === "unifvar") {
+    unify(e, t, BuiltinTypes.Boolean);
   } else {
-    throw new TypeMismatch(e, {
-      expected: BuiltinTypes.Boolean,
-      actual: t,
-    });
+    return impl(e, t);
+  }
+
+  function impl(e: Expr, t: Type): void {
+    if (
+      (t.kind === "scalar" && eqQNames(t.name, BuiltinTypes.Boolean.name)) ||
+      (t.kind === "nullable" &&
+        t.typevar.kind === "scalar" &&
+        eqQNames(t.typevar.name, BuiltinTypes.Boolean.name))
+    ) {
+      return;
+    } else {
+      throw new TypeMismatch(e, {
+        expected: BuiltinTypes.Boolean,
+        actual: t,
+      });
+    }
   }
 }
 
 export const BuiltinTypeConstructors = {
-  Nullable: <T extends SimpleT>(t: T): NullableT<T> => ({
+  Nullable: <T extends SimpleT | UnifVar>(t: T): NullableT<T> => ({
     kind: "nullable",
     typevar: t,
   }),
-  Array: <T extends SimpleT>(t: T): ArrayT<T> => ({
+  Array: <T extends SimpleT | UnifVar>(t: T): ArrayT<T> => ({
     kind: "array",
     subtype: "array",
     typevar: t,
   }),
-  List: <T extends SimpleT>(t: T): ArrayT<T> => ({
+  List: <T extends SimpleT | UnifVar>(t: T): ArrayT<T> => ({
     kind: "array",
     subtype: "list",
     typevar: t,
@@ -206,13 +220,23 @@ function isNullable(t: Type) {
 export type Global = {
   readonly tables: ReadonlyArray<{
     readonly name: QName;
-    readonly rel: RecordT;
+    readonly rel: {
+      fields: {
+        name: Name | null;
+        type: SimpleT;
+      }[];
+    };
     readonly primaryKey: Name[];
     readonly defaults: Name[];
   }>;
   readonly views: ReadonlyArray<{
     readonly name: QName;
-    readonly rel: RecordT;
+    readonly rel: {
+      fields: {
+        name: Name | null;
+        type: SimpleT;
+      }[];
+    };
   }>;
   readonly domains: ReadonlyArray<{
     readonly name: QName;
@@ -220,248 +244,375 @@ export type Global = {
   }>;
 };
 
-function eqType(t1: Type, t2: Type): boolean {
-  if (t1.kind === "anyscalar") {
-    return t2.kind === "anyscalar";
-  } else if (t1.kind === "nullable") {
-    return t2.kind === "nullable" && eqType(t1.typevar, t2.typevar);
-  } else if (t1.kind === "array") {
-    return (
-      t2.kind === "array" &&
-      t1.subtype === t2.subtype &&
-      eqType(t1.typevar, t2.typevar)
-    );
-  } else if (t1.kind === "scalar") {
-    return t2.kind === "scalar" && eqQNames(t1.name, t2.name);
-  } else if (t1.kind === "jsonknown") {
-    return t2.kind === "jsonknown" && eqType(t1.record, t2.record);
-  } else if (t1.kind === "record") {
-    return (
-      t2.kind === "record" &&
-      t1.fields.length == t2.fields.length &&
-      t1.fields.reduce(
-        (acc: boolean, field, i) =>
-          acc &&
-          field.name?.name === t2.fields[i].name?.name &&
-          eqType(field.type, t2.fields[i].type),
-        true
-      )
-    );
-  } else {
-    return checkAllCasesHandled(t1);
-  }
-}
-
-function unify(e: Expr, source: Type, target: Type): Type {
-  if (source.kind === "record") {
-    if (target.kind === "record") {
-      return unifyRecords(e, source, target);
-    } else {
-      return unifyRecordWithSimple(e, source, target);
+function eqType(t1: Type | UnifVar, t2: Type | UnifVar): boolean {
+  return impl(
+    t1.kind === "unifvar" ? t1.val : t1,
+    t2.kind === "unifvar" ? t2.val : t2
+  );
+  function impl(t1: Type | UnknownT, t2: Type | UnknownT): boolean {
+    if (t1.kind === "unknown") {
+      return false;
     }
-  } else {
-    if (target.kind === "record") {
-      return unifyRecordWithSimple(e, target, source);
+    if (t2.kind === "unknown") {
+      return false;
+    }
+    if (t1.kind === "anyscalar") {
+      return t2.kind === "anyscalar";
+    } else if (t1.kind === "nullable") {
+      return t2.kind === "nullable" && eqType(t1.typevar, t2.typevar);
+    } else if (t1.kind === "array") {
+      return (
+        t2.kind === "array" &&
+        t1.subtype === t2.subtype &&
+        eqType(t1.typevar, t2.typevar)
+      );
+    } else if (t1.kind === "scalar") {
+      return t2.kind === "scalar" && eqQNames(t1.name, t2.name);
+    } else if (t1.kind === "jsonknown") {
+      return t2.kind === "jsonknown" && eqType(t1.record, t2.record);
+    } else if (t1.kind === "record") {
+      return (
+        t2.kind === "record" &&
+        t1.fields.length == t2.fields.length &&
+        t1.fields.reduce(
+          (acc: boolean, field, i) =>
+            acc &&
+            field.name?.name === t2.fields[i].name?.name &&
+            eqType(field.type, t2.fields[i].type),
+          true
+        )
+      );
     } else {
-      return unifySimples(e, source, target);
+      return checkAllCasesHandled(t1);
     }
   }
 }
 
-function cast(e: Expr, source: Type, target: Type, casttype: CastType): void {
-  if (source.kind === "record") {
-    if (target.kind === "record") {
-      castRecords(e, source, target, casttype);
-    } else {
-      castRecordToSimple(e, source, target, casttype);
-    }
-  } else {
-    if (target.kind === "record") {
-      castSimpleToRecord(e, source, target, casttype);
-    } else {
-      castSimples(e, source, target, casttype);
-    }
-  }
-}
-
-function castRecords(
+function unify(
   e: Expr,
-  source: RecordT,
-  target: RecordT,
-  casttype: CastType
-): void {
-  if (source.fields.length !== target.fields.length) {
-    throw new TypeMismatch(e, { expected: source, actual: target });
-  }
-  source.fields.forEach((sf, i) => {
-    const tf = target.fields[i];
-    castSimples(e, sf.type, tf.type, casttype);
-  });
-}
-
-function unifyRecords(e: Expr, source: RecordT, target: RecordT): RecordT {
-  if (source.fields.length !== target.fields.length) {
-    throw new TypeMismatch(e, { expected: source, actual: target });
-  }
-  const newFields = source.fields.map((sf, i) => {
-    const tf: Field = target.fields[i];
-    const t = unifySimples(tf.expr || e, sf.type, tf.type);
-    return {
-      name: sf.name || tf.name,
-      type: t,
-      expr: tf.expr,
-    };
-  });
-  return {
-    kind: "record",
-    fields: newFields,
-  };
-}
-
-function castRecordToSimple(
-  e: Expr,
-  source: RecordT,
-  target: SimpleT,
-  casttype: CastType
-): void {
-  // TODO add warning if no LIMIT 1
-  if (source.fields.length === 0) {
-    throw new TypeMismatch(
-      e,
-      { expected: source, actual: target },
-      "Record has no fields"
-    );
-  }
-  if (source.fields.length > 1) {
-    throw new TypeMismatch(
-      e,
-      { expected: source, actual: target },
-      "More than one row returned by a subquery used as an expression"
-    );
-  }
-  castSimples(e, source.fields[0].type, target, casttype);
-}
-
-function castSimpleToRecord(
-  e: Expr,
-  source: SimpleT,
-  target: RecordT,
-  casttype: CastType
-): void {
-  // TODO add warning if no LIMIT 1
-  if (target.fields.length === 0) {
-    throw new TypeMismatch(
-      e,
-      { expected: source, actual: target },
-      "Record has no fields"
-    );
-  }
-  if (target.fields.length > 1) {
-    throw new TypeMismatch(
-      e,
-      { expected: source, actual: target },
-      "More than one row returned by a subquery used as an expression"
-    );
-  }
-  castSimples(e, source, target.fields[0].type, casttype);
-}
-
-function unifyRecordWithSimple(
-  e: Expr,
-  source: RecordT,
-  target: SimpleT
-): SimpleT {
-  // TODO add warning if no LIMIT 1
-  if (source.fields.length === 0) {
-    throw new TypeMismatch(
-      e,
-      { expected: source, actual: target },
-      "Record has no fields"
-    );
-  }
-  if (source.fields.length > 1) {
-    throw new TypeMismatch(
-      e,
-      { expected: source, actual: target },
-      "More than one row returned by a subquery used as an expression"
-    );
-  }
-  return unifySimples(e, source.fields[0].type, target);
-}
-
-function castSimples(
-  e: Expr,
-  source: SimpleT,
-  target: SimpleT,
-  type: CastType
-): void {
-  // T -> Nullable<T> is a universal cast
-  if (target.kind === "nullable" && source.kind !== "nullable") {
-    return castSimples(e, source, target.typevar, type);
-  }
-
-  if (source.kind === "anyscalar") {
-    // ok
-    return;
-  } else if (source.kind === "nullable") {
-    if (target.kind === "nullable") {
-      return castSimples(e, source.typevar, target.typevar, type);
-    } else {
-      throw new TypeMismatch(e, { expected: source, actual: target });
-    }
-  } else if (source.kind === "array") {
-    if (target.kind === "array" && source.subtype === target.subtype) {
-      return castSimples(e, source.typevar, target.typevar, type);
-    } else {
-      throw new TypeMismatch(e, { expected: source, actual: target });
-    }
-  } else if (source.kind === "scalar") {
-    if (target.kind === "scalar") {
-      return castScalars(e, source, target, type);
-    } else {
-      // simple - parametrized
-      throw new TypeMismatch(e, { expected: source, actual: target });
-    }
-  } else if (source.kind === "jsonknown") {
-    if (target.kind === "jsonknown") {
-      for (let field of source.record.fields) {
-        const matchingFieldInTarget = target.record.fields.find(
-          (f) => f.name === field.name
-        );
-        if (!matchingFieldInTarget) {
-          throw new TypeMismatch(
-            e,
-            { expected: source, actual: target },
-            `Missing field ${field.name}`
-          );
+  source: SimpleT | UnifVar,
+  target: SimpleT | UnifVar
+): SimpleT;
+function unify(e: Expr, source: RecordT, target: RecordT): RecordT;
+function unify(e: Expr, source: RecordT, target: SimpleT): SimpleT;
+function unify(e: Expr, source: Type, target: Type): Type;
+function unify(e: Expr, source: Type | UnifVar, target: Type): Type;
+function unify(e: Expr, source: Type | UnifVar, target: Type | UnifVar): Type;
+function unify(e: Expr, source: Type | UnifVar, target: Type | UnifVar): Type {
+  if (source.kind === "unifvar") {
+    if (source.val.kind === "unknown") {
+      if (target.kind === "unifvar") {
+        if (target.val.kind === "unknown") {
+          throw new Error(`Both unifvars are still unknown`);
         } else {
-          castSimples(e, field.type, matchingFieldInTarget.type, type);
+          source.val = target.val;
+          return source.val;
+        }
+      } else {
+        if (target.kind === "record") {
+          throw new Error(`Unifvar getting unified with record`);
+        } else {
+          source.val = target;
+          return source.val;
         }
       }
-      return;
     } else {
-      // simple - parametrized
-      throw new TypeMismatch(e, { expected: source, actual: target });
+      if (target.kind === "unifvar") {
+        if (target.val.kind === "unknown") {
+          target.val = source.val;
+          return source.val;
+        } else {
+          const res = impl(e, source.val, target.val);
+          if (res.kind === "record") {
+            throw new Error(`Unifvar getting unified with record`);
+          }
+          target.val = res;
+          source.val = res;
+          return res;
+        }
+      } else {
+        const res = impl(e, source.val, target);
+        if (res.kind === "record") {
+          throw new Error(`Unifvar getting unified with record`);
+        }
+        source.val = res;
+        return res;
+      }
+    }
+  } else if (target.kind === "unifvar") {
+    if (target.val.kind === "unknown") {
+      if (source.kind === "record") {
+        throw new Error(`Unifvar getting unified with record`);
+      }
+      target.val = source;
+      return source;
+    } else {
+      const res = impl(e, source, target.val);
+      if (res.kind === "record") {
+        throw new Error(`Unifvar getting unified with record`);
+      }
+      target.val = res;
+      return res;
     }
   } else {
-    return checkAllCasesHandled(source);
+    return impl(e, source, target);
+  }
+
+  function impl(e: Expr, source: Type, target: Type): Type {
+    if (source.kind === "record") {
+      if (target.kind === "record") {
+        return unifyRecords(e, source, target);
+      } else {
+        return unifyRecordWithSimple(e, source, target);
+      }
+    } else {
+      if (target.kind === "record") {
+        return unifyRecordWithSimple(e, target, source);
+      } else {
+        return unifySimples(e, source, target);
+      }
+    }
+  }
+
+  // Get the "biggest" type back, if implicit casting is possible
+  function unifySimples(e: Expr, source: SimpleT, target: SimpleT): SimpleT {
+    try {
+      cast(e, source, target, "implicit");
+      return target;
+    } catch {
+      cast(e, target, source, "implicit");
+      return source;
+    }
+  }
+
+  function unifyRecords(e: Expr, source: RecordT, target: RecordT): RecordT {
+    if (source.fields.length !== target.fields.length) {
+      throw new TypeMismatch(e, { expected: source, actual: target });
+    }
+    const newFields = source.fields.map((sf, i) => {
+      const tf: Field = target.fields[i];
+      const t = unify(tf.expr || e, sf.type, tf.type);
+      return {
+        name: sf.name || tf.name,
+        type: t,
+        expr: tf.expr,
+      };
+    });
+    return {
+      kind: "record",
+      fields: newFields,
+    };
+  }
+
+  function unifyRecordWithSimple(
+    e: Expr,
+    source: RecordT,
+    target: SimpleT
+  ): SimpleT {
+    // TODO add warning if no LIMIT 1
+    if (source.fields.length === 0) {
+      throw new TypeMismatch(
+        e,
+        { expected: source, actual: target },
+        "Record has no fields"
+      );
+    }
+    if (source.fields.length > 1) {
+      throw new TypeMismatch(
+        e,
+        { expected: source, actual: target },
+        "More than one row returned by a subquery used as an expression"
+      );
+    }
+    return unify(e, source.fields[0].type, target);
   }
 }
 
-// Get the "biggest" type back, if implicit casting is possible
-function unifySimples(e: Expr, source: SimpleT, target: SimpleT): SimpleT {
-  try {
-    castSimples(e, source, target, "implicit");
-    return target;
-  } catch {
-    castSimples(e, target, source, "implicit");
-    return source;
+function cast(
+  e: Expr,
+  source: SimpleT | UnifVar,
+  target: SimpleT,
+  casttype: CastType
+): void;
+function cast(
+  e: Expr,
+  source: Type | UnifVar,
+  target: Type,
+  casttype: CastType
+): void;
+function cast(
+  e: Expr,
+  source: Type | UnifVar,
+  target: Type,
+  casttype: CastType
+): void {
+  if (source.kind === "unifvar") {
+    if (source.val.kind === "unknown") {
+      if (target.kind === "record") {
+        throw new Error("Can't cast unifvar to record type");
+      }
+      source.val = target;
+    } else {
+      impl(e, source.val, target, casttype);
+    }
+  } else {
+    impl(e, source, target, casttype);
+  }
+
+  function impl(e: Expr, source: Type, target: Type, casttype: CastType) {
+    if (source.kind === "record") {
+      if (target.kind === "record") {
+        castRecords(e, source, target, casttype);
+      } else {
+        castRecordToSimple(e, source, target, casttype);
+      }
+    } else {
+      if (target.kind === "record") {
+        castSimpleToRecord(e, source, target, casttype);
+      } else {
+        castSimples(e, source, target, casttype);
+      }
+    }
+  }
+
+  function castRecords(
+    e: Expr,
+    source: RecordT,
+    target: RecordT,
+    casttype: CastType
+  ): void {
+    if (source.fields.length !== target.fields.length) {
+      throw new TypeMismatch(e, { expected: source, actual: target });
+    }
+    source.fields.forEach((sf, i) => {
+      const tf = target.fields[i];
+      if (tf.type.kind === "unifvar") {
+        throw new Error(`Fatal: trying to cast field in record to unifvar`);
+      }
+      cast(e, sf.type, tf.type, casttype);
+    });
+  }
+
+  function castSimpleToRecord(
+    e: Expr,
+    source: SimpleT,
+    target: RecordT,
+    casttype: CastType
+  ): void {
+    // TODO add warning if no LIMIT 1
+    if (target.fields.length === 0) {
+      throw new TypeMismatch(
+        e,
+        { expected: source, actual: target },
+        "Record has no fields"
+      );
+    }
+    if (target.fields.length > 1) {
+      throw new TypeMismatch(
+        e,
+        { expected: source, actual: target },
+        "More than one row returned by a subquery used as an expression"
+      );
+    }
+    const t = target.fields[0].type;
+    if (t.kind === "unifvar") {
+      throw new Error(
+        `Fatal: trying to cast simpleT to field in record = unifvar`
+      );
+    }
+    castSimples(e, source, t, casttype);
+  }
+
+  function castRecordToSimple(
+    e: Expr,
+    source: RecordT,
+    target: SimpleT,
+    casttype: CastType
+  ): void {
+    // TODO add warning if no LIMIT 1
+    if (source.fields.length === 0) {
+      throw new TypeMismatch(
+        e,
+        { expected: source, actual: target },
+        "Record has no fields"
+      );
+    }
+    if (source.fields.length > 1) {
+      throw new TypeMismatch(
+        e,
+        { expected: source, actual: target },
+        "More than one row returned by a subquery used as an expression"
+      );
+    }
+    cast(e, source.fields[0].type, target, casttype);
+  }
+
+  function castSimples(
+    e: Expr,
+    source: SimpleT,
+    target: SimpleT,
+    type: CastType
+  ): void {
+    // T -> Nullable<T> is a universal cast
+    if (target.kind === "nullable" && source.kind !== "nullable") {
+      return castSimples(e, source, target.typevar, type);
+    }
+
+    if (source.kind === "anyscalar") {
+      // ok
+      return;
+    } else if (source.kind === "nullable") {
+      if (target.kind === "nullable") {
+        return castSimples(e, source.typevar, target.typevar, type);
+      } else {
+        throw new TypeMismatch(e, { expected: source, actual: target });
+      }
+    } else if (source.kind === "array") {
+      if (target.kind === "array" && source.subtype === target.subtype) {
+        return castSimples(e, source.typevar, target.typevar, type);
+      } else {
+        throw new TypeMismatch(e, { expected: source, actual: target });
+      }
+    } else if (source.kind === "scalar") {
+      if (target.kind === "scalar") {
+        return castScalars(e, source, target, type);
+      } else {
+        // simple - parametrized
+        throw new TypeMismatch(e, { expected: source, actual: target });
+      }
+    } else if (source.kind === "jsonknown") {
+      if (target.kind === "jsonknown") {
+        for (let field of source.record.fields) {
+          const matchingFieldInTarget = target.record.fields.find(
+            (f) => f.name === field.name
+          );
+          if (!matchingFieldInTarget) {
+            throw new TypeMismatch(
+              e,
+              { expected: source, actual: target },
+              `Missing field ${field.name}`
+            );
+          } else {
+            if (matchingFieldInTarget.type.kind === "unifvar") {
+              throw new Error(`Fatal: trying to cast field in json to unifvar`);
+            }
+            cast(e, field.type, matchingFieldInTarget.type, type);
+          }
+        }
+        return;
+      } else {
+        // simple - parametrized
+        throw new TypeMismatch(e, { expected: source, actual: target });
+      }
+    } else {
+      return checkAllCasesHandled(source);
+    }
   }
 }
 
 function unifyOverloadedCall(
   call: ExprCall,
-  argTypes: Type[],
+  argTypes: (Type | UnifVar)[],
   overloads: {
     expectedArgs: SimpleT[];
     returnT: SimpleT;
@@ -486,7 +637,7 @@ function unifyOverloadedCall(
 
 function unifyCallGeneral(
   call: ExprCall,
-  argTypes: Type[],
+  argTypes: (Type | UnifVar)[],
   expectedArgs: SimpleT[],
   returnT: SimpleT
 ): SimpleT {
@@ -496,11 +647,11 @@ function unifyCallGeneral(
   for (let i = 0; i < expectedArgs.length; i++) {
     const arg = argTypes[i];
     const expectedArg = expectedArgs[i];
-    const simplifiedArg = toSimpleT(arg);
+    const simplifiedArg = toSimpleT(call, arg);
     if (simplifiedArg === null) {
       throw new CantReduceToSimpleT(call.args[i], arg);
     }
-    unifySimples(call, simplifiedArg, expectedArg);
+    unify(call, simplifiedArg, expectedArg);
   }
   return returnT;
 }
@@ -528,7 +679,7 @@ function castScalars(
 
   // You can cast text to anything, but it might throw
   // We need this for literal input, like '1 day'::interval
-  if (type === "explicit" && eqType(source, BuiltinTypes.Text)) {
+  if (type === "explicit" && source.kind) {
     return;
   }
 
@@ -597,6 +748,7 @@ export type Context = {
   readonly decls: ReadonlyArray<{
     readonly name: Name;
     readonly type:
+      | UnifVar
       | Type
       | VoidT /* with statement can return bindings of type void */;
     // | ScalarT // declare bindings and function parameters
@@ -639,7 +791,13 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
     // so that's a bit more work. Not a huge amount though, just didnt do it yet
     return notImplementedYet(s);
   }
-  const fields = s.columns.reduce(function (acc: Field[], c) {
+  const fields = s.columns.reduce(function (
+    acc: {
+      name: Name | null;
+      type: SimpleT;
+    }[],
+    c
+  ) {
     if (c.kind === "like table") {
       const targetTable = c.like;
       const found = g.tables.find((t) => eqQNames(t.name, targetTable));
@@ -651,10 +809,6 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
       return acc.concat({
         name: c.name,
         type: mkType(c.dataType, c.constraints || []),
-        expr: {
-          type: "null",
-          _location: c._location,
-        },
       });
     }
   }, []);
@@ -703,7 +857,6 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
       primaryKey,
       defaults: defaults.map((c) => c.name),
       rel: {
-        kind: "record",
         fields,
       },
     }),
@@ -711,7 +864,7 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
 }
 function doCreateView(
   _g: Global,
-  s: CreateViewStatement | CreateMaterializedViewStatement
+  _s: CreateViewStatement | CreateMaterializedViewStatement
 ): Global {
   return _g;
   // return notImplementedYet(s);
@@ -759,9 +912,13 @@ export function elabSelect(
                   eqQNames(inf.fromName, fr.name) &&
                   inf.fieldName === fi.name?.name
               );
-              if (foundNullabilityInference && isNullable(fi.type)) {
+              if (
+                foundNullabilityInference &&
+                fi.type.kind !== "unifvar" &&
+                isNullable(fi.type)
+              ) {
                 const t =
-                  foundNullabilityInference.isNull === true
+                  foundNullabilityInference.isNullValue === true
                     ? BuiltinTypes.Null
                     : unnullify(fi.type);
                 return { name: fi.name, type: t, expr: fi.expr };
@@ -841,17 +998,13 @@ export function elabSelect(
         "Can't union a statement that returns nothing"
       );
     }
-    return unifyRecords(s, typeL, typeR);
+    return unify(s, typeL, typeR);
   } else if (s.type === "values") {
     const typesPerRow: RecordT[] = s.values.map((exprs) => {
       const fields = exprs.map((exp) => {
         const t_ = elabExpr(g, c, exp);
-        const t = toSimpleT(t_);
-        if (t === null) {
-          throw new CantReduceToSimpleT(exp, t_);
-        } else {
-          return { name: null, type: t, expr: exp };
-        }
+        const t = toSimpleT(exp, t_);
+        return { name: null, type: t, expr: exp };
       });
       return {
         kind: "record",
@@ -859,7 +1012,7 @@ export function elabSelect(
       };
     });
     return typesPerRow.reduce(
-      (acc: RecordT, t: RecordT) => unifyRecords(s, acc, t),
+      (acc: RecordT, t: RecordT) => unify(s, acc, t),
       typesPerRow[0]
     );
   } else if (s.type === "with") {
@@ -902,7 +1055,12 @@ function elabInsert(
 ): VoidT | RecordT {
   const insertingInto: null | {
     readonly name: QName;
-    readonly rel: RecordT;
+    readonly rel: {
+      fields: {
+        name: Name | null;
+        type: SimpleT;
+      }[];
+    };
   } = g.tables.find((t) => eqQNames(t.name, s.into)) || null;
   if (!insertingInto) {
     throw new UnknownIdentifier(s, s.into);
@@ -913,11 +1071,17 @@ function elabInsert(
     ...c,
     froms: c.froms.concat({
       name: { name: nameToAddInContext },
-      type: insertingInto.rel,
+      type: {
+        kind: "record",
+        ...insertingInto.rel,
+      },
     }),
   };
 
-  const columns: Field[] = s.columns
+  const columns: {
+    name: Name | null;
+    type: SimpleT;
+  }[] = s.columns
     ? s.columns.map((c) => {
         const foundField = insertingInto.rel.fields.find((f) => {
           if (!f.name) {
@@ -964,20 +1128,12 @@ function elabInsert(
       kind: "record",
       fields: s.returning.map((selectedCol) => {
         const t_ = elabExpr(g, newContext, selectedCol.expr);
-        const t = toSimpleT(t_);
-        if (!t) {
-          throw new KindMismatch(
-            selectedCol.expr,
-            t_,
-            "Need simple type here, not a record"
-          );
-        } else {
-          return {
-            name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
-            type: t,
-            expr: selectedCol.expr,
-          };
-        }
+        const t = toSimpleT(selectedCol.expr, t_);
+        return {
+          name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
+          type: t,
+          expr: selectedCol.expr,
+        };
       }),
     };
   } else {
@@ -995,7 +1151,12 @@ function elabDeleteOrUpdate(
   const tableName = s.type === "delete" ? s.from : s.table;
   const tableDef: null | {
     readonly name: QName;
-    readonly rel: RecordT;
+    readonly rel: {
+      fields: {
+        name: Name | null;
+        type: SimpleT;
+      }[];
+    };
   } = g.tables.find((t) => eqQNames(t.name, tableName)) || null;
 
   if (!tableDef) {
@@ -1006,7 +1167,7 @@ function elabDeleteOrUpdate(
     ...c,
     froms: c.froms.concat({
       name: { name: nameToAddInContext },
-      type: tableDef.rel,
+      type: { kind: "record", ...tableDef.rel },
     }),
   };
 
@@ -1020,20 +1181,12 @@ function elabDeleteOrUpdate(
       kind: "record",
       fields: s.returning.map((selectedCol) => {
         const t_ = elabExpr(g, newContext, selectedCol.expr);
-        const t = toSimpleT(t_);
-        if (!t) {
-          throw new KindMismatch(
-            selectedCol.expr,
-            t_,
-            "Need simple type here, not a record"
-          );
-        } else {
-          return {
-            name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
-            type: t,
-            expr: selectedCol.expr,
-          };
-        }
+        const t = toSimpleT(selectedCol.expr, t_);
+        return {
+          name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
+          type: t,
+          expr: selectedCol.expr,
+        };
       }),
     };
   } else {
@@ -1041,15 +1194,27 @@ function elabDeleteOrUpdate(
   }
 }
 
-function toSimpleT(t: Type): SimpleT | null {
-  if (t.kind === "record") {
-    if (t.fields.length === 1) {
-      return t.fields[0].type;
-    } else {
-      return null;
-    }
-  } else {
+function toSimpleT(e: Expr, t: UnifVar): UnifVar;
+function toSimpleT(e: Expr, t: Type): SimpleT;
+function toSimpleT(e: Expr, t: Type | UnifVar): SimpleT | UnifVar;
+function toSimpleT(e: Expr, t: Type | UnifVar): SimpleT | UnifVar {
+  if (t.kind === "unifvar") {
+    // UnifVar's always have simple types in them
     return t;
+  } else {
+    return impl(t);
+  }
+
+  function impl(t: Type): SimpleT | UnifVar {
+    if (t.kind === "record") {
+      if (t.fields.length === 1) {
+        return toSimpleT(e, t.fields[0].type);
+      } else {
+        throw new CantReduceToSimpleT(e, t);
+      }
+    } else {
+      return t;
+    }
   }
 }
 
@@ -1062,153 +1227,40 @@ export type functionType = {
   language: string;
 };
 
-export function doCreateFunction(
+export type queryType = {
+  inputs: { name: Name; type: SimpleT | UnifVar }[];
+  returns: Type | VoidT | UnifVar;
+  multipleRows: boolean;
+};
+
+export function doQuery(
   g: Global,
   c: Context,
-  s: CreateFunctionStatement
-): functionType {
-  const name = s.name;
-  console.log(`Typechecking function: ${name.name}`);
-  if (!s.language) {
-    throw new Error(
-      "Please provide language for function at " + showLocation(s._location)
-    );
-  }
-  if (s.code === undefined) {
-    throw new ErrorWithLocation(
-      s._location,
-      "Function definition without body"
-    );
-  }
-  if (s.language && s.language.name.toLowerCase() === "sql") {
-    const inputs = s.arguments.map((arg) => {
-      if (!arg.name) {
-        throw new Error(
-          "Please provide name for all function arguments at " +
-            showLocation(s._location)
-        );
+  s: SelectStatement | InsertStatement
+): queryType {
+  const returnType = elabStatement(g, c, s);
+  const multipleRows = hasMultipleRows(s);
+  return {
+    inputs: map(c.decls, (d): { name: Name; type: SimpleT | UnifVar } => {
+      const t = d.type;
+      if (t.kind === "void") {
+        throw new Error(`Unexpected: Input paramater has type void`);
+      } else if (t.kind === "record") {
+        throw new Error(`Unexpected: Input paramater has type record`);
       }
       return {
-        name: arg.name,
-        type: mkType(
-          arg.type,
-          // !!!!!!!!!!!!
-          // Default rule of THIS typechecker:  params are NOT NULL
-          // , unless defined as eg: (myname int default null)
-          // !!!!!!!!!!!!
-          arg.default && arg.default.type === "null"
-            ? []
-            : [{ type: "not null" }]
-        ),
+        name: d.name,
+        type: t,
       };
-    });
-    const contextForBody: Context = {
-      froms: c.froms,
-      decls: c.decls.concat(inputs),
-    };
+    }),
+    returns: returnType,
+    multipleRows: multipleRows,
+  };
+}
 
-    // TODO adjust locations based on location of "s.code"
-    const body = parse(s.code, { locationTracking: true });
-
-    if (body.length === 0) {
-      // empty function body
-      return {
-        name,
-        inputs,
-        returns: { kind: "void" },
-        multipleRows: false,
-        code: s.code,
-        language: s.language.name,
-      };
-    } else {
-      // TODO check rest of body for type errors
-      const lastStatement = body[body.length - 1];
-      const returnType = elabStatement(g, contextForBody, lastStatement);
-
-      const unifiedReturnType = (function (): Type | VoidT {
-        const location =
-          s.returns?.type._location || s.name._location || s._location;
-        const dummyExpr = {
-          // TODO!
-          _location: location,
-          type: "null" as const,
-        };
-
-        if (returnType.kind === "void") {
-          if (
-            !s.returns ||
-            (s.returns.type.kind === undefined &&
-              s.returns.type.name === "void")
-          ) {
-            return { kind: "void" };
-          } else if (s.returns.type.kind === "table") {
-            throw new Error("RETURNS TABLE is not supported yet");
-          } else {
-            const annotatedType = mkType(s.returns.type, []);
-            throw new KindMismatch(
-              dummyExpr,
-              annotatedType,
-              "Function returns void"
-            );
-          }
-        }
-        if (!s.returns) {
-          throw new KindMismatch(
-            dummyExpr,
-            { kind: "void" },
-            "Function needs return type"
-          );
-        } else if (s.returns.type.kind === "table") {
-          throw new Error("RETURNS TABLE is not supported yet");
-        } else if (
-          s.returns.type.kind === undefined &&
-          s.returns.type.name === "record"
-        ) {
-          if (returnType.kind === "record") {
-            return returnType;
-          } else {
-            throw new KindMismatch(
-              dummyExpr,
-              returnType,
-              "Function returns record type but type annotation disagrees"
-            );
-          }
-        } else {
-          const annotatedType = mkType(s.returns.type, [
-            { type: "not null" } /* not sure about this one */,
-          ]);
-          try {
-            return unify(dummyExpr, returnType, annotatedType);
-          } catch (err) {
-            const mess = err instanceof Error ? err.message : "";
-            if (err instanceof TypeMismatch) {
-              throw new TypeMismatch(
-                dummyExpr,
-                { expected: err.expected, actual: err.actual },
-                "Function return type mismatch"
-              );
-            } else {
-              throw new ErrorWithLocation(
-                location,
-                "Function return type mismatch: \n" + mess
-              );
-            }
-          }
-        }
-      })();
-
-      return {
-        name,
-        inputs,
-        returns: unifiedReturnType,
-        multipleRows: (s.returns && s.returns.setof) || false,
-        code: s.code,
-        language: s.language.name,
-      };
-    }
-  } else {
-    return notImplementedYet(s);
-  }
+function hasMultipleRows(_s: SelectStatement | InsertStatement) {
+  // TODO
+  return false;
 }
 
 type HandledFrom = { name: QName; rel: RecordT };
@@ -1220,16 +1272,20 @@ function findRel(g: Global, c: Context, e: Expr, n: QName): Nullable<RecordT> {
     if (d.type.kind === "record") {
       return d.type;
     } else {
-      throw new KindMismatch(e, d.type, "Expecting a record or table");
+      if (d.type.kind === "unifvar") {
+        throw new KindMismatch(e, d.type.val, "Expecting a record or table");
+      } else {
+        throw new KindMismatch(e, d.type, "Expecting a record or table");
+      }
     }
   } else {
     const t = g.tables.find((t) => eqQNames(t.name, n));
     if (t) {
-      return t.rel;
+      return { kind: "record", ...t.rel };
     } else {
       const v = g.views.find((v) => eqQNames(v.name, n));
       if (v) {
-        return v.rel;
+        return { kind: "record", ...v.rel };
       } else {
         return null;
       }
@@ -1274,13 +1330,17 @@ export class UnknownIdentifier extends ErrorWithLocation {
   }
 }
 export class CantReduceToSimpleT extends ErrorWithLocation {
-  constructor(e: PGNode, m: Type) {
+  constructor(e: PGNode, m: Type | UnifVar) {
     super(e._location, `Can't reduce to simple type: ${showType(m)}`);
   }
 }
 
-export function showType(t: Type): string {
-  if (t.kind === "record") {
+export function showType(t: Type | UnknownT | UnifVar): string {
+  if (t.kind === "unifvar") {
+    return `UnifVar<${showType(t.val)}>`;
+  } else if (t.kind === "unknown") {
+    return "UNKNOWN";
+  } else if (t.kind === "record") {
     return (
       "{" +
       t.fields
@@ -1343,7 +1403,7 @@ export function showSqlType(t: Type): string {
   }
 }
 export class UnknownUnaryOp extends ErrorWithLocation {
-  constructor(e: Expr, n: QName, t1: Type) {
+  constructor(e: Expr, n: QName, t1: Type | UnifVar) {
     super(
       e._location,
       `Can't apply unary operator "${showQName(n)}" to ${showType(t1)}`
@@ -1351,7 +1411,7 @@ export class UnknownUnaryOp extends ErrorWithLocation {
   }
 }
 export class UnknownBinaryOp extends ErrorWithLocation {
-  constructor(e: Expr, n: QName, t1: Type, t2: Type) {
+  constructor(e: Expr, n: QName, t1: Type | UnifVar, t2: Type | UnifVar) {
     super(
       e._location,
       `Can't apply operator "${showQName(n)}" to ${showType(t1)} and ${showType(
@@ -1366,7 +1426,7 @@ export class UnknownFunction extends ErrorWithLocation {
   }
 }
 export class InvalidArguments extends ErrorWithLocation {
-  constructor(e: Expr, n: QName, argTs: Type[]) {
+  constructor(e: Expr, n: QName, argTs: (Type | UnifVar)[]) {
     const argsString = argTs.map((t) => showType(t)).join(", ");
     super(
       e._location,
@@ -1398,7 +1458,7 @@ class ColumnsMismatch extends ErrorWithLocation {
   }
 }
 class KindMismatch extends ErrorWithLocation {
-  constructor(e: Expr, type: Type | VoidT, errormsg: string) {
+  constructor(e: Expr, type: Type | UnknownT | VoidT, errormsg: string) {
     super(
       e._location,
       `
@@ -1410,14 +1470,6 @@ ${errormsg}}
 Type: 
 ${JSON.stringify(type)}
 `
-    );
-  }
-}
-class UnableToDeriveFieldName extends ErrorWithLocation {
-  constructor(e: Expr) {
-    super(
-      e._location,
-      `Unable to derive field name for expression ${e}, please provide an alias with <expr> AS <name>`
     );
   }
 }
@@ -1442,13 +1494,13 @@ but this name already exists in the statement. Alias this column with
 
 export class TypeMismatch extends ErrorWithLocation {
   public expected: Type;
-  public actual: Type;
+  public actual: Type | UnifVar;
   public mess?: string;
   constructor(
     e: Expr,
     ts: {
       expected: Type;
-      actual: Type;
+      actual: Type | UnifVar;
     },
     mess?: string
   ) {
@@ -1475,12 +1527,12 @@ ${JSON.stringify(ts.actual)}}
 }
 
 export class CannotCast extends ErrorWithLocation {
-  public from: Type;
+  public from: Type | UnifVar;
   public to: Type;
   constructor(
     e: Expr,
     ts: {
-      from: Type;
+      from: Type | UnifVar;
       to: Type;
     }
   ) {
@@ -1605,7 +1657,10 @@ function addFromsToScope(
   return mergeHandledFroms(c, inFroms);
 }
 
-function lookupInRecord(s: RecordT, name: Name): SimpleT | null {
+function lookupInRecord<T>(
+  s: { fields: { name: Name | null; type: T }[] },
+  name: Name
+): T | null {
   const found = s.fields.find((f) => f.name && f.name.name === name.name);
   if (found) {
     return found.type;
@@ -1614,7 +1669,7 @@ function lookupInRecord(s: RecordT, name: Name): SimpleT | null {
   }
 }
 
-function elabRef(c: Context, e: ExprRef): Type {
+function elabRef(c: Context, e: ExprRef): Type | UnifVar {
   if (e.name === "*") {
     const tab = e.table;
     if (tab !== undefined) {
@@ -1653,7 +1708,7 @@ function lookupRef(
         fromName: QName;
         fieldName: string;
       };
-      type: SimpleT;
+      type: SimpleT | UnifVar;
     } {
   assert(e.name !== "*");
   const tableName = e.table;
@@ -1680,7 +1735,7 @@ function lookupRef(
     const foundFields: {
       fromName: QName;
       field: Name;
-      type: SimpleT;
+      type: SimpleT | UnifVar;
     }[] = mapPartial(c.froms, (t) => {
       const foundfield = lookupInRecord(t.type, e);
       return foundfield
@@ -1748,7 +1803,7 @@ function elabAnyCall(
   e: Expr,
   name: QName,
   nullPolicy: "CALLED ON NULL INPUT" | "STRICT", // RETURNS NULL ON NULL INPUT = STRICT
-  sourceTypes: Type[],
+  sourceTypes: (Type | UnifVar)[],
   targetTypes: Type[]
 ): {
   nullifyResultType: boolean;
@@ -1790,13 +1845,10 @@ function elabAnyCall(
 function elabUnaryOp(g: Global, c: Context, e: ExprUnary): Type {
   const t1_ = elabExpr(g, c, e.operand);
 
-  const t1 = toSimpleT(t1_);
-  if (t1 === null) {
-    throw new CantReduceToSimpleT(e, t1_);
-  }
+  const t1 = toSimpleT(e, t1_);
 
   if (e.op === "IS NULL" || e.op === "IS NOT NULL") {
-    if (!isNullable(t1)) {
+    if (t1.kind !== "unifvar" && !isNullable(t1)) {
       registerWarning(e, "IS (NOT) NULL check but operand is not nullable");
     }
     return BuiltinTypes.Boolean;
@@ -1838,10 +1890,10 @@ function elabUnaryOp(g: Global, c: Context, e: ExprUnary): Type {
 }
 function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
   const t1_ = elabExpr(g, c, e.left);
-  const t2_ = elabExpr(g, c, e.right);
+  const t1 = toSimpleT(e.left, t1_);
 
-  const t1 = toSimpleT(t1_);
-  const t2 = toSimpleT(t2_);
+  const t2_ = elabExpr(g, c, e.right);
+  const t2 = toSimpleT(e.right, t2_);
 
   if (t1 === null) {
     throw new CantReduceToSimpleT(e, t1_);
@@ -1862,7 +1914,7 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
   // TODO use elabAnyCall?
   if (e.op === "IN" || e.op === "NOT IN") {
     // No generics, so special casing this operator
-    castSimples(e, t2, BuiltinTypeConstructors.List(t1), "implicit");
+    cast(e, t2, BuiltinTypeConstructors.List(t1), "implicit");
     return BuiltinTypes.Boolean;
   }
 
@@ -1943,10 +1995,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
           );
         }
         const valT = argTypes[i + 1];
-        const valTSimple = toSimpleT(valT);
-        if (valTSimple === null) {
-          throw new CantReduceToSimpleT(e.args[i], argTypes[i]);
-        }
+        const valTSimple = toSimpleT(e.args[i], valT);
         record.fields.push({
           name: { name: key.value },
           type: valTSimple,
@@ -2014,7 +2063,14 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
 
   if (eqQNames(e.function, { name: "to_char" })) {
     // TODO dedup
-    if (isNullable(argTypes[0])) {
+    const argT = argTypes[0];
+    const t = argT.kind === "unifvar" ? argT.val : argT;
+    if (t.kind === "unknown") {
+      throw new Error(
+        `Unifvar is unknown at this position. Add an explicit cast.`
+      );
+    }
+    if (isNullable(t)) {
       return nullify(
         unifyOverloadedCall(
           e,
@@ -2082,11 +2138,8 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       throw new InvalidArguments(e, e.function, argTypes);
     }
     const t_ = argTypes[0];
-    const t = toSimpleT(t_);
-    if (t === null) {
-      throw new CantReduceToSimpleT(e.args[0], argTypes[0]);
-    }
-    const unifiedT = unifySimples(
+    const t = toSimpleT(e.args[0], t_);
+    const unifiedT = unify(
       e,
       t,
       BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar)
@@ -2157,22 +2210,34 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     if (e.args.length === 0) {
       throw new InvalidArguments(e, e.function, []);
     }
-    const types: [Expr, SimpleT][] = e.args
+    const types: [Expr, SimpleT | UnifVar][] = e.args
       .map((arg) => [arg, elabExpr(g, c, arg)] as const)
       .map(([arg, t_]) => {
-        const t = toSimpleT(t_);
-        if (t === null) {
-          throw new CantReduceToSimpleT(arg, t_);
-        } else {
-          return [arg, t];
-        }
+        const t = toSimpleT(arg, t_);
+        return [arg, t];
       });
-    const unifiedType = types.reduce(
-      (acc, [arg, t]) => unifySimples(arg, acc, t),
+    const unifiedType_ = types.reduce(
+      (acc, [arg, t]): SimpleT => unify(arg, acc, t),
       types[0][1]
     );
+    const unifiedType =
+      unifiedType_.kind === "unifvar" ? unifiedType_.val : unifiedType_;
+    if (unifiedType.kind === "unknown") {
+      throw new ErrorWithLocation(
+        e._location,
+        `Unifvar is unknown in ${e.function.name} call, add type annotation`
+      );
+    }
     if (eqQNames(e.function, { name: "coalesce" })) {
-      if (types.some(([_arg, t]) => !isNullable(t))) {
+      if (
+        types.some(([_arg, t]) =>
+          t.kind === "unifvar"
+            ? t.val.kind === "unknown"
+              ? false
+              : !isNullable(t.val)
+            : !isNullable(t)
+        )
+      ) {
         return unnullify(unifiedType);
       } else {
         return unifiedType;
@@ -2186,7 +2251,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   throw new UnknownFunction(e, e.function);
 }
 
-function elabExpr(g: Global, c: Context, e: Expr): Type {
+function elabExpr(g: Global, c: Context, e: Expr): Type | UnifVar {
   if (e.type === "ref") {
     const t = elabRef(c, e);
     return t;
@@ -2213,12 +2278,8 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
   } else if (e.type === "list" || e.type === "array") {
     const typevar = e.expressions.reduce((acc: SimpleT, subexpr: Expr) => {
       const t_ = elabExpr(g, c, subexpr);
-      const t = toSimpleT(t_);
-      if (t === null) {
-        throw new CantReduceToSimpleT(e, t_);
-      } else {
-        return unifySimples(e, t, acc);
-      }
+      const t = toSimpleT(subexpr, t_);
+      return unify(e, t, acc);
     }, BuiltinTypes.AnyScalar);
     return e.type === "list"
       ? BuiltinTypeConstructors.List(typevar)
@@ -2234,7 +2295,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
         "Select in array select can't return void"
       );
     }
-    const t = unifyRecordWithSimple(e, selectType, BuiltinTypes.AnyScalar);
+    const t = unify(e, selectType, BuiltinTypes.AnyScalar);
     return BuiltinTypeConstructors.Array(t);
   } else if (e.type === "default") {
     // ??
@@ -2323,31 +2384,33 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
   } else if (e.type === "arrayIndex") {
     const arrayT = elabExpr(g, c, e.array);
     const indexT = elabExpr(g, c, e.index);
+    if (arrayT.kind === "unifvar") {
+      throw new ErrorWithLocation(
+        e._location,
+        "Indexing unifvar is not supported yet"
+      );
+    }
     const unifiedArrayT_ = unify(
       e.array,
       arrayT,
       BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar)
     );
     cast(e.array, indexT, BuiltinTypes.Integer, "implicit");
-    const unifiedArrayT = toSimpleT(unifiedArrayT_);
+    const unifiedArrayT = toSimpleT(e.array, unifiedArrayT_);
 
-    if (unifiedArrayT === null) {
-      throw new CantReduceToSimpleT(e.array, unifiedArrayT_);
+    const unnulified = unnullify(unifiedArrayT);
+    if (unnulified.kind !== "array") {
+      throw new TypeMismatch(e.array, {
+        expected: arrayT,
+        actual: BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar),
+      });
     } else {
-      const unnulified = unnullify(unifiedArrayT);
-      if (unnulified.kind !== "array") {
-        throw new TypeMismatch(e.array, {
-          expected: arrayT,
-          actual: BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar),
-        });
-      } else {
-        return nullify(unnulified.typevar);
-      }
+      return nullify(unnulified.typevar);
     }
   } else if (e.type === "case") {
     if (e.value) {
       const valueT = elabExpr(g, c, e.value);
-      const conditionTs: [Expr, Type][] = e.whens.map((whenExp) => [
+      const conditionTs: [Expr, Type | UnifVar][] = e.whens.map((whenExp) => [
         whenExp.when,
         elabExpr(g, c, whenExp.when),
       ]);
@@ -2356,7 +2419,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
         valueT
       );
     } else {
-      const conditionTs: [Expr, Type][] = e.whens.map((whenExp) => [
+      const conditionTs: [Expr, Type | UnifVar][] = e.whens.map((whenExp) => [
         whenExp.when,
         elabExpr(g, c, whenExp.when),
       ]);
@@ -2368,7 +2431,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
       throw new Error("Not expecting CASE statement without when");
     }
     const whensT = e.whens.reduce(
-      (acc: Type, whenExp) =>
+      (acc: Type | UnifVar, whenExp): Type | UnifVar =>
         unify(whenExp.value, acc, elabExpr(g, c, whenExp.value)),
       elabExpr(g, c, e.whens[0].value)
     );
@@ -2394,6 +2457,9 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     const valueT = elabExpr(g, c, e.value);
     const hiT = elabExpr(g, c, e.hi);
     const loT = elabExpr(g, c, e.lo);
+    if (hiT.kind === "unifvar" || loT.kind === "unifvar") {
+      throw new ErrorWithLocation(e._location, `Not supported`);
+    }
     cast(e, valueT, loT, "implicit");
     cast(e, valueT, hiT, "implicit");
     return BuiltinTypes.Boolean;
@@ -2421,7 +2487,13 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     } catch (err) {
       throw new CannotCast(e, { from: operandT, to: toT });
     }
-    if (isNullable(operandT)) {
+    if (
+      operandT.kind === "unifvar"
+        ? operandT.val.kind === "unknown"
+          ? true // not sure
+          : isNullable(operandT.val)
+        : isNullable(operandT)
+    ) {
       return toT;
     } else {
       return unnullify(toT);
@@ -2434,12 +2506,12 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
 function inferNullability(
   c: Context,
   e: Expr
-): { fromName: QName; fieldName: string; isNull: boolean }[] {
+): { fromName: QName; fieldName: string; isNullValue: boolean }[] {
   if (e.type === "unary") {
     if (e.op === "NOT") {
       return inferNullability(c, e).map((judg) => ({
         ...judg,
-        isNull: !judg.isNull,
+        isNull: !judg.isNullValue,
       }));
     }
     if (e.op === "IS NULL" || e.op === "IS NOT NULL") {
@@ -2452,7 +2524,7 @@ function inferNullability(
             return [];
           } else {
             return [
-              { ...found.from, isNull: e.op === "IS NULL" ? true : false },
+              { ...found.from, isNullValue: e.op === "IS NULL" ? true : false },
             ];
           }
         }
@@ -2466,7 +2538,11 @@ function inferNullability(
   }
 }
 
-function elabStatement(g: Global, c: Context, s: Statement): VoidT | Type {
+function elabStatement(
+  g: Global,
+  c: Context,
+  s: Statement
+): VoidT | Type | UnifVar {
   if (
     s.type === "select" ||
     s.type === "union" ||
@@ -2523,7 +2599,7 @@ function nullifyRecord(s: RecordT): RecordT {
   };
 }
 
-function nullify(s: SimpleT): SimpleT {
+function nullify(s: SimpleT | UnifVar): SimpleT {
   if (s.kind === "nullable") {
     return s;
   } else {
@@ -2531,7 +2607,9 @@ function nullify(s: SimpleT): SimpleT {
   }
 }
 
-function unnullify(s: SimpleT): SimpleT {
+function unnullify(s: UnknownT): UnknownT;
+function unnullify(s: SimpleT): SimpleT;
+function unnullify(s: SimpleT | UnknownT): SimpleT | UnknownT {
   if (s.kind === "nullable") {
     return s.typevar;
   } else {

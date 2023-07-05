@@ -136,7 +136,7 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
   }
 }
 
-function genDeserialization(
+function genFunctionResDeserialization(
   returnType: SimpleT | RecordT | VoidT,
   literalVar: string
 ) {
@@ -157,7 +157,7 @@ function genDeserialization(
       "})"
     );
   } else {
-    return genDeserializeSimpleT(returnType, literalVar);
+    return genDeserializeSimpleT(returnType, literalVar + "[0]");
   }
 }
 
@@ -235,11 +235,14 @@ $$${f.code}$$ LANGUAGE ${f.language};
     f.returns.kind === "void"
       ? ""
       : f.multipleRows === true
-      ? `return res.rows.map(row => ${genDeserialization(f.returns, "row")});`
+      ? `return res.rows.map(row => ${genFunctionResDeserialization(
+          f.returns,
+          "row"
+        )});`
       : `
 const row = res.rows[0];
 if (row.some(f => f !== null)){
-  return ${genDeserialization(f.returns, "row")}
+  return ${genFunctionResDeserialization(f.returns, "row")}
 } else {
   return null;
 }`;
@@ -295,7 +298,10 @@ text: "SELECT ${genSelectColumnsFromTable(table.rel)} FROM ${showQName(
 values: [],
 rowMode: "array",
 });
-const rows = res.rows.map(row => ${genDeserialization(table.rel, "row")});
+const rows = res.rows.map(row => ${genFunctionResDeserialization(
+    table.rel,
+    "row"
+  )});
 return rows;
 }`;
 
@@ -378,7 +384,7 @@ values: [pk.${primaryKeySingleCol.name.name}] as any[],
 rowMode: "array",
 });
 if (res.rows[0]){
-return ${genDeserialization(table.rel, "res.rows[0]")};
+return ${genFunctionResDeserialization(table.rel, "res.rows[0]")};
 } else {
 return null;
 }

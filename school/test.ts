@@ -15,7 +15,6 @@ const pool = new Pool({
 const studentid = <studentid>1;
 
 async function go() {
-  debugger;
   const res2 = await getstudentnestedjoin(pool, { uw_studentid: studentid });
   const res3 = await getstudentnestedjoinnojson(pool, {
     uw_studentid: studentid,

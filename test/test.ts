@@ -13,6 +13,7 @@ import {
   SimpleT,
   Type,
   VoidT,
+  Field,
 } from "../src/typecheck";
 
 // https://github.com/alsatian-test/alsatian/blob/master/packages/alsatian/README.md
@@ -84,7 +85,7 @@ function expectReturnType<T>(
         function removeLocation(obj: Object): any {
           if (isPlainObject(obj)) {
             const mapped = mapValues(obj, (inner) => removeLocation(inner));
-            return omit(omit(mapped, "_location"), "expr");
+            return omit(omit(mapped, "_location"), "_expr");
           } else if (Array.isArray(obj)) {
             return obj.map((inner) => removeLocation(inner));
           }
@@ -1450,6 +1451,41 @@ INSERT INTO testje (id, name) VALUES (1, 'hello');
 $$ LANGUAGE sql;
 `,
       { kind: "void" }
+    );
+  }
+
+  @Test()
+  @Focus
+  public insertFromSelect() {
+    expectReturnType(
+      `
+create table testje ( id int NOT NULL, name text);
+create table testje2 ( id int NOT NULL, name text);
+`,
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+WITH mycte AS (
+  SELECT *
+  FROM testje2
+  WHERE id = 2
+),
+inserts_ AS (
+  INSERT INTO testje (id, name)
+  SELECT nextval('my_seq'), mycte.name FROM mycte
+  RETURNING id
+)
+SELECT * FROM inserts_
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
     );
   }
 

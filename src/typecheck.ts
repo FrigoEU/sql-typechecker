@@ -28,7 +28,6 @@ import {
   toSql,
   UpdateStatement,
 } from "trader-pgsql-ast-parser";
-import { Either, Left } from "purify-ts";
 import { builtincasts } from "./builtincasts";
 import { builtinoperators } from "./builtinoperators";
 import { builtinUnaryOperators } from "./builtinunaryoperators";
@@ -66,10 +65,10 @@ export type SimpleT =
   | NullableT<any>
   | ArrayT<any>;
 
-type Field = {
+export type Field = {
   name: Name | null;
   type: SimpleT;
-  expr: Expr | null;
+  _expr?: Expr;
 };
 export type RecordT = {
   kind: "record";
@@ -175,10 +174,14 @@ function requireBoolean(e: Expr, t: Type): void {
   ) {
     return;
   } else {
-    throw new TypeMismatch(e, {
-      expected: BuiltinTypes.Boolean,
-      actual: t,
-    });
+    throw new TypeMismatch(
+      e,
+      {
+        expected: BuiltinTypes.Boolean,
+        actual: t,
+      },
+      "Requiring boolean"
+    );
   }
 }
 
@@ -252,64 +255,84 @@ function eqType(t1: Type, t2: Type): boolean {
   }
 }
 
-function unify(e: Expr, source: Type, target: Type): Type {
+function unify(g: Global, e: Expr, source: Type, target: Type): Type {
   if (source.kind === "record") {
     if (target.kind === "record") {
-      return unifyRecords(e, source, target);
+      return unifyRecords(g, e, source, target);
     } else {
-      return unifyRecordWithSimple(e, source, target);
+      return unifyRecordWithSimple(g, e, source, target);
     }
   } else {
     if (target.kind === "record") {
-      return unifyRecordWithSimple(e, target, source);
+      return unifyRecordWithSimple(g, e, target, source);
     } else {
-      return unifySimples(e, source, target);
+      return unifySimples(g, e, source, target);
     }
   }
 }
 
-function cast(e: Expr, source: Type, target: Type, casttype: CastType): void {
+function cast(
+  g: Global,
+  e: Expr,
+  source: Type,
+  target: Type,
+  casttype: CastType
+): void {
   if (source.kind === "record") {
     if (target.kind === "record") {
-      castRecords(e, source, target, casttype);
+      castRecords(g, e, source, target, casttype);
     } else {
-      castRecordToSimple(e, source, target, casttype);
+      castRecordToSimple(g, e, source, target, casttype);
     }
   } else {
     if (target.kind === "record") {
-      castSimpleToRecord(e, source, target, casttype);
+      castSimpleToRecord(g, e, source, target, casttype);
     } else {
-      castSimples(e, source, target, casttype);
+      castSimples(g, e, source, target, casttype);
     }
   }
 }
 
 function castRecords(
+  g: Global,
   e: Expr,
   source: RecordT,
   target: RecordT,
   casttype: CastType
 ): void {
   if (source.fields.length !== target.fields.length) {
-    throw new TypeMismatch(e, { expected: source, actual: target });
+    throw new TypeMismatch(
+      e,
+      { expected: source, actual: target },
+      "Amount of fields is not the same"
+    );
   }
   source.fields.forEach((sf, i) => {
     const tf = target.fields[i];
-    castSimples(e, sf.type, tf.type, casttype);
+    castSimples(g, e, sf.type, tf.type, casttype);
   });
 }
 
-function unifyRecords(e: Expr, source: RecordT, target: RecordT): RecordT {
+function unifyRecords(
+  g: Global,
+  e: Expr,
+  source: RecordT,
+  target: RecordT
+): RecordT {
   if (source.fields.length !== target.fields.length) {
-    throw new TypeMismatch(e, { expected: source, actual: target });
+    throw new TypeMismatch(
+      e,
+      { expected: source, actual: target },
+      "Amount of fields is not the same"
+    );
   }
   const newFields = source.fields.map((sf, i) => {
     const tf: Field = target.fields[i];
-    const t = unifySimples(tf.expr || e, sf.type, tf.type);
+    const t = unifySimples(g, tf._expr || e, sf.type, tf.type);
     return {
       name: sf.name || tf.name,
       type: t,
-      expr: tf.expr,
+      _expr: tf._expr,
     };
   });
   return {
@@ -319,6 +342,7 @@ function unifyRecords(e: Expr, source: RecordT, target: RecordT): RecordT {
 }
 
 function castRecordToSimple(
+  g: Global,
   e: Expr,
   source: RecordT,
   target: SimpleT,
@@ -339,10 +363,11 @@ function castRecordToSimple(
       "More than one row returned by a subquery used as an expression"
     );
   }
-  castSimples(e, source.fields[0].type, target, casttype);
+  castSimples(g, e, source.fields[0].type, target, casttype);
 }
 
 function castSimpleToRecord(
+  g: Global,
   e: Expr,
   source: SimpleT,
   target: RecordT,
@@ -363,10 +388,11 @@ function castSimpleToRecord(
       "More than one row returned by a subquery used as an expression"
     );
   }
-  castSimples(e, source, target.fields[0].type, casttype);
+  castSimples(g, e, source, target.fields[0].type, casttype);
 }
 
 function unifyRecordWithSimple(
+  g: Global,
   e: Expr,
   source: RecordT,
   target: SimpleT
@@ -386,10 +412,11 @@ function unifyRecordWithSimple(
       "More than one row returned by a subquery used as an expression"
     );
   }
-  return unifySimples(e, source.fields[0].type, target);
+  return unifySimples(g, e, source.fields[0].type, target);
 }
 
 function castSimples(
+  g: Global,
   e: Expr,
   source: SimpleT,
   target: SimpleT,
@@ -397,7 +424,7 @@ function castSimples(
 ): void {
   // T -> Nullable<T> is a universal cast
   if (target.kind === "nullable" && source.kind !== "nullable") {
-    return castSimples(e, source, target.typevar, type);
+    return castSimples(g, e, source, target.typevar, type);
   }
 
   if (source.kind === "anyscalar") {
@@ -405,22 +432,34 @@ function castSimples(
     return;
   } else if (source.kind === "nullable") {
     if (target.kind === "nullable") {
-      return castSimples(e, source.typevar, target.typevar, type);
+      return castSimples(g, e, source.typevar, target.typevar, type);
     } else {
-      throw new TypeMismatch(e, { expected: source, actual: target });
+      throw new TypeMismatch(
+        e,
+        { expected: source, actual: target },
+        "Nullability is different"
+      );
     }
   } else if (source.kind === "array") {
     if (target.kind === "array" && source.subtype === target.subtype) {
-      return castSimples(e, source.typevar, target.typevar, type);
+      return castSimples(g, e, source.typevar, target.typevar, type);
     } else {
-      throw new TypeMismatch(e, { expected: source, actual: target });
+      throw new TypeMismatch(
+        e,
+        { expected: source, actual: target },
+        "Can't unify array with non-array"
+      );
     }
   } else if (source.kind === "scalar") {
     if (target.kind === "scalar") {
-      return castScalars(e, source, target, type);
+      return castScalars(g, e, source, target, type);
     } else {
       // simple - parametrized
-      throw new TypeMismatch(e, { expected: source, actual: target });
+      throw new TypeMismatch(
+        e,
+        { expected: source, actual: target },
+        "Can't unify scalar with non-scalar"
+      );
     }
   } else if (source.kind === "jsonknown") {
     if (target.kind === "jsonknown") {
@@ -435,13 +474,17 @@ function castSimples(
             `Missing field ${field.name}`
           );
         } else {
-          castSimples(e, field.type, matchingFieldInTarget.type, type);
+          castSimples(g, e, field.type, matchingFieldInTarget.type, type);
         }
       }
       return;
     } else {
       // simple - parametrized
-      throw new TypeMismatch(e, { expected: source, actual: target });
+      throw new TypeMismatch(
+        e,
+        { expected: source, actual: target },
+        "Can't unify JSON with non-JSON"
+      );
     }
   } else {
     return checkAllCasesHandled(source);
@@ -449,17 +492,23 @@ function castSimples(
 }
 
 // Get the "biggest" type back, if implicit casting is possible
-function unifySimples(e: Expr, source: SimpleT, target: SimpleT): SimpleT {
+function unifySimples(
+  g: Global,
+  e: Expr,
+  source: SimpleT,
+  target: SimpleT
+): SimpleT {
   try {
-    castSimples(e, source, target, "implicit");
+    castSimples(g, e, source, target, "implicit");
     return target;
   } catch {
-    castSimples(e, target, source, "implicit");
+    castSimples(g, e, target, source, "implicit");
     return source;
   }
 }
 
 function unifyOverloadedCall(
+  g: Global,
   call: ExprCall,
   argTypes: Type[],
   overloads: {
@@ -471,6 +520,7 @@ function unifyOverloadedCall(
   for (let overload of overloads) {
     try {
       const res = unifyCallGeneral(
+        g,
         call,
         argTypes,
         overload.expectedArgs,
@@ -485,6 +535,7 @@ function unifyOverloadedCall(
 }
 
 function unifyCallGeneral(
+  g: Global,
   call: ExprCall,
   argTypes: Type[],
   expectedArgs: SimpleT[],
@@ -500,7 +551,7 @@ function unifyCallGeneral(
     if (simplifiedArg === null) {
       throw new CantReduceToSimpleT(call.args[i], arg);
     }
-    unifySimples(call, simplifiedArg, expectedArg);
+    unifySimples(g, call, simplifiedArg, expectedArg);
   }
   return returnT;
 }
@@ -519,6 +570,7 @@ function unifyCallGeneral(
 //
 export type CastType = "implicit" | "assignment" | "explicit";
 function castScalars(
+  g: Global,
   e: Expr,
   source: ScalarT,
   target: ScalarT,
@@ -531,14 +583,18 @@ function castScalars(
   if (type === "explicit" && eqType(source, BuiltinTypes.Text)) {
     return;
   }
-
-  const matchingCast = findMatchingCast([source.name], source, target, type);
+  const matchingCast = findMatchingCast(g, [source.name], source, target, type);
   if (matchingCast === null) {
-    throw new TypeMismatch(e, { expected: target, actual: source });
+    throw new TypeMismatch(
+      e,
+      { expected: target, actual: source },
+      "Couldn't find matching cast"
+    );
   }
 }
 
 function findMatchingCast(
+  g: Global,
   visited: QName[],
   from: ScalarT,
   to: ScalarT,
@@ -548,7 +604,13 @@ function findMatchingCast(
   target: ScalarT;
   type: CastType;
 } | null {
-  const casts = builtincasts;
+  const casts = builtincasts.concat(
+    g.domains.map((d) => ({
+      source: d.type.kind === "scalar" ? d.type : BuiltinTypes.Null,
+      target: { kind: "scalar" as const, name: d.name },
+      type: "assignment" as const,
+    }))
+  );
 
   if (eqQNames(from.name, to.name)) {
     return { source: from, target: to, type: "implicit" };
@@ -571,6 +633,7 @@ function findMatchingCast(
     } else if (type === "explicit") {
       for (let halfM of halfMatching) {
         const found = findMatchingCast(
+          g,
           visited.concat(from.name),
           halfM.target,
           to,
@@ -651,10 +714,6 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
       return acc.concat({
         name: c.name,
         type: mkType(c.dataType, c.constraints || []),
-        expr: {
-          type: "null",
-          _location: c._location,
-        },
       });
     }
   }, []);
@@ -764,7 +823,7 @@ export function elabSelect(
                   foundNullabilityInference.isNull === true
                     ? BuiltinTypes.Null
                     : unnullify(fi.type);
-                return { name: fi.name, type: t, expr: fi.expr };
+                return { name: fi.name, type: t, _expr: fi._expr };
               } else {
                 return fi;
               }
@@ -801,7 +860,7 @@ export function elabSelect(
           if (c.expr.type === "ref" && c.expr.name === "*") {
             return t.fields;
           } else {
-            return [{ name: n, type: t.fields[0].type, expr: c.expr }];
+            return [{ name: n, type: t.fields[0].type, _expr: c.expr }];
           }
         } else {
           // AFAIK, * is the only way to introduce multiple fields with one expression
@@ -817,7 +876,7 @@ export function elabSelect(
         }
       }
 
-      return [{ name: n, type: t, expr: c.expr }];
+      return [{ name: n, type: t, _expr: c.expr }];
     });
 
     return {
@@ -841,7 +900,7 @@ export function elabSelect(
         "Can't union a statement that returns nothing"
       );
     }
-    return unifyRecords(s, typeL, typeR);
+    return unifyRecords(g, s, typeL, typeR);
   } else if (s.type === "values") {
     const typesPerRow: RecordT[] = s.values.map((exprs) => {
       const fields = exprs.map((exp) => {
@@ -850,7 +909,7 @@ export function elabSelect(
         if (t === null) {
           throw new CantReduceToSimpleT(exp, t_);
         } else {
-          return { name: null, type: t, expr: exp };
+          return { name: null, type: t, _expr: exp };
         }
       });
       return {
@@ -859,7 +918,7 @@ export function elabSelect(
       };
     });
     return typesPerRow.reduce(
-      (acc: RecordT, t: RecordT) => unifyRecords(s, acc, t),
+      (acc: RecordT, t: RecordT) => unifyRecords(g, s, acc, t),
       typesPerRow[0]
     );
   } else if (s.type === "with") {
@@ -881,7 +940,7 @@ export function elabSelect(
           {
             name: null,
             type: res,
-            expr: s,
+            _expr: s,
           },
         ],
       };
@@ -900,6 +959,7 @@ function elabInsert(
   c: Context,
   s: InsertStatement
 ): VoidT | RecordT {
+  debugger;
   const insertingInto: null | {
     readonly name: QName;
     readonly rel: RecordT;
@@ -932,7 +992,7 @@ function elabInsert(
       })
     : insertingInto.rel.fields;
 
-  const insertT = elabSelect(g, newContext, s.insert);
+  const insertT = elabSelect(g, c, s.insert);
 
   if (insertT.kind === "void") {
     throw new ColumnsMismatch(s.insert, {
@@ -952,7 +1012,8 @@ function elabInsert(
     const col = columns[i];
 
     cast(
-      insertField.expr || s.insert,
+      g,
+      insertField._expr || s.insert,
       insertField.type,
       col.type,
       "assignment"
@@ -975,7 +1036,7 @@ function elabInsert(
           return {
             name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
             type: t,
-            expr: selectedCol.expr,
+            _expr: selectedCol.expr,
           };
         }
       }),
@@ -1012,7 +1073,7 @@ function elabDeleteOrUpdate(
 
   if (s.where) {
     const whereT = elabExpr(g, newContext, s.where);
-    cast(s.where, whereT, BuiltinTypes.Boolean, "implicit");
+    cast(g, s.where, whereT, BuiltinTypes.Boolean, "implicit");
   }
 
   if (s.returning) {
@@ -1031,7 +1092,7 @@ function elabDeleteOrUpdate(
           return {
             name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
             type: t,
-            expr: selectedCol.expr,
+            _expr: selectedCol.expr,
           };
         }
       }),
@@ -1178,7 +1239,7 @@ export function doCreateFunction(
             { type: "not null" } /* not sure about this one */,
           ]);
           try {
-            return unify(dummyExpr, returnType, annotatedType);
+            return unify(g, dummyExpr, returnType, annotatedType);
           } catch (err) {
             const mess = err instanceof Error ? err.message : "";
             if (err instanceof TypeMismatch) {
@@ -1196,6 +1257,26 @@ export function doCreateFunction(
           }
         }
       })();
+
+      if (
+        s.returns &&
+        s.returns.type.kind === undefined &&
+        s.returns.type.name === "record"
+      ) {
+        if (unifiedReturnType.kind !== "record") {
+          throw new ErrorWithLocation(
+            s._location,
+            `Function should return record, but returns ${JSON.stringify(
+              unifiedReturnType
+            )}`
+          );
+        } else if (unifiedReturnType.fields.length <= 1) {
+          throw new ErrorWithLocation(
+            s._location,
+            `Function should return more than one field when specified as RETURNS RECORD`
+          );
+        }
+      }
 
       return {
         name,
@@ -1745,6 +1826,7 @@ function isNotEmpty<A>(a: A | null | undefined): a is A {
 }
 
 function elabAnyCall(
+  g: Global,
   e: Expr,
   name: QName,
   nullPolicy: "CALLED ON NULL INPUT" | "STRICT", // RETURNS NULL ON NULL INPUT = STRICT
@@ -1761,14 +1843,14 @@ function elabAnyCall(
     function (acc, sourceT, i) {
       const targetT = targetTypes[i];
       if (sourceT.kind === "nullable") {
-        cast(e, sourceT.typevar, targetT, "implicit");
+        cast(g, e, sourceT.typevar, targetT, "implicit");
         const score = eqType(sourceT.typevar, targetT) ? 0 : -1;
         return {
           score: acc.score + score,
           anySourceIsNullable: true,
         };
       } else {
-        cast(e, sourceT, targetT, "implicit");
+        cast(g, e, sourceT, targetT, "implicit");
         const score = eqType(sourceT, targetT) ? 0 : -1;
         return {
           score: acc.score + score,
@@ -1815,6 +1897,7 @@ function elabUnaryOp(g: Global, c: Context, e: ExprUnary): Type {
     .map(function (op) {
       try {
         const { nullifyResultType, score } = elabAnyCall(
+          g,
           e,
           op.name,
           "STRICT", // TODO?
@@ -1862,7 +1945,7 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
   // TODO use elabAnyCall?
   if (e.op === "IN" || e.op === "NOT IN") {
     // No generics, so special casing this operator
-    castSimples(e, t2, BuiltinTypeConstructors.List(t1), "implicit");
+    castSimples(g, e, t2, BuiltinTypeConstructors.List(t1), "implicit");
     return BuiltinTypes.Boolean;
   }
 
@@ -1898,6 +1981,7 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
     .map(function (op) {
       try {
         const res = elabAnyCall(
+          g,
           e,
           op.name,
           "STRICT" /* TODO ? */,
@@ -1950,7 +2034,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
         record.fields.push({
           name: { name: key.value },
           type: valTSimple,
-          expr: e.args[i],
+          _expr: e.args[i],
         });
       }
       return { kind: "jsonknown", record: record };
@@ -1970,7 +2054,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
 
   if (eqQNames(e.function, { name: "trim" })) {
     // any -> any[]
-    return unifyOverloadedCall(e, argTypes, [
+    return unifyOverloadedCall(g, e, argTypes, [
       {
         expectedArgs: [BuiltinTypes.Text],
         returnT: BuiltinTypes.Text,
@@ -1980,7 +2064,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
 
   if (eqQNames(e.function, { name: "generate_series" })) {
     // Generate_series doesn't return an array, but rather makes extra rows!
-    return unifyOverloadedCall(e, argTypes, [
+    return unifyOverloadedCall(g, e, argTypes, [
       {
         expectedArgs: [BuiltinTypes.Integer, BuiltinTypes.Integer],
         returnT: BuiltinTypes.Integer,
@@ -2017,6 +2101,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     if (isNullable(argTypes[0])) {
       return nullify(
         unifyOverloadedCall(
+          g,
           e,
           [unnullify(argTypes[0] as SimpleT)],
           [
@@ -2041,6 +2126,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       );
     } else {
       return unifyOverloadedCall(
+        g,
         e,
         [argTypes[0]],
         [
@@ -2060,7 +2146,9 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "nextval" })) {
+    debugger;
     return unifyCallGeneral(
+      g,
       e,
       argTypes,
       [BuiltinTypes.Text],
@@ -2069,7 +2157,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "now" })) {
-    return unifyCallGeneral(e, argTypes, [], BuiltinTypes.Timestamp);
+    return unifyCallGeneral(g, e, argTypes, [], BuiltinTypes.Timestamp);
   }
 
   if (
@@ -2087,6 +2175,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       throw new CantReduceToSimpleT(e.args[0], argTypes[0]);
     }
     const unifiedT = unifySimples(
+      g,
       e,
       t,
       BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar)
@@ -2099,7 +2188,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "sum" })) {
-    return unifyOverloadedCall(e, argTypes, [
+    return unifyOverloadedCall(g, e, argTypes, [
       { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Bigint },
       { expectedArgs: [BuiltinTypes.Smallint], returnT: BuiltinTypes.Bigint },
       { expectedArgs: [BuiltinTypes.Bigint], returnT: BuiltinTypes.Numeric },
@@ -2113,7 +2202,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "avg" })) {
-    return unifyOverloadedCall(e, argTypes, [
+    return unifyOverloadedCall(g, e, argTypes, [
       { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Numeric },
       { expectedArgs: [BuiltinTypes.Smallint], returnT: BuiltinTypes.Numeric },
       { expectedArgs: [BuiltinTypes.Bigint], returnT: BuiltinTypes.Numeric },
@@ -2131,6 +2220,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     eqQNames(e.function, { name: "min" })
   ) {
     return unifyOverloadedCall(
+      g,
       e,
       argTypes,
       allNumericBuiltinTypes
@@ -2168,7 +2258,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
         }
       });
     const unifiedType = types.reduce(
-      (acc, [arg, t]) => unifySimples(arg, acc, t),
+      (acc, [arg, t]) => unifySimples(g, arg, acc, t),
       types[0][1]
     );
     if (eqQNames(e.function, { name: "coalesce" })) {
@@ -2217,7 +2307,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
       if (t === null) {
         throw new CantReduceToSimpleT(e, t_);
       } else {
-        return unifySimples(e, t, acc);
+        return unifySimples(g, e, t, acc);
       }
     }, BuiltinTypes.AnyScalar);
     return e.type === "list"
@@ -2234,7 +2324,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
         "Select in array select can't return void"
       );
     }
-    const t = unifyRecordWithSimple(e, selectType, BuiltinTypes.AnyScalar);
+    const t = unifyRecordWithSimple(g, e, selectType, BuiltinTypes.AnyScalar);
     return BuiltinTypeConstructors.Array(t);
   } else if (e.type === "default") {
     // ??
@@ -2260,17 +2350,17 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     // TODO use elabAnyCall?
     const t = elabExpr(g, c, e.from);
     try {
-      cast(e.from, t, BuiltinTypes.Timestamp, "implicit");
+      cast(g, e.from, t, BuiltinTypes.Timestamp, "implicit");
     } catch (err) {
       try {
         if (intervalIsValid(e.field.name)) {
-          cast(e.from, t, BuiltinTypes.Interval, "implicit");
+          cast(g, e.from, t, BuiltinTypes.Interval, "implicit");
         } else {
           throw err;
         }
       } catch (err) {
         if (timeIsValid(e.field.name)) {
-          cast(e.from, t, BuiltinTypes.Time, "implicit");
+          cast(g, e.from, t, BuiltinTypes.Time, "implicit");
         } else {
           throw err;
         }
@@ -2281,6 +2371,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     const t = elabExpr(g, c, e.operand);
     try {
       cast(
+        g,
         e.operand,
         t,
         BuiltinTypeConstructors.Nullable(BuiltinTypes.Json),
@@ -2288,6 +2379,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
       );
     } catch {
       cast(
+        g,
         e.operand,
         t,
         BuiltinTypeConstructors.Nullable(BuiltinTypes.Jsonb),
@@ -2324,11 +2416,12 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     const arrayT = elabExpr(g, c, e.array);
     const indexT = elabExpr(g, c, e.index);
     const unifiedArrayT_ = unify(
+      g,
       e.array,
       arrayT,
       BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar)
     );
-    cast(e.array, indexT, BuiltinTypes.Integer, "implicit");
+    cast(g, e.array, indexT, BuiltinTypes.Integer, "implicit");
     const unifiedArrayT = toSimpleT(unifiedArrayT_);
 
     if (unifiedArrayT === null) {
@@ -2336,10 +2429,14 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     } else {
       const unnulified = unnullify(unifiedArrayT);
       if (unnulified.kind !== "array") {
-        throw new TypeMismatch(e.array, {
-          expected: arrayT,
-          actual: BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar),
-        });
+        throw new TypeMismatch(
+          e.array,
+          {
+            expected: arrayT,
+            actual: BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar),
+          },
+          "Can't get array index from non-array type"
+        );
       } else {
         return nullify(unnulified.typevar);
       }
@@ -2352,7 +2449,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
         elabExpr(g, c, whenExp.when),
       ]);
       conditionTs.reduce(
-        (acc, [exp, conditionT]) => unify(exp, acc, conditionT),
+        (acc, [exp, conditionT]) => unify(g, exp, acc, conditionT),
         valueT
       );
     } else {
@@ -2369,10 +2466,10 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     }
     const whensT = e.whens.reduce(
       (acc: Type, whenExp) =>
-        unify(whenExp.value, acc, elabExpr(g, c, whenExp.value)),
+        unify(g, whenExp.value, acc, elabExpr(g, c, whenExp.value)),
       elabExpr(g, c, e.whens[0].value)
     );
-    return e.else ? unify(e.else, whensT, elabExpr(g, c, e.else)) : whensT;
+    return e.else ? unify(g, e.else, whensT, elabExpr(g, c, e.else)) : whensT;
   } else if (
     e.type === "select" ||
     e.type === "union" ||
@@ -2394,14 +2491,15 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     const valueT = elabExpr(g, c, e.value);
     const hiT = elabExpr(g, c, e.hi);
     const loT = elabExpr(g, c, e.lo);
-    cast(e, valueT, loT, "implicit");
-    cast(e, valueT, hiT, "implicit");
+    cast(g, e, valueT, loT, "implicit");
+    cast(g, e, valueT, hiT, "implicit");
     return BuiltinTypes.Boolean;
   } else if (e.type === "substring" || e.type === "overlay") {
     const valueT = elabExpr(g, c, e.value);
     const fromT = e.from ? elabExpr(g, c, e.from) : BuiltinTypes.Integer;
     const forT = e.for ? elabExpr(g, c, e.for) : BuiltinTypes.Integer;
     const res = elabAnyCall(
+      g,
       e,
       { name: e.type },
       "STRICT",
@@ -2417,7 +2515,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     const operandT = elabExpr(g, c, e.operand);
     const toT = mkType(e.to, []);
     try {
-      cast(e, operandT, toT, "explicit");
+      cast(g, e, operandT, toT, "explicit");
     } catch (err) {
       throw new CannotCast(e, { from: operandT, to: toT });
     }

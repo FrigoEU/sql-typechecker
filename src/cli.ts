@@ -16,6 +16,7 @@ import {
   getImports,
 } from "./codegen";
 import {
+  Global,
   doCreateFunction,
   ErrorWithLocation,
   parseSetupScripts,
@@ -75,19 +76,39 @@ async function go() {
     );
   }
 
-  const allStatements: { fileName: string; statements: Statement[] }[] = [];
+  const allStatements: {
+    fileName: string;
+    fileContents: string;
+    statements: Statement[];
+  }[] = [];
+  let g: Global = { tables: [], views: [], domains: [] };
   for (let sqlFile of allSqlFiles) {
-    console.log(`Processing file ${sqlFile}`);
+    // console.log(`Processing file ${sqlFile}`);
     const fileContents = await fs.readFile(sqlFile, "utf-8");
     const statements: Statement[] = parse(fileContents, {
       locationTracking: true,
     });
-    allStatements.push({ fileName: sqlFile, statements });
+    allStatements.push({ fileName: sqlFile, fileContents, statements });
+
+    try {
+      g = parseSetupScripts(g, statements);
+    } catch (err) {
+      console.error("---------------------------------------------");
+      if (err instanceof ErrorWithLocation && err.l !== undefined) {
+        const found = findCode(fileContents, err.l);
+        if (found) {
+          console.error(`${sqlFile}:${found.lineNumber}:${found.range[0]}: `);
+        } else {
+          console.error(`${sqlFile}:0:`);
+        }
+      } else {
+        console.error(`${sqlFile}:0:`);
+      }
+      console.error(err instanceof Error ? err.message : JSON.stringify(err));
+      console.error("---------------------------------------------");
+      console.error("");
+    }
   }
-
-  console.log(`Processing ${allStatements.length} statements`);
-
-  const g = parseSetupScripts(allStatements.flatMap((f) => f.statements));
 
   // Generating global file with domains = newtypes
   const outDir = path.resolve(process.cwd(), outArg);
@@ -155,7 +176,7 @@ async function go() {
       mkImportDomainsStatement(g.domains, outFileName, domainFile),
       "utf8"
     );
-    console.log(`Writing functions to ${outFileName}`);
+    // console.log(`Writing functions to ${outFileName}`);
 
     for (let st of createFunctionStatements) {
       try {
@@ -166,28 +187,55 @@ async function go() {
         // console.log(`Writing: ${writing}`);
         await fs.appendFile(functionsOutFile, writing, "utf-8");
       } catch (err) {
+        const functionLineNumber = (function () {
+          const indexOfCode = f.fileContents.indexOf(st.code || "");
+          const foundCode = findCode(f.fileContents, {
+            start: indexOfCode,
+            end: indexOfCode + 1,
+          });
+          if (!foundCode) {
+            return null;
+          }
+          return (
+            foundCode.lineNumber +
+            1 /* not sure where + 1 comes from exactly..., but it fits */
+          );
+        })();
+        console.error("---------------------------------------------");
         if (err instanceof ErrorWithLocation && err.l !== undefined) {
           const found = findCode(st.code || "", err.l);
           if (found) {
-            const prefix = found.lineNumber.toString() + "  ";
-            console.error("");
-            console.error(`Typechecking error`);
+            const fullLineNumber = (functionLineNumber || 0) + found.lineNumber;
+            const prefix = fullLineNumber.toString() + "  ";
+            console.error(
+              `${f.fileName}:${fullLineNumber}:${found.range[0]}: ${st.name.name}`
+            );
             console.error("");
             console.error(prefix + found.line);
             console.error(
               repeat(" ", found.range[0] + prefix.length) +
                 repeat("^", found.range[1] - found.range[0])
             );
+          } else {
+            console.error(
+              `${f.fileName}:${functionLineNumber || 0}: ${st.name.name}`
+            );
           }
+        } else {
+          console.error(
+            `${f.fileName}:${functionLineNumber || 0}: ${st.name.name}`
+          );
         }
         console.error(err instanceof Error ? err.message : JSON.stringify(err));
+        console.error("---------------------------------------------");
+        console.error("");
       }
     }
 
     await fs.appendFile(functionsOutFile, `\n`, "utf-8");
   }
 
-  console.log("Done!");
+  // console.log("Done!");
 }
 
 function findCode(

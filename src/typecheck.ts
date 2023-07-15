@@ -53,6 +53,9 @@ export type JsonKnownT = {
 export type ScalarT = {
   kind: "scalar";
   name: QName;
+  domain?: {
+    realtype: SimpleT;
+  };
 };
 export type VoidT = {
   // represents nothing, so zero rows, like when doing an INSERT without RETURNING
@@ -219,7 +222,7 @@ export type Global = {
   }>;
   readonly domains: ReadonlyArray<{
     readonly name: QName;
-    readonly type: SimpleT;
+    readonly realtype: SimpleT;
   }>;
 };
 
@@ -606,7 +609,7 @@ function findMatchingCast(
 } | null {
   const casts = builtincasts.concat(
     g.domains.map((d) => ({
-      source: d.type.kind === "scalar" ? d.type : BuiltinTypes.Null,
+      source: d.realtype.kind === "scalar" ? d.realtype : BuiltinTypes.Null,
       target: { kind: "scalar" as const, name: d.name },
       type: "assignment" as const,
     }))
@@ -672,27 +675,53 @@ export function notImplementedYet(node: PGNode | null): any {
   throw new NotImplementedYet(node);
 }
 
-function mkType(t: DataTypeDef, cs: ColumnConstraint[]): SimpleT {
+function mkType(g: Global, t: DataTypeDef, cs: ColumnConstraint[]): SimpleT {
   if (t.kind === "array") {
     if (t.arrayOf.kind === "array") {
       throw new Error("Array or array not supported");
     } else {
-      return BuiltinTypeConstructors.Array({
-        kind: "scalar",
-        name: { ...t.arrayOf, name: normalizeTypeName(t.arrayOf.name) },
-      });
+      const elTypeName = normalizeTypeName(t.arrayOf.name);
+      const scalarT = checkType(g, t.arrayOf._location, elTypeName);
+      return BuiltinTypeConstructors.Array(scalarT);
     }
   } else {
-    const t_: ScalarT = {
-      kind: "scalar",
-      name: { ...t, name: normalizeTypeName(t.name) },
-    };
+    const typeName = normalizeTypeName(t.name);
+    const t_ = checkType(g, t._location, typeName);
 
     const notnullable = cs.some(
       (c) => c.type === "not null" || c.type === "primary key"
     );
     return notnullable ? t_ : nullify(t_);
   }
+}
+
+function checkType(
+  g: Global,
+  l: NodeLocation | undefined,
+  name: string
+): ScalarT {
+  const foundDom = g.domains.find((d) => d.name.name === name);
+  if (foundDom) {
+    return {
+      kind: "scalar",
+      name: { _location: l, name: name },
+      domain: {
+        realtype: foundDom.realtype,
+      },
+    };
+  }
+
+  const builtintype = Object.keys(BuiltinTypes)
+    .concat(["bytea"])
+    .find((b) => b.toLowerCase() === name);
+
+  if (builtintype) {
+    return {
+      kind: "scalar",
+      name: { _location: l, name: name },
+    };
+  }
+  throw new UnknownIdentifier({ _location: l }, { name });
 }
 
 function doCreateTable(g: Global, s: CreateTableStatement): Global {
@@ -713,7 +742,7 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
     } else {
       return acc.concat({
         name: c.name,
-        type: mkType(c.dataType, c.constraints || []),
+        type: mkType(g, c.dataType, c.constraints || []),
       });
     }
   }, []);
@@ -744,7 +773,7 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
     if (col.kind !== "column") {
       return null;
     }
-    const t = mkType(col.dataType, col.constraints || []);
+    const t = mkType(g, col.dataType, col.constraints || []);
     if (t.kind === "scalar" && t.name.name.toLowerCase() === "serial") {
       return col;
     }
@@ -959,7 +988,6 @@ function elabInsert(
   c: Context,
   s: InsertStatement
 ): VoidT | RecordT {
-  debugger;
   const insertingInto: null | {
     readonly name: QName;
     readonly rel: RecordT;
@@ -1129,11 +1157,8 @@ export function doCreateFunction(
   s: CreateFunctionStatement
 ): functionType {
   const name = s.name;
-  console.log(`Typechecking function: ${name.name}`);
   if (!s.language) {
-    throw new Error(
-      "Please provide language for function at " + showLocation(s._location)
-    );
+    throw new Error(`Please provide language at ${showLocation(s._location)}`);
   }
   if (s.code === undefined) {
     throw new ErrorWithLocation(
@@ -1152,6 +1177,7 @@ export function doCreateFunction(
       return {
         name: arg.name,
         type: mkType(
+          g,
           arg.type,
           // !!!!!!!!!!!!
           // Default rule of THIS typechecker:  params are NOT NULL
@@ -1205,7 +1231,7 @@ export function doCreateFunction(
           } else if (s.returns.type.kind === "table") {
             throw new Error("RETURNS TABLE is not supported yet");
           } else {
-            const annotatedType = mkType(s.returns.type, []);
+            const annotatedType = mkType(g, s.returns.type, []);
             throw new KindMismatch(
               dummyExpr,
               annotatedType,
@@ -1235,7 +1261,7 @@ export function doCreateFunction(
             );
           }
         } else {
-          const annotatedType = mkType(s.returns.type, [
+          const annotatedType = mkType(g, s.returns.type, [
             { type: "not null" } /* not sure about this one */,
           ]);
           try {
@@ -1345,8 +1371,12 @@ ${JSON.stringify(node)} @ ${node._location}`
 }
 
 class UnknownField extends ErrorWithLocation {
-  constructor(e: Expr, _s: RecordT, n: Name) {
-    super(e._location, `UnknownField ${n.name}`);
+  constructor(e: Expr, s: RecordT, n: Name) {
+    super(
+      e._location,
+      `UnknownField ${n.name}.
+Keys present: ${s.fields.map((f) => f.name?.name || "").join(", ")}`
+    );
   }
 }
 export class UnknownIdentifier extends ErrorWithLocation {
@@ -1592,14 +1622,14 @@ function registerWarning(e: Expr, message: string) {
 function mergeHandledFroms(c: Context, handledFroms: HandledFrom[]): Context {
   return {
     ...c,
-    froms: c.froms.concat(
-      handledFroms.map(function (f) {
+    froms: handledFroms
+      .map(function (f) {
         return {
           name: f.name,
           type: f.rel,
         };
       })
-    ),
+      .concat(c.froms),
   };
 }
 
@@ -1780,6 +1810,7 @@ function lookupRef(
     });
 
     // Fields seem to have precedence over eg: function params in postgres?
+    // We still throw ambiguousidentifier
     if (foundFields.length === 0) {
       if (foundIdentifiers.length === 0) {
         return new UnknownIdentifier(e, e);
@@ -1789,6 +1820,9 @@ function lookupRef(
         return new AmbiguousIdentifier(e, e, []);
       }
     } else if (foundFields.length === 1) {
+      if (foundIdentifiers.length > 0) {
+        return new AmbiguousIdentifier(e, e, []);
+      }
       return {
         type: foundFields[0].type,
         from: {
@@ -2146,7 +2180,6 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "nextval" })) {
-    debugger;
     return unifyCallGeneral(
       g,
       e,
@@ -2225,7 +2258,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       argTypes,
       allNumericBuiltinTypes
         .concat([BuiltinTypes.Date, BuiltinTypes.Time, BuiltinTypes.Timestamp])
-        .map((t) => ({ expectedArgs: [t], returnT: t }))
+        .map((t) => ({ expectedArgs: [t], returnT: nullify(t) }))
     );
   }
 
@@ -2513,7 +2546,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     throw new Error("Haven't been able to simulate this yet");
   } else if (e.type === "cast") {
     const operandT = elabExpr(g, c, e.operand);
-    const toT = mkType(e.to, []);
+    const toT = mkType(g, e.to, []);
     try {
       cast(g, e, operandT, toT, "explicit");
     } catch (err) {
@@ -2583,32 +2616,29 @@ function elabStatement(g: Global, c: Context, s: Statement): VoidT | Type {
   }
 }
 
-export function parseSetupScripts(ast: Statement[]): Global {
-  return ast.reduce(
-    (acc: Global, a): Global => {
-      if (a.type === "create table" && !a.temporary) {
-        return doCreateTable(acc, a);
-      } else if (
-        a.type === "create view" ||
-        a.type === "create materialized view"
-      ) {
-        return doCreateView(acc, a);
-      } else if (a.type === "alter table") {
-        return doAlterTable(acc, a);
-      } else if (a.type === "create domain") {
-        return {
-          ...acc,
-          domains: acc.domains.concat({
-            name: a.name,
-            type: mkType(a.dataType, [{ type: "not null" }]),
-          }),
-        };
-      } else {
-        return acc;
-      }
-    },
-    { tables: [], views: [], domains: [] }
-  );
+export function parseSetupScripts(g: Global, ast: Statement[]): Global {
+  return ast.reduce((acc: Global, a): Global => {
+    if (a.type === "create table" && !a.temporary) {
+      return doCreateTable(acc, a);
+    } else if (
+      a.type === "create view" ||
+      a.type === "create materialized view"
+    ) {
+      return doCreateView(acc, a);
+    } else if (a.type === "alter table") {
+      return doAlterTable(acc, a);
+    } else if (a.type === "create domain") {
+      return {
+        ...acc,
+        domains: acc.domains.concat({
+          name: a.name,
+          realtype: mkType(acc, a.dataType, [{ type: "not null" }]),
+        }),
+      };
+    } else {
+      return acc;
+    }
+  }, g);
 }
 
 function nullifyRecord(s: RecordT): RecordT {

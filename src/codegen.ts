@@ -1,4 +1,3 @@
-import assert from "assert";
 import { Name, QName } from "trader-pgsql-ast-parser";
 import {
   checkAllCasesHandled,
@@ -111,6 +110,11 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
       "})"
     );
   } else if (t.kind === "scalar") {
+    if (t.domain) {
+      return `${genDeserializeSimpleT(t.domain.realtype, literalVar)} as ${
+        t.name.name
+      }`;
+    }
     if (t.name.name === "date") {
       return `LocalDate.parse(${literalVar})`;
     } else if (t.name.name === "time") {
@@ -262,10 +266,10 @@ export async function ${f.name.name}(pool: Pool, args: ${argsType})
 
 export function genDomain(dom: {
   readonly name: QName;
-  readonly type: SimpleT;
+  readonly realtype: SimpleT;
 }): string {
   return `export type ${dom.name.name} = ${showTypeAsTypescriptType(
-    dom.type
+    dom.realtype
   )} & { readonly __tag: "${dom.name.name}" };`;
 }
 

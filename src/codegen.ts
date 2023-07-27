@@ -30,7 +30,9 @@ export function showTypeAsTypescriptType(t: Type): string {
     } else if (t.kind === "nullable") {
       return showTypeAsTypescriptType(t.typevar) + " | null";
     } else if (t.kind === "scalar") {
-      if (
+      if (t.domain) {
+        return `types.${t.name.name}`;
+      } else if (
         [
           "numeric",
           "bigint",
@@ -61,6 +63,8 @@ export function showTypeAsTypescriptType(t: Type): string {
         t.name.name === "timestamp"
       ) {
         return "LocalDateTime";
+      } else if (t.isEnum) {
+        return "types." + t.name.name;
       } else {
         return t.name.name;
       }
@@ -82,7 +86,7 @@ export function showTypeAsTypescriptType(t: Type): string {
 
 function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
   if (t.kind === "array") {
-    return `${literalVar}.map((el: any) => ${genDeserializeSimpleT(
+    return `parseArray(${literalVar}, (el: any) => ${genDeserializeSimpleT(
       t.typevar as SimpleT,
       "el"
     )})`;
@@ -111,9 +115,10 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
     );
   } else if (t.kind === "scalar") {
     if (t.domain) {
-      return `${genDeserializeSimpleT(t.domain.realtype, literalVar)} as ${
-        t.name.name
-      }`;
+      return `${genDeserializeSimpleT(
+        t.domain.realtype,
+        literalVar
+      )} as types.${t.name.name}`;
     }
     if (t.name.name === "date") {
       return `LocalDate.parse(${literalVar})`;
@@ -273,10 +278,20 @@ export function genDomain(dom: {
   )} & { readonly __tag: "${dom.name.name}" };`;
 }
 
+export function genEnum(enu: {
+  readonly name: QName;
+  readonly values: string[];
+}): string {
+  return `export type ${enu.name.name} =
+  | ${enu.values.map((v) => `"${v}"`).join("\n  | ")};
+`;
+}
+
 export function getImports() {
   return `
 import type { Pool } from "pg";
 import { Instant, LocalDate, LocalTime, LocalDateTime} from "@js-joda/core";
+import {parse as parseArray} from "postgres-array";
 `;
 }
 

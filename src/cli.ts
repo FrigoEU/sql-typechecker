@@ -13,6 +13,7 @@ import {
   functionToTypescript,
   genCrudOperations,
   genDomain,
+  genEnum,
   getImports,
 } from "./codegen";
 import {
@@ -81,7 +82,7 @@ async function go() {
     fileContents: string;
     statements: Statement[];
   }[] = [];
-  let g: Global = { tables: [], views: [], domains: [] };
+  let g: Global = { tables: [], views: [], domains: [], enums: [] };
   for (let sqlFile of allSqlFiles) {
     // console.log(`Processing file ${sqlFile}`);
     const fileContents = await fs.readFile(sqlFile, "utf-8");
@@ -93,6 +94,7 @@ async function go() {
     try {
       g = parseSetupScripts(g, statements);
     } catch (err) {
+      console.error("Error in setup script");
       console.error("---------------------------------------------");
       if (err instanceof ErrorWithLocation && err.l !== undefined) {
         const found = findCode(fileContents, err.l);
@@ -107,22 +109,26 @@ async function go() {
       console.error(err instanceof Error ? err.message : JSON.stringify(err));
       console.error("---------------------------------------------");
       console.error("");
+      process.exit(1);
     }
   }
 
   // Generating global file with domains = newtypes
   const outDir = path.resolve(process.cwd(), outArg);
   await fs.mkdir(outDir, { recursive: true });
-  const domainFile = path.format({
+  const typesFile = path.format({
     dir: outDir,
-    name: "domains",
+    name: "types",
     ext: ".ts",
   });
-  await prepOutFile(domainFile);
+  await prepOutFile(typesFile);
   for (let dom of g.domains) {
-    await fs.appendFile(domainFile, genDomain(dom) + "\n", "utf-8");
+    await fs.appendFile(typesFile, genDomain(dom) + "\n", "utf-8");
   }
-  await fs.appendFile(domainFile, `\n`, "utf-8");
+  for (let enu of g.enums) {
+    await fs.appendFile(typesFile, genEnum(enu) + "\n", "utf-8");
+  }
+  await fs.appendFile(typesFile, `\n`, "utf-8");
 
   // Generating a "tables" file to reexport all tables from
   const tablesIndexFile = path.format({
@@ -144,7 +150,7 @@ async function go() {
     const text = genCrudOperations(table);
     await fs.appendFile(
       tableOutFile,
-      mkImportDomainsStatement(g.domains, tableOutFile, domainFile),
+      mkImportDomainsStatement(g.domains, tableOutFile, typesFile),
       "utf8"
     );
     await fs.appendFile(
@@ -173,7 +179,7 @@ async function go() {
     const functionsOutFile = await prepOutFile(outFileName);
     await fs.appendFile(
       outFileName,
-      mkImportDomainsStatement(g.domains, outFileName, domainFile),
+      mkImportDomainsStatement(g.domains, outFileName, typesFile),
       "utf8"
     );
     // console.log(`Writing functions to ${outFileName}`);
@@ -293,10 +299,9 @@ function mkImportDomainsStatement(
   const p = path.relative(path.dirname(thisFile), path.dirname(domainFile));
   const formatted = path.format({
     dir: p || ".",
-    name: "domains",
+    name: "types",
     ext: "",
   });
-  const doms = domains.map((d) => d.name.name).join(", ");
 
-  return `import {${doms}} from "${formatted}";\n\n`;
+  return `import * as types from "${formatted}";\n\n`;
 }

@@ -56,6 +56,7 @@ export type ScalarT = {
   domain?: {
     realtype: SimpleT;
   };
+  isEnum?: { values: string[] };
 };
 export type VoidT = {
   // represents nothing, so zero rows, like when doing an INSERT without RETURNING
@@ -223,6 +224,10 @@ export type Global = {
   readonly domains: ReadonlyArray<{
     readonly name: QName;
     readonly realtype: SimpleT;
+  }>;
+  readonly enums: ReadonlyArray<{
+    readonly name: QName;
+    readonly values: string[];
   }>;
 };
 
@@ -707,6 +712,17 @@ function checkType(
       name: { _location: l, name: name },
       domain: {
         realtype: foundDom.realtype,
+      },
+    };
+  }
+
+  const foundEnum = g.enums.find((d) => d.name.name === name);
+  if (foundEnum) {
+    return {
+      kind: "scalar",
+      name: { _location: l, name: name },
+      isEnum: {
+        values: foundEnum.values,
       },
     };
   }
@@ -1993,6 +2009,15 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
         description: "equal",
       }))
     )
+    .concat(
+      g.enums.map((d) => ({
+        name: { schema: "pg_catalog", name: "=" },
+        left: { kind: "scalar", name: d.name },
+        right: { kind: "scalar", name: d.name },
+        result: { kind: "scalar", name: { name: "boolean" } },
+        description: "equal",
+      }))
+    )
     .filter(function (op) {
       return eqQNames(
         {
@@ -2633,6 +2658,14 @@ export function parseSetupScripts(g: Global, ast: Statement[]): Global {
         domains: acc.domains.concat({
           name: a.name,
           realtype: mkType(acc, a.dataType, [{ type: "not null" }]),
+        }),
+      };
+    } else if (a.type === "create enum") {
+      return {
+        ...acc,
+        enums: acc.enums.concat({
+          name: a.name,
+          values: a.values.map((v) => v.value),
         }),
       };
     } else {

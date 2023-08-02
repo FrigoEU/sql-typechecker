@@ -2593,7 +2593,7 @@ function inferNullability(
 ): { fromName: QName; fieldName: string; isNull: boolean }[] {
   if (e.type === "unary") {
     if (e.op === "NOT") {
-      return inferNullability(c, e).map((judg) => ({
+      return inferNullability(c, e.operand).map((judg) => ({
         ...judg,
         isNull: !judg.isNull,
       }));

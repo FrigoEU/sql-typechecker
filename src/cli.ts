@@ -185,6 +185,9 @@ async function go() {
     // console.log(`Writing functions to ${outFileName}`);
 
     for (let st of createFunctionStatements) {
+      if (st.language?.name.toLowerCase() !== "sql") {
+        continue;
+      }
       try {
         const res = doCreateFunction(g, { decls: [], froms: [] }, st);
         const writing = prettier.format(functionToTypescript(res), {

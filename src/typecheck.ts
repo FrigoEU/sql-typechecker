@@ -814,11 +814,28 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
   };
 }
 function doCreateView(
-  _g: Global,
+  g: Global,
   s: CreateViewStatement | CreateMaterializedViewStatement
 ): Global {
-  return _g;
-  // return notImplementedYet(s);
+  const sel = elabSelect(
+    g,
+    {
+      froms: [],
+      decls: [],
+    },
+    // Bug in parser
+    Array.isArray(s.query) ? s.query[0] : s.query
+  );
+  if (sel.kind === "void") {
+    throw new ErrorWithLocation(s._location, "View returns void");
+  }
+  return {
+    ...g,
+    views: g.views.concat({
+      name: s.name,
+      rel: sel,
+    }),
+  };
 }
 function doAlterTable(_g: Global, s: AlterTableStatement): Global {
   return notImplementedYet(s);
@@ -1391,7 +1408,10 @@ class UnknownField extends ErrorWithLocation {
     super(
       e._location,
       `UnknownField ${n.name}.
-Keys present: ${s.fields.map((f) => f.name?.name || "").join(", ")}`
+Keys present:
+${s.fields
+  .map((f) => (f.name?.name || "") + ": " + showType(f.type))
+  .join("\n")}`
     );
   }
 }
@@ -2105,7 +2125,16 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   if (eqQNames(e.function, { name: "array_agg" })) {
     // any -> any[]
     if (e.args.length === 1) {
-      return { kind: "array", subtype: "array", typevar: argTypes[0] };
+      const subt = argTypes[0];
+      if (subt.kind === "record") {
+        throw new ErrorWithLocation(
+          e.args[0]._location,
+          "Can't have record type inside array"
+        );
+      }
+      return BuiltinTypeConstructors.Nullable(
+        BuiltinTypeConstructors.Array(subt)
+      );
     } else {
       throw new InvalidArguments(e, e.function, argTypes);
     }
@@ -2700,8 +2729,8 @@ function unnullify(s: SimpleT): SimpleT {
   }
 }
 
-export function checkAllCasesHandled(_: never): any {
-  throw new Error("Oops didn't expect that");
+export function checkAllCasesHandled(r: never): any {
+  throw new Error(`Oops didn't expect that, ${JSON.stringify(r)}`);
 }
 
 export function showQName(n: QName): string {

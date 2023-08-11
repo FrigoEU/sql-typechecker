@@ -1,10 +1,8 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.54",
+  "version": "0.0.55",
   "main": "out/typeparsers.js",
-  "files": [
-    "out/**"
-  ],
+  "files": ["out/**"],
   "bin": "out/cli.js",
   "dependencies": {
     "@js-joda/core": "^4.3.1",

@@ -86,7 +86,7 @@ export function showTypeAsTypescriptType(t: Type): string {
 
 function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
   if (t.kind === "array") {
-    return `parseArray(${literalVar}, (el: any) => ${genDeserializeSimpleT(
+    return `(Array.isArray(${literalVar}) ? ${literalVar} : parseArray(${literalVar})).map((el: any) => ${genDeserializeSimpleT(
       t.typevar as SimpleT,
       "el"
     )})`;

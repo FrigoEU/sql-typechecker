@@ -19,11 +19,8 @@ export function normalizeTypeName(s: string): string {
   if (s === "float4") {
     return "real";
   }
-  if (s === "float" || s === "float8") {
-    return "double";
-  }
-  if (s === "double precision") {
-    return "double";
+  if (s === "float" || s === "float8" || s === "double") {
+    return "double precision";
   }
   return s;
 }

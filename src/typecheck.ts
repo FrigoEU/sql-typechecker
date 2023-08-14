@@ -118,7 +118,7 @@ export const BuiltinTypes = {
   },
   Double: {
     kind: "scalar",
-    name: { name: "double" },
+    name: { name: "double precision" },
   },
   Text: {
     kind: "scalar",

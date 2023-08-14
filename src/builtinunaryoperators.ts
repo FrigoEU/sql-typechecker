@@ -49,8 +49,8 @@ const builtinunaryoperatorsFromSchema: unaryOp[] = [
   },
   {
     name: { name: "+" },
-    operand: { kind: "scalar", name: { name: "double" } },
-    result: { kind: "scalar", name: { name: "double" } },
+    operand: { kind: "scalar", name: { name: "double precision" } },
+    result: { kind: "scalar", name: { name: "double precision" } },
     description: "unary plus",
   },
   {
@@ -86,8 +86,8 @@ const builtinunaryoperatorsFromSchema: unaryOp[] = [
   },
   {
     name: { name: "-" },
-    operand: { kind: "scalar", name: { name: "double" } },
-    result: { kind: "scalar", name: { name: "double" } },
+    operand: { kind: "scalar", name: { name: "double precision" } },
+    result: { kind: "scalar", name: { name: "double precision" } },
     description: "negate",
   },
   {
@@ -155,8 +155,8 @@ const builtinunaryoperatorsFromSchema: unaryOp[] = [
   },
   {
     name: { name: "@" },
-    operand: { kind: "scalar", name: { name: "double" } },
-    result: { kind: "scalar", name: { name: "double" } },
+    operand: { kind: "scalar", name: { name: "double precision" } },
+    result: { kind: "scalar", name: { name: "double precision" } },
     description: "absolute value",
   },
   {
@@ -186,13 +186,13 @@ const builtinunaryoperatorsFromSchema: unaryOp[] = [
   {
     name: { name: "@-@" },
     operand: { kind: "scalar", name: { name: "lseg" } },
-    result: { kind: "scalar", name: { name: "double" } },
+    result: { kind: "scalar", name: { name: "double precision" } },
     description: "distance between endpoints",
   },
   {
     name: { name: "@-@" },
     operand: { kind: "scalar", name: { name: "path" } },
-    result: { kind: "scalar", name: { name: "double" } },
+    result: { kind: "scalar", name: { name: "double precision" } },
     description: "sum of path segment lengths",
   },
 
@@ -236,15 +236,15 @@ const builtinunaryoperatorsFromSchema: unaryOp[] = [
 
   {
     name: { name: "|/" },
-    operand: { kind: "scalar", name: { name: "double" } },
-    result: { kind: "scalar", name: { name: "double" } },
+    operand: { kind: "scalar", name: { name: "double precision" } },
+    result: { kind: "scalar", name: { name: "double precision" } },
     description: "square root",
   },
 
   {
     name: { name: "||/" },
-    operand: { kind: "scalar", name: { name: "double" } },
-    result: { kind: "scalar", name: { name: "double" } },
+    operand: { kind: "scalar", name: { name: "double precision" } },
+    result: { kind: "scalar", name: { name: "double precision" } },
     description: "cube root",
   },
 

@@ -39,7 +39,7 @@ export function showTypeAsTypescriptType(t: Type): string {
           "smallint",
           "integer",
           "real",
-          "double",
+          "double precision",
           "float8",
           "float4",
           "float2",

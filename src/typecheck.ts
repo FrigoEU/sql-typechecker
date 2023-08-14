@@ -729,6 +729,7 @@ function checkType(
 
   const builtintype = Object.keys(BuiltinTypes)
     .concat(["bytea"])
+    .concat(["double precision"])
     .find((b) => b.toLowerCase() === name);
 
   if (builtintype) {

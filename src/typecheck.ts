@@ -1135,7 +1135,7 @@ function elabDeleteOrUpdate(
 
   if (s.where) {
     const whereT = elabExpr(g, newContext, s.where);
-    cast(g, s.where, whereT, BuiltinTypes.Boolean, "implicit");
+    requireBoolean(s.where, whereT);
   }
 
   if (s.returning) {
@@ -1329,11 +1329,6 @@ export function doCreateFunction(
             `Function should return record, but returns ${JSON.stringify(
               unifiedReturnType
             )}`
-          );
-        } else if (unifiedReturnType.fields.length <= 1) {
-          throw new ErrorWithLocation(
-            s._location,
-            `Function should return more than one field when specified as RETURNS RECORD`
           );
         }
       }

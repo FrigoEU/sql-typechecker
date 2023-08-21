@@ -33,7 +33,10 @@ function testCreateFunction(
     >
   ) => void
 ) {
-  const g = parseSetupScripts(parse(setupStr));
+  const g = parseSetupScripts(
+    { tables: [], views: [], domains: [], enums: [] },
+    parse(setupStr)
+  );
   const query = parse(queryStr);
   if (query[0].type === "create function") {
     try {
@@ -63,7 +66,7 @@ function expectInputs(
       Right: (res) => {
         Expect(res.inputs.length).toEqual(expectedInputTypes.length);
         expectedInputTypes.forEach((expectedInputType, i) => {
-          Expect(res.inputs[i]).toEqual(expectedInputType);
+          Expect(removeLocation(res.inputs[i])).toEqual(expectedInputType);
         });
       },
     });
@@ -82,15 +85,8 @@ function expectReturnType<T>(
         throw err;
       },
       Right: (res) => {
-        function removeLocation(obj: Object): any {
-          if (isPlainObject(obj)) {
-            const mapped = mapValues(obj, (inner) => removeLocation(inner));
-            return omit(omit(mapped, "_location"), "_expr");
-          } else if (Array.isArray(obj)) {
-            return obj.map((inner) => removeLocation(inner));
-          }
-          return obj;
-        }
+        console.log(JSON.stringify(res.returns));
+        console.log(JSON.stringify(expectedReturnType));
         Expect(removeLocation(res.returns)).toEqual(expectedReturnType);
         if (opts) {
           Expect(res.multipleRows).toEqual(opts.multipleRows);
@@ -98,6 +94,16 @@ function expectReturnType<T>(
       },
     });
   });
+}
+
+function removeLocation(obj: Object): any {
+  if (isPlainObject(obj)) {
+    const mapped = mapValues(obj, (inner) => removeLocation(inner));
+    return omit(omit(mapped, "_location"), "_expr");
+  } else if (Array.isArray(obj)) {
+    return obj.map((inner) => removeLocation(inner));
+  }
+  return obj;
 }
 
 function expectThrowLike(
@@ -136,6 +142,7 @@ $$ LANGUAGE sql;
             name: { name: "id" },
             type: BuiltinTypes.Integer,
           },
+
           {
             name: { name: "name" },
             type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
@@ -188,6 +195,23 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ]
+    );
+  }
+
+  @Test()
+  public nullableComparisonInUpdate() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect(myname text default null) RETURNS VOID AS $$
+  UPDATE testje
+  SET id = 2
+  WHERE myname = name;
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "void",
+      }
     );
   }
 
@@ -1455,7 +1479,6 @@ $$ LANGUAGE sql;
   }
 
   @Test()
-  @Focus
   public insertFromSelect() {
     expectReturnType(
       `
@@ -1673,25 +1696,27 @@ $$ LANGUAGE sql;
           },
           {
             name: { name: "thirdstuff" },
-            type: BuiltinTypeConstructors.Array({
-              kind: "jsonknown",
-              record: {
-                kind: "record",
-                fields: [
-                  {
-                    name: { name: "name" },
-                    type: { kind: "scalar", name: { name: "text" } },
-                  },
-                  {
-                    name: { name: "price" },
-                    type: {
-                      kind: "nullable",
-                      typevar: { kind: "scalar", name: { name: "integer" } },
+            type: BuiltinTypeConstructors.Nullable(
+              BuiltinTypeConstructors.Array({
+                kind: "jsonknown",
+                record: {
+                  kind: "record",
+                  fields: [
+                    {
+                      name: { name: "name" },
+                      type: { kind: "scalar", name: { name: "text" } },
                     },
-                  },
-                ],
-              },
-            }),
+                    {
+                      name: { name: "price" },
+                      type: {
+                        kind: "nullable",
+                        typevar: { kind: "scalar", name: { name: "integer" } },
+                      },
+                    },
+                  ],
+                },
+              })
+            ),
           },
         ],
       }

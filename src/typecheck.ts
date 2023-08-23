@@ -884,7 +884,7 @@ export function elabSelect(
               if (foundNullabilityInference && isNullable(fi.type)) {
                 const t =
                   foundNullabilityInference.isNull === true
-                    ? BuiltinTypes.Null
+                    ? fi.type
                     : unnullify(fi.type);
                 return { name: fi.name, type: t, _expr: fi._expr };
               } else {

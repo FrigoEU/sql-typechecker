@@ -838,7 +838,18 @@ function doCreateView(
     }),
   };
 }
-function doAlterTable(_g: Global, s: AlterTableStatement): Global {
+function doAlterTable(g: Global, s: AlterTableStatement): Global {
+  if (
+    s.changes.every(
+      (c) =>
+        c.type === "add constraint" ||
+        c.type === "rename constraint" ||
+        c.type === "drop constraint" ||
+        c.type === "owner"
+    )
+  ) {
+    return g;
+  }
   return notImplementedYet(s);
 }
 

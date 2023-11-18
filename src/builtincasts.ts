@@ -93,6 +93,7 @@ export const builtincasts: {
   { source: "integer", target: "regrole", type: "yes" },
   { source: "integer", target: "regtype", type: "yes" },
   { source: "integer", target: "smallint", type: "in assignment" },
+  { source: "text", target: "interval", type: "no" },
   { source: "interval", target: "interval", type: "yes" },
   {
     source: "interval",

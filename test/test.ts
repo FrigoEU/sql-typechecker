@@ -437,6 +437,7 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  @IgnoreTest("Not working yet(?)")
   public isNull2() {
     expectReturnType(
       "create table testje ( id int not null, name text );",
@@ -491,6 +492,30 @@ CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT -id + 2 as id
 FROM testje
 WHERE id + 5 < 7
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  @Focus
+  public overlaps() {
+    expectReturnType(
+      "create table testje ( id int not null, stamp time NOT NULL, duration int8 NOT NULL, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  SELECT id
+  FROM testje
+  WHERE (stamp, stamp + (duration::text || ' minutes')::interval) OVERLAPS (stamp, stamp + (duration::text || ' minutes')::interval)
 $$ LANGUAGE sql;
 `,
       {

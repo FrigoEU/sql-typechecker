@@ -2035,6 +2035,24 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
     return BuiltinTypes.Boolean;
   }
 
+  if (e.op === "OVERLAPS") {
+    castSimples(
+      g,
+      e,
+      t1,
+      BuiltinTypeConstructors.List(BuiltinTypes.Time),
+      "implicit"
+    );
+    castSimples(
+      g,
+      e,
+      t2,
+      BuiltinTypeConstructors.List(BuiltinTypes.Time),
+      "implicit"
+    );
+    return BuiltinTypes.Boolean;
+  }
+
   const found = builtinoperators
     .concat(
       g.domains.map((d) => ({

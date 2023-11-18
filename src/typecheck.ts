@@ -620,6 +620,15 @@ function findMatchingCast(
     }))
   );
 
+  const foundDomainFrom = g.domains.find((d) => eqQNames(d.name, from.name));
+  if (
+    foundDomainFrom &&
+    foundDomainFrom.realtype.kind === "scalar" &&
+    eqQNames(foundDomainFrom.realtype.name, to.name)
+  ) {
+    return { source: from, target: to, type: "implicit" };
+  }
+
   if (eqQNames(from.name, to.name)) {
     return { source: from, target: to, type: "implicit" };
   } else {

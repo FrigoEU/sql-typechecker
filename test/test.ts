@@ -507,7 +507,6 @@ $$ LANGUAGE sql;
   }
 
   @Test()
-  @Focus
   public overlaps() {
     expectReturnType(
       "create table testje ( id int not null, stamp time NOT NULL, duration int8 NOT NULL, name text );",
@@ -527,6 +526,44 @@ $$ LANGUAGE sql;
           },
         ],
       }
+    );
+  }
+
+  @Test()
+  public overlaps_date() {
+    expectReturnType(
+      "create table testje ( id int not null, d1 date NOT NULL, d2 date NOT NULL, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  SELECT id
+  FROM testje
+  WHERE (d1, d2) OVERLAPS (d2, d1)
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public overlaps_mismatch() {
+    expectThrowLike(
+      "create table testje ( id int not null, d1 date NOT NULL, d2 date NOT NULL, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  SELECT id
+  FROM testje
+  WHERE (d1, d2) OVERLAPS (1, 2)
+$$ LANGUAGE sql;
+`,
+      `Couldn't find matching cast`
     );
   }
 

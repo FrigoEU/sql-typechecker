@@ -2036,20 +2036,19 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
   }
 
   if (e.op === "OVERLAPS") {
-    castSimples(
+    unifySimples(
       g,
       e,
       t1,
-      BuiltinTypeConstructors.List(BuiltinTypes.Time),
-      "implicit"
+      BuiltinTypeConstructors.List(BuiltinTypes.AnyScalar)
     );
-    castSimples(
+    unifySimples(
       g,
       e,
       t2,
-      BuiltinTypeConstructors.List(BuiltinTypes.Time),
-      "implicit"
+      BuiltinTypeConstructors.List(BuiltinTypes.AnyScalar)
     );
+    unifySimples(g, e, t1, t2);
     return BuiltinTypes.Boolean;
   }
 

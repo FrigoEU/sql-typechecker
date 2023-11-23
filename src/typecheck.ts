@@ -883,7 +883,7 @@ export function elabSelect(
 ): RecordT | VoidT {
   if (s.type === "select") {
     const newC = ((): Context => {
-      const newC_: Context = addFromsToScope(g, c, s, s.from || []);
+      const newC_: Context = addFromsToScope(g, c, s.from || []);
 
       const inferredNullability = s.where
         ? inferNullability(newC_, s.where)
@@ -1145,13 +1145,16 @@ function elabDeleteOrUpdate(
     throw new UnknownIdentifier(s, tableName);
   }
   const nameToAddInContext = tableName.alias || tableName.name;
-  const newContext = {
+  const newC_ = {
     ...c,
     froms: c.froms.concat({
       name: { name: nameToAddInContext },
       type: tableDef.rel,
     }),
   };
+
+  const newContext =
+    s.type === "update" && s.from ? addFromsToScope(g, newC_, [s.from]) : newC_;
 
   if (s.where) {
     const whereT = elabExpr(g, newContext, s.where);
@@ -1370,13 +1373,13 @@ export function doCreateFunction(
 type HandledFrom = { name: QName; rel: RecordT };
 type Nullable<T> = T | null;
 
-function findRel(g: Global, c: Context, e: Expr, n: QName): Nullable<RecordT> {
+function findRel(g: Global, c: Context, f: From, n: QName): Nullable<RecordT> {
   const d = c.decls.find((d) => eqQNames(d.name, n));
   if (d) {
     if (d.type.kind === "record") {
       return d.type;
     } else {
-      throw new KindMismatch(e, d.type, "Expecting a record or table");
+      throw new KindMismatch_From(f, d.type, "Expecting a record or table");
     }
   } else {
     const t = g.tables.find((t) => eqQNames(t.name, n));
@@ -1576,6 +1579,22 @@ ${JSON.stringify(type)}
     );
   }
 }
+class KindMismatch_From extends ErrorWithLocation {
+  constructor(f: From, type: Type | VoidT, errormsg: string) {
+    super(
+      f._location,
+      `
+KindMismatch_From:
+${toSql.from(f)}
+
+${errormsg}}
+
+Type:
+${JSON.stringify(type)}
+`
+    );
+  }
+}
 class UnableToDeriveFieldName extends ErrorWithLocation {
   constructor(e: Expr) {
     super(
@@ -1688,7 +1707,6 @@ function mergeHandledFroms(c: Context, handledFroms: HandledFrom[]): Context {
 function doSingleFrom(
   g: Global,
   c: Context,
-  e: Expr,
   handledFroms: HandledFrom[],
   f: From
 ): HandledFrom[] {
@@ -1715,7 +1733,7 @@ function doSingleFrom(
       if ((f.name.columnNames || []).length > 0) {
         notImplementedYet(f);
       }
-      const foundRel = findRel(g, c, e, f.name);
+      const foundRel = findRel(g, c, f, f.name);
       if (!foundRel) {
         throw new UnknownIdentifier(f, f.name);
       }
@@ -1752,17 +1770,12 @@ function doSingleFrom(
 
   return newHandledFroms;
 }
-function addFromsToScope(
-  g: Global,
-  c: Context,
-  e: Expr,
-  froms: From[]
-): Context {
+function addFromsToScope(g: Global, c: Context, froms: From[]): Context {
   const inFroms: HandledFrom[] = froms.reduce(function (
     acc: HandledFrom[],
     f: From
   ) {
-    return doSingleFrom(g, c, e, acc, f);
+    return doSingleFrom(g, c, acc, f);
   },
   []);
   return mergeHandledFroms(c, inFroms);

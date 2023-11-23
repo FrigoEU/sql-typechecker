@@ -199,6 +199,26 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public updateFrom() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect(myname text default null) RETURNS VOID AS $$
+
+  UPDATE testje
+  SET id = 2
+  FROM testje t2
+  WHERE myname = testje.name AND t2.name = testje.name;
+
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "void",
+      }
+    );
+  }
+
+  @Test()
   public nullableComparisonInUpdate() {
     expectReturnType(
       "create table testje ( id int not null, name text );",

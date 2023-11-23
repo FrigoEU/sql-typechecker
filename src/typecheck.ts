@@ -2173,6 +2173,18 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     }
   }
 
+  if (eqQNames(e.function, { name: "exists" })) {
+    if (e.args.length === 1) {
+      const subt = argTypes[0];
+      if (subt.kind === "record") {
+        return BuiltinTypes.Boolean;
+      } else {
+        throw new InvalidArguments(e, e.function, argTypes);
+      }
+    }
+    throw new InvalidArguments(e, e.function, argTypes);
+  }
+
   if (eqQNames(e.function, { name: "trim" })) {
     // any -> any[]
     return unifyOverloadedCall(g, e, argTypes, [

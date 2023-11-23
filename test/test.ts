@@ -1668,6 +1668,25 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public deleteWithExists() {
+    expectReturnType(
+      "create table testje ( id int NOT NULL);",
+      `
+CREATE FUNCTION mydelete() RETURNS SETOF RECORD AS $$
+DELETE FROM testje
+WHERE EXISTS (SELECT * FROM testje t2 WHERE t2.id = testje.id)
+RETURNING id
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
+      },
+      { multipleRows: true }
+    );
+  }
+
+  @Test()
   public deleteError() {
     expectThrowLike(
       "create table testje ( id int NOT NULL);",

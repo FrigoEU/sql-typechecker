@@ -368,7 +368,7 @@ ${f.name?.name}?: ${showTypeAsTypescriptType(f.type)}`
     const insert = `
 export async function insert(pool: Pool, row: {${inputRow}}): Promise<{${
       primaryKeySingleCol.name.name
-    }: ${showTypeAsTypescriptType(primaryKeySingleCol.type)}} | null>{
+    }: ${showTypeAsTypescriptType(primaryKeySingleCol.type)}}>{
 
   const providedFields = Object.keys(row)  as (keyof typeof row)[];
 
@@ -384,7 +384,7 @@ export async function insert(pool: Pool, row: {${inputRow}}): Promise<{${
   if (res && res.rows[0]){
     return {${primaryKeySingleCol.name.name}: res.rows[0][0]};
   } else {
-    return null;
+    throw new Error("Failed insert into ${showQName(table.name)}");
   }
 }`;
 

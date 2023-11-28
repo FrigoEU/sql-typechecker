@@ -422,7 +422,7 @@ export async function update(pool: Pool, pk: {${
       primaryKeySingleCol.type
     )}}, row: {${inputRowForUpdate}}): Promise<null>{
 
-  const providedFields = Object.keys(row) as (keyof typeof row)[] ;
+  const providedFields = (Object.keys(row) as (keyof typeof row)[]).filter(key => row[key] !== undefined) ;
   if (providedFields.length === 0){ return null; }
 
   await pool.query({

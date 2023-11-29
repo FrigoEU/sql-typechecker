@@ -266,10 +266,10 @@ export async function ${f.name.name}(pool: Pool, args: ${argsType})
   }).catch(err => {
     if (err && "message" in err){
       err.message =
-        "While running SQL function ${f.name.name}: \n" +
+        "While running SQL function ${f.name.name}: \\n" +
         "Args: " +
         JSON.stringify(args) +
-        "\n" +
+        "\\n" +
         err.message;
     }
     throw err;

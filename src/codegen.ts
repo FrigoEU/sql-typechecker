@@ -263,6 +263,16 @@ export async function ${f.name.name}(pool: Pool, args: ${argsType})
     text: "SELECT * FROM ${funcInvocation}",
     values: [${argsAsList}],
     rowMode: "array",
+  }).catch(err => {
+    if (err && "message" in err){
+      err.message =
+        "While running SQL function ${f.name.name}: \n" +
+        "Args: " +
+        JSON.stringify(args) +
+        "\n" +
+        err.message;
+    }
+    throw err;
   });
   ${deserializationAndReturn}
   }

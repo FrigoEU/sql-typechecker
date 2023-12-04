@@ -54,6 +54,8 @@ export function showTypeAsTypescriptType(t: Type): string {
         return "string";
       } else if (["bytea"].includes(t.name.name)) {
         return "Buffer";
+      } else if (t.name.name === "jsonb") {
+        return "any";
       } else if (t.name.name === "date") {
         return "LocalDate";
       } else if (t.name.name === "time") {
@@ -127,6 +129,8 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
       return `Instant.parse(${literalVar})`;
     } else if (t.name.name === "timestamp without time zone") {
       return `LocalDateTime.parse(${literalVar}.replace(" ", "T"))`;
+    } else if (t.name.name === "jsonb") {
+      return `JSON.parse(${literalVar})`;
     } else if (
       t.name.name === "bigint" ||
       t.name.name === "smallint" ||

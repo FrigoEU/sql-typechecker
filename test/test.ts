@@ -1,19 +1,19 @@
 import { Expect, Focus, IgnoreTest, Test, TestFixture } from "alsatian";
-import { isObject, isPlainObject, mapValues, omit } from "lodash";
-import { Name, parse, QName } from "trader-pgsql-ast-parser";
+import { isPlainObject, mapValues, omit } from "lodash";
 import { Either, Left, Right } from "purify-ts";
+import { Name, parse, QName } from "trader-pgsql-ast-parser";
 import {
+  AnyScalar,
   ArrayT,
   BuiltinTypeConstructors,
   BuiltinTypes,
   doCreateFunction,
   parseSetupScripts,
-  ScalarT,
   RecordT,
+  ScalarT,
   SimpleT,
   Type,
   VoidT,
-  Field,
 } from "../src/typecheck";
 
 // https://github.com/alsatian-test/alsatian/blob/master/packages/alsatian/README.md
@@ -195,6 +195,60 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ]
+    );
+  }
+
+  @Test()
+  public timestampWithTimeZone() {
+    expectReturnType(
+      "create table testje ( id int not null, stamp timestamp with time zone );",
+      `
+CREATE FUNCTION myselect(myid int) RETURNS SETOF RECORD AS $$
+  SELECT id, stamp
+  FROM testje
+  WHERE id = myid
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "stamp" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.TimestampTz),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public arrayField() {
+    expectReturnType(
+      "create table testje ( id int not null, numbers int[] NOT NULL );",
+      `
+CREATE FUNCTION myselect(myid int) RETURNS SETOF RECORD AS $$
+  SELECT id, numbers
+  FROM testje
+  WHERE id = myid
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "numbers" },
+            type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+          },
+        ],
+      }
     );
   }
 
@@ -862,7 +916,7 @@ $$ LANGUAGE sql;
         fields: [
           {
             name: null,
-            type: BuiltinTypes.AnyScalar,
+            type: AnyScalar,
           },
         ],
       }

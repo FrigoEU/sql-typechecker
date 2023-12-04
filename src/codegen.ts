@@ -58,10 +58,7 @@ export function showTypeAsTypescriptType(t: Type): string {
         return "LocalDate";
       } else if (t.name.name === "time") {
         return "LocalTime";
-      } else if (
-        t.name.name === "timestamp without time zone" ||
-        t.name.name === "timestamp"
-      ) {
+      } else if (t.name.name === "timestamp without time zone") {
         return "LocalDateTime";
       } else if (t.isEnum) {
         return "types." + t.name.name;
@@ -126,10 +123,7 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
       return `LocalTime.parse(${literalVar})`;
     } else if (t.name.name === "timestamp with time zone") {
       return `Instant.parse(${literalVar})`;
-    } else if (
-      t.name.name === "timestamp without time zone" ||
-      t.name.name === "timestamp"
-    ) {
+    } else if (t.name.name === "timestamp without time zone") {
       return `LocalDateTime.parse(${literalVar}.replace(" ", "T"))`;
     } else if (
       t.name.name === "bigint" ||

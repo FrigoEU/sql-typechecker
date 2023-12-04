@@ -1,5 +1,5 @@
 import assert from "assert";
-import { isNil } from "lodash";
+import { isNil, orderBy } from "lodash";
 import {
   AlterTableStatement,
   ColumnConstraint,
@@ -96,6 +96,10 @@ export const BuiltinTypes = {
     kind: "scalar",
     name: { name: "numeric" },
   },
+  Bytea: {
+    kind: "scalar",
+    name: { name: "bytea" },
+  },
   Bigint: {
     kind: "scalar",
     name: { name: "bigint" },
@@ -124,9 +128,6 @@ export const BuiltinTypes = {
     kind: "scalar",
     name: { name: "text" },
   },
-  AnyScalar: {
-    kind: "anyscalar",
-  },
   Date: {
     kind: "scalar",
     name: { name: "date" },
@@ -137,7 +138,11 @@ export const BuiltinTypes = {
   },
   Timestamp: {
     kind: "scalar",
-    name: { name: "timestamp" },
+    name: { name: "timestamp without time zone" },
+  },
+  TimestampTz: {
+    kind: "scalar",
+    name: { name: "timestamp with time zone" },
   },
   Interval: {
     kind: "scalar",
@@ -156,6 +161,10 @@ export const BuiltinTypes = {
     name: { name: "null" },
   },
 } as const;
+
+export const AnyScalar: AnyScalarT = {
+  kind: "anyscalar",
+};
 
 const allNumericBuiltinTypes: ScalarT[] = [
   BuiltinTypes.Smallint,
@@ -525,7 +534,12 @@ function unifyOverloadedCall(
   }[]
 ): SimpleT {
   // This is probably bad, among others for performance, as we use error handling for control flow here
-  for (let overload of overloads) {
+  for (let overload of orderBy(
+    overloads,
+    // Hack to prefer overloads with exact type
+    (ol) => (eqType(ol.expectedArgs[0], argTypes[0]) ? 2 : 1),
+    ["desc"]
+  )) {
     try {
       const res = unifyCallGeneral(
         g,
@@ -736,9 +750,8 @@ function checkType(
     };
   }
 
-  const builtintype = Object.keys(BuiltinTypes)
-    .concat(["bytea"])
-    .concat(["double precision"])
+  const builtintype = Object.values(BuiltinTypes)
+    .map((v) => v.name.name)
     .find((b) => b.toLowerCase() === name);
 
   if (builtintype) {
@@ -2049,18 +2062,8 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
   }
 
   if (e.op === "OVERLAPS") {
-    unifySimples(
-      g,
-      e,
-      t1,
-      BuiltinTypeConstructors.List(BuiltinTypes.AnyScalar)
-    );
-    unifySimples(
-      g,
-      e,
-      t2,
-      BuiltinTypeConstructors.List(BuiltinTypes.AnyScalar)
-    );
+    unifySimples(g, e, t1, BuiltinTypeConstructors.List(AnyScalar));
+    unifySimples(g, e, t2, BuiltinTypeConstructors.List(AnyScalar));
     unifySimples(g, e, t1, t2);
     return BuiltinTypes.Boolean;
   }
@@ -2323,7 +2326,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       g,
       e,
       t,
-      BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar)
+      BuiltinTypeConstructors.Array(AnyScalar)
     );
     if (unifiedT.kind !== "array") {
       throw new TypecheckerError(e, "Expecting array type");
@@ -2379,7 +2382,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     // return unifyCallGeneral(
     //   e,
     //   argTypes,
-    //   [BuiltinTypes.AnyScalar],
+    //   [AnyScalar],
     //   BuiltinTypes.Bigint
     // );
   }
@@ -2433,7 +2436,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     return BuiltinTypes.Boolean;
   } else if (e.type === "string") {
     if (e.value.trim() === "{}") {
-      return BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar);
+      return BuiltinTypeConstructors.Array(AnyScalar);
     } else {
       return BuiltinTypes.Text;
     }
@@ -2442,7 +2445,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
   } else if (e.type === "binary") {
     return elabBinaryOp(g, c, e);
   } else if (e.type === "null") {
-    return BuiltinTypeConstructors.Nullable(BuiltinTypes.AnyScalar);
+    return BuiltinTypeConstructors.Nullable(AnyScalar);
   } else if (e.type === "numeric") {
     return BuiltinTypes.Numeric;
   } else if (e.type === "list" || e.type === "array") {
@@ -2454,7 +2457,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
       } else {
         return unifySimples(g, e, t, acc);
       }
-    }, BuiltinTypes.AnyScalar);
+    }, AnyScalar);
     return e.type === "list"
       ? BuiltinTypeConstructors.List(typevar)
       : BuiltinTypeConstructors.Array(typevar);
@@ -2469,11 +2472,11 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
         "Select in array select can't return void"
       );
     }
-    const t = unifyRecordWithSimple(g, e, selectType, BuiltinTypes.AnyScalar);
+    const t = unifyRecordWithSimple(g, e, selectType, AnyScalar);
     return BuiltinTypeConstructors.Array(t);
   } else if (e.type === "default") {
     // ??
-    return BuiltinTypes.AnyScalar;
+    return AnyScalar;
   } else if (e.type === "extract") {
     function timeIsValid(s: string) {
       return [
@@ -2531,7 +2534,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
         "implicit"
       );
     }
-    return BuiltinTypes.AnyScalar;
+    return AnyScalar;
   } else if (e.type === "keyword") {
     if (e.keyword === "current_time") {
       return BuiltinTypes.Time;
@@ -2564,7 +2567,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
       g,
       e.array,
       arrayT,
-      BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar)
+      BuiltinTypeConstructors.Array(AnyScalar)
     );
     cast(g, e.array, indexT, BuiltinTypes.Integer, "implicit");
     const unifiedArrayT = toSimpleT(unifiedArrayT_);
@@ -2578,7 +2581,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
           e.array,
           {
             expected: arrayT,
-            actual: BuiltinTypeConstructors.Array(BuiltinTypes.AnyScalar),
+            actual: BuiltinTypeConstructors.Array(AnyScalar),
           },
           "Can't get array index from non-array type"
         );

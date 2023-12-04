@@ -13,6 +13,12 @@ export function normalizeTypeName(s: string): string {
   if (s === "decimal") {
     return "numeric";
   }
+  if (s === "timestamp") {
+    return "timestamp without time zone";
+  }
+  if (s === "timestamptz") {
+    return "timestamp with time zone";
+  }
   if (s === "bool") {
     return "boolean";
   }

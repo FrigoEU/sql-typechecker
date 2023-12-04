@@ -60,6 +60,8 @@ export function showTypeAsTypescriptType(t: Type): string {
         return "LocalTime";
       } else if (t.name.name === "timestamp without time zone") {
         return "LocalDateTime";
+      } else if (t.name.name === "timestamp with time zone") {
+        return "Instant";
       } else if (t.isEnum) {
         return "types." + t.name.name;
       } else {

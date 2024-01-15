@@ -128,6 +128,14 @@ export const BuiltinTypes = {
     kind: "scalar",
     name: { name: "text" },
   },
+  Tsvector: {
+    kind: "scalar",
+    name: { name: "tsvector" },
+  },
+  Tsquery: {
+    kind: "scalar",
+    name: { name: "tsquery" },
+  },
   Date: {
     kind: "scalar",
     name: { name: "date" },
@@ -2374,6 +2382,25 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       allNumericBuiltinTypes
         .concat([BuiltinTypes.Date, BuiltinTypes.Time, BuiltinTypes.Timestamp])
         .map((t) => ({ expectedArgs: [t], returnT: nullify(t) }))
+    );
+  }
+
+  if (eqQNames(e.function, { name: "to_tsvector" })) {
+    return unifyCallGeneral(
+      g,
+      e,
+      argTypes,
+      [BuiltinTypes.Text],
+      BuiltinTypes.Tsvector
+    );
+  }
+  if (eqQNames(e.function, { name: "to_tsquery" })) {
+    return unifyCallGeneral(
+      g,
+      e,
+      argTypes,
+      [BuiltinTypes.Text],
+      BuiltinTypes.Tsquery
     );
   }
 

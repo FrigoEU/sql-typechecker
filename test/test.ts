@@ -604,6 +604,29 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public textsearch() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  SELECT id
+  FROM testje
+  WHERE to_tsvector(name) @@ to_tsquery('test')
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public overlaps_date() {
     expectReturnType(
       "create table testje ( id int not null, d1 date NOT NULL, d2 date NOT NULL, name text );",

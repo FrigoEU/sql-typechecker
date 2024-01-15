@@ -1,6 +1,6 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.77",
+  "version": "0.0.78",
   "main": "out/typeparsers.js",
   "files": ["out/**"],
   "bin": "out/cli.js",
@@ -9,7 +9,7 @@
     "lodash": "^4.17.21",
     "pg": "^8.7.3",
     "postgres-range": "^1.1.2",
-    "trader-pgsql-ast-parser": "10.5.6"
+    "trader-pgsql-ast-parser": "10.5.7"
   },
   "scripts": {
     "check": "tsc -p . --noEmit",

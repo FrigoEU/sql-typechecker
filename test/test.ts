@@ -253,6 +253,33 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public rowNumberOver() {
+    expectReturnType(
+      "create table testje ( id int not null);",
+      `
+CREATE FUNCTION myselect(myid int) RETURNS SETOF RECORD AS $$
+  SELECT id, ROW_NUMBER() OVER (PARTITION BY id ORDER BY id) AS seq
+  FROM testje
+  WHERE id = myid
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "seq" },
+            type: BuiltinTypes.Integer,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public updateFrom() {
     expectReturnType(
       "create table testje ( id int not null, name text );",

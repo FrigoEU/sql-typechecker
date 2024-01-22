@@ -2219,6 +2219,11 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     ]);
   }
 
+  if (eqQNames(e.function, { name: "row_number" })) {
+    // () -> int
+    return BuiltinTypes.Integer;
+  }
+
   if (eqQNames(e.function, { name: "generate_series" })) {
     // Generate_series doesn't return an array, but rather makes extra rows!
     return unifyOverloadedCall(g, e, argTypes, [

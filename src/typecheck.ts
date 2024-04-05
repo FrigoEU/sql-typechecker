@@ -2062,8 +2062,21 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
     );
   }
 
-  // TODO use elabAnyCall?
+  if (
+    (e.op === "=" ||
+      e.op === "!=" ||
+      e.op === "@>" ||
+      e.op === "<@" ||
+      e.op === "&&") &&
+    t1.kind === "array" &&
+    t2.kind === "array"
+  ) {
+    unifySimples(g, e, t1.typevar, t2.typevar);
+    return BuiltinTypes.Boolean;
+  }
+
   if (e.op === "IN" || e.op === "NOT IN") {
+    // TODO use elabAnyCall?
     // No generics, so special casing this operator
     castSimples(g, e, t2, BuiltinTypeConstructors.List(t1), "implicit");
     return BuiltinTypes.Boolean;

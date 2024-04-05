@@ -745,6 +745,30 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public equalArrays() {
+    expectInputs(
+      "create table testje ( id int not null, name text );",
+      `
+      CREATE FUNCTION myselect(mylist1 int[], mylist2 int[]) RETURNS SETOF RECORD AS $$
+SELECT id
+FROM testje
+WHERE mylist1 = mylist2
+$$ LANGUAGE sql;
+`,
+      [
+        {
+          name: { name: "mylist1" },
+          type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+        },
+        {
+          name: { name: "mylist2" },
+          type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+        },
+      ]
+    );
+  }
+
+  @Test()
   public equalAny() {
     expectInputs(
       "create table testje ( id int not null, name text );",

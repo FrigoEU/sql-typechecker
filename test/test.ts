@@ -1012,6 +1012,34 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public Greatest() {
+    expectReturnType(
+      "create table testje ( id int not null, name text, mynum int);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+SELECT
+      GREATEST(1, mynum) AS notnullable,
+      GREATEST(mynum) AS nullable
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "notnullable" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "nullable" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public Coalesce() {
     expectReturnType(
       "create table testje ( id int not null, name text);",

@@ -2390,6 +2390,17 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (
+    eqQNames(e.function, { name: "least" }) ||
+    eqQNames(e.function, { name: "greatest" })
+  ) {
+    const { unifiedType, types } = unifyAllArgumentsVariadic();
+
+    return types.some(([_, t]) => !isNullable(t))
+      ? unnullify(unifiedType)
+      : unifiedType;
+  }
+
+  if (
     eqQNames(e.function, { name: "max" }) ||
     eqQNames(e.function, { name: "min" })
   ) {
@@ -2440,6 +2451,22 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     if (e.args.length === 0) {
       throw new InvalidArguments(e, e.function, []);
     }
+    const { unifiedType, types } = unifyAllArgumentsVariadic();
+    if (eqQNames(e.function, { name: "coalesce" })) {
+      if (types.some(([_arg, t]) => !isNullable(t))) {
+        return unnullify(unifiedType);
+      } else {
+        return unifiedType;
+      }
+    } else {
+      // nullable types already "win" unification, so nullif doesn't need special logic
+      return unifiedType;
+    }
+  }
+
+  throw new UnknownFunction(e, e.function);
+
+  function unifyAllArgumentsVariadic() {
     const types: [Expr, SimpleT][] = e.args
       .map((arg) => [arg, elabExpr(g, c, arg)] as const)
       .map(([arg, t_]) => {
@@ -2454,19 +2481,8 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       (acc, [arg, t]) => unifySimples(g, arg, acc, t),
       types[0][1]
     );
-    if (eqQNames(e.function, { name: "coalesce" })) {
-      if (types.some(([_arg, t]) => !isNullable(t))) {
-        return unnullify(unifiedType);
-      } else {
-        return unifiedType;
-      }
-    } else {
-      // nullable types already "win" unification, so nullif doesn't need special logic
-      return unifiedType;
-    }
+    return { unifiedType, types };
   }
-
-  throw new UnknownFunction(e, e.function);
 }
 
 function elabExpr(g: Global, c: Context, e: Expr): Type {

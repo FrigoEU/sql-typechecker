@@ -85,8 +85,8 @@ function expectReturnType<T>(
         throw err;
       },
       Right: (res) => {
-        console.log(JSON.stringify(res.returns));
-        console.log(JSON.stringify(expectedReturnType));
+        // console.log(JSON.stringify(res.returns));
+        // console.log(JSON.stringify(expectedReturnType));
         Expect(removeLocation(res.returns)).toEqual(expectedReturnType);
         if (opts) {
           Expect(res.multipleRows).toEqual(opts.multipleRows);
@@ -1531,6 +1531,32 @@ $$ LANGUAGE sql;
           {
             name: { name: "name" },
             type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public cast_double_precision_to_numeric() {
+    expectReturnType(
+      "create table testje ( id int not null, numb double precision NOT NULL);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+      SELECT id::int as id, numb::numeric AS numb
+from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "numb" },
+            type: BuiltinTypes.Numeric,
           },
         ],
       }

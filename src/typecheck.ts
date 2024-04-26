@@ -659,6 +659,7 @@ function findMatchingCast(
         eqQNames(c.source.name, from.name) &&
         (c.type === type ||
           (c.type === "implicit" && type === "assignment") ||
+          (c.type === "assignment" && type === "explicit") ||
           (c.type === "implicit" && type === "explicit")) &&
         !visited.some((v) => eqQNames(v, c.target.name))
     );

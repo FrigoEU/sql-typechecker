@@ -2390,6 +2390,17 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     ]);
   }
 
+  if (eqQNames(e.function, { name: "round" })) {
+    return unifyOverloadedCall(g, e, argTypes, [
+      { expectedArgs: [BuiltinTypes.Real], returnT: BuiltinTypes.Real },
+      { expectedArgs: [BuiltinTypes.Numeric], returnT: BuiltinTypes.Numeric },
+      {
+        expectedArgs: [BuiltinTypes.Numeric, BuiltinTypes.Integer],
+        returnT: BuiltinTypes.Numeric,
+      },
+    ]);
+  }
+
   if (
     eqQNames(e.function, { name: "least" }) ||
     eqQNames(e.function, { name: "greatest" })

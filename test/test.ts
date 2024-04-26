@@ -631,6 +631,32 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public round() {
+    expectReturnType(
+      "create table testje ( id int not null, numb double precision NOT NULL);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+      SELECT id, round(numb, 2) AS numb
+  FROM testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "numb" },
+            type: BuiltinTypes.Numeric,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public textsearch() {
     expectReturnType(
       "create table testje ( id int not null, name text );",

@@ -2445,6 +2445,19 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     );
   }
 
+  if (
+    eqQNames(e.function, { name: "upper" }) ||
+    eqQNames(e.function, { name: "lower" })
+  ) {
+    return unifyCallGeneral(
+      g,
+      e,
+      argTypes,
+      [BuiltinTypes.Text],
+      BuiltinTypes.Text
+    );
+  }
+
   if (eqQNames(e.function, { name: "count" })) {
     return BuiltinTypes.Bigint;
     // return unifyCallGeneral(

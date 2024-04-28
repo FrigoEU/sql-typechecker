@@ -1066,6 +1066,32 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public upperLower() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+      SELECT id, lower(upper(name))
+      from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "lower" },
+            type: BuiltinTypes.Text,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public Coalesce() {
     expectReturnType(
       "create table testje ( id int not null, name text);",

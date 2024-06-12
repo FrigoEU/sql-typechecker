@@ -386,7 +386,7 @@ export async function insert(pool: Pool, row: {${inputRow}}): Promise<{${
       primaryKeySingleCol.name.name
     }: ${showTypeAsTypescriptType(primaryKeySingleCol.type)}}>{
 
-  const providedFields = Object.keys(row).filter(key => allowedFieldNames.includes(key))  as (keyof typeof row)[];
+  const providedFields = (Object.keys(row) as (keyof typeof row)[]).filter(key => row[key] !== undefined && allowedFieldNames.includes(key)) ;
 
   const res = await pool.query({
   text: "INSERT INTO ${showQName(

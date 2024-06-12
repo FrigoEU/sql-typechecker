@@ -1,9 +1,8 @@
 CREATE OR REPLACE FUNCTION insertIntoTestje(id int, name text DEFAULT NULL)
-  RETURNS int
+  RETURNS VOID
 AS $$
   INSERT INTO testje (id, name)
-  VALUES (id, name)
-  RETURNING id;
+  VALUES (id, name);
   $$ LANGUAGE sql;
 
 

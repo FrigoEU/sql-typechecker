@@ -157,7 +157,7 @@ function genFunctionResDeserialization(
       returnType.fields
         .map(
           (f, i) =>
-            `${f.name?.name || "?"}: ${genDeserializeSimpleT(
+            `"${f.name?.name || "?"}": ${genDeserializeSimpleT(
               f.type,
               literalVar + "[" + i + "]"
             )}`
@@ -375,12 +375,18 @@ ${f.name?.name}: ${showTypeAsTypescriptType(f.type)}`
 ${f.name?.name}?: ${showTypeAsTypescriptType(f.type)}`
         )
         .join(",");
+
+    const allowedFieldNames = `const allowedFieldNames = [${mandatoryFields
+      .concat(optionalFields)
+      .map((m) => '"' + m.name?.name + '"')
+      .join(",")}];`;
+
     const insert = `
 export async function insert(pool: Pool, row: {${inputRow}}): Promise<{${
       primaryKeySingleCol.name.name
     }: ${showTypeAsTypescriptType(primaryKeySingleCol.type)}}>{
 
-  const providedFields = Object.keys(row)  as (keyof typeof row)[];
+  const providedFields = Object.keys(row).filter(key => allowedFieldNames.includes(key))  as (keyof typeof row)[];
 
   const res = await pool.query({
   text: "INSERT INTO ${showQName(
@@ -432,7 +438,7 @@ export async function update(pool: Pool, pk: {${
       primaryKeySingleCol.type
     )}}, row: {${inputRowForUpdate}}): Promise<null>{
 
-  const providedFields = (Object.keys(row) as (keyof typeof row)[]).filter(key => row[key] !== undefined) ;
+  const providedFields = (Object.keys(row) as (keyof typeof row)[]).filter(key => row[key] !== undefined && allowedFieldNames.includes(key)) ;
   if (providedFields.length === 0){ return null; }
 
   await pool.query({
@@ -465,6 +471,7 @@ return null;
 }`;
 
     return `
+${allowedFieldNames}
 ${selectAll}
 ${selectOne}
 ${insert}

@@ -1,5 +1,5 @@
 CREATE TABLE testje (
-  id int NOT NULL,
+  id int PRIMARY KEY,
   name text
 );
 

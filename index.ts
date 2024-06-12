@@ -1,5 +1,6 @@
-import * as sample from "./sample/out";
-import postgres from "postgres";
+import * as sample from "./sample/sample1";
+import * as sample2 from "./sample/nested/sample2";
+import { Pool } from "pg";
 
 const dbSettings = {
   host: process.env.dbhost || "localhost",
@@ -7,12 +8,12 @@ const dbSettings = {
 };
 
 async function go() {
-  const sqlclient = postgres(dbSettings);
-  const resInsert = await sample.insertintotestje(sqlclient, {
+  const sqlclient = new Pool(dbSettings);
+  const resInsert = await sample2.insertintotestje(sqlclient, {
     id: 2,
     name: "ble",
   });
-  console.log(resInsert?.toString());
+  // console.log(resInsert?.toString());
   const resSelect = await sample.selectallfromtestje(sqlclient, {});
   resSelect.map((r) => console.log(r.name + ": " + r.id));
 }

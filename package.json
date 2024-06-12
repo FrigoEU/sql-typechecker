@@ -1,6 +1,6 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.84",
+  "version": "0.0.85",
   "main": "out/typeparsers.js",
   "files": ["out/**"],
   "bin": "out/cli.js",
@@ -17,7 +17,7 @@
     "prepare": "npm run build",
     "build:types": "tsc --emitDeclarationOnly --declaration --outDir ./out --module commonjs --target ES2019 --esModuleInterop src/typeparsers.ts",
     "test": "alsatian ./test/**/*.ts",
-    "start": "npm run build && node --enable-source-maps ./out/cli.js -d ./sample -o ./sample/out.ts && ts-node index.ts",
+    "start": "npm run build && node --enable-source-maps ./out/cli.js -d ./sample -o ./sample/out && ts-node index.ts",
     "start_debug": "npm run debug -- -d ./sample -o ./sample/out.ts && ts-node index.ts",
     "start_index": "ts-node index.ts",
     "start_school": "npm run build && node --enable-source-maps ./out/cli.js -d ./school -o ./school/funcs",

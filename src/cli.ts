@@ -306,5 +306,5 @@ function mkImportDomainsStatement(
     ext: "",
   });
 
-  return `import * as types from "./${formatted}";\n\n`;
+  return `import * as types from "${formatted}";\n\n`;
 }

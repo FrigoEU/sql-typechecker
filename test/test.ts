@@ -1097,7 +1097,7 @@ $$ LANGUAGE sql;
       "create table testje ( id int not null, name text);",
       `
 CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
-      SELECT MAX(id, 1)
+      SELECT MAX(id)
       from testje
 $$ LANGUAGE sql;
 `,

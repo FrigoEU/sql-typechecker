@@ -2420,6 +2420,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (
+    // Aggregate functions => only 1 argument
     eqQNames(e.function, { name: "max" }) ||
     eqQNames(e.function, { name: "min" })
   ) {
@@ -2442,12 +2443,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
           BuiltinTypes.Float8,
           BuiltinTypes.Real,
         ])
-        .flatMap((t) => [
-          { expectedArgs: [t], returnT: nullify(t) },
-          { expectedArgs: [t, t], returnT: nullify(t) },
-          { expectedArgs: [t, t, t], returnT: nullify(t) },
-          { expectedArgs: [t, t, t, t], returnT: nullify(t) },
-        ])
+        .flatMap((t) => [{ expectedArgs: [t], returnT: nullify(t) }])
     );
   }
 

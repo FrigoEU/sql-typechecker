@@ -1092,6 +1092,28 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public Max() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+      SELECT MAX(id, 1)
+      from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "max" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public Coalesce() {
     expectReturnType(
       "create table testje ( id int not null, name text);",

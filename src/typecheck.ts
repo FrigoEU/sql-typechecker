@@ -1554,11 +1554,13 @@ export class UnknownFunction extends ErrorWithLocation {
   }
 }
 export class InvalidArguments extends ErrorWithLocation {
-  constructor(e: Expr, n: QName, argTs: Type[]) {
+  constructor(e: Expr, n: QName, argTs: Type[], reason?: string) {
     const argsString = argTs.map((t) => showType(t)).join(", ");
     super(
       e._location,
-      `Can't apply function "${showQName(n)}" to arguments: ${argsString}`
+      `Can't apply function "${showQName(n)}" to arguments: ${argsString}. ${
+        reason || ""
+      }`
     );
   }
 }
@@ -1958,7 +1960,12 @@ function elabAnyCall(
   score: number; // amount of coersions we had to do gets you into minus, so higher score is better
 } {
   if (sourceTypes.length !== targetTypes.length) {
-    throw new InvalidArguments(e, name, sourceTypes);
+    throw new InvalidArguments(
+      e,
+      name,
+      sourceTypes,
+      `Number of arguments: ${sourceTypes.length} vs ${targetTypes.length}`
+    );
   }
   const { score, anySourceIsNullable } = sourceTypes.reduce(
     function (acc, sourceT, i) {
@@ -2421,8 +2428,26 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       e,
       argTypes,
       allNumericBuiltinTypes
-        .concat([BuiltinTypes.Date, BuiltinTypes.Time, BuiltinTypes.Timestamp])
-        .map((t) => ({ expectedArgs: [t], returnT: nullify(t) }))
+        .concat([
+          BuiltinTypes.Date,
+          BuiltinTypes.Time,
+          BuiltinTypes.Timestamp,
+          BuiltinTypes.Numeric,
+          BuiltinTypes.Integer,
+          BuiltinTypes.Bigint,
+          BuiltinTypes.Smallint,
+          BuiltinTypes.Double,
+          BuiltinTypes.Float2,
+          BuiltinTypes.Float4,
+          BuiltinTypes.Float8,
+          BuiltinTypes.Real,
+        ])
+        .flatMap((t) => [
+          { expectedArgs: [t], returnT: nullify(t) },
+          { expectedArgs: [t, t], returnT: nullify(t) },
+          { expectedArgs: [t, t, t], returnT: nullify(t) },
+          { expectedArgs: [t, t, t, t], returnT: nullify(t) },
+        ])
     );
   }
 

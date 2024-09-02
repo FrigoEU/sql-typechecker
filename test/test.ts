@@ -1092,6 +1092,32 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public bool_and() {
+    expectReturnType(
+      "create table testje ( id int not null, name text);",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+      SELECT id, bool_and(id IS NOT NULL)
+      from testje
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "bool_and" },
+            type: BuiltinTypes.Boolean,
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
   public Max() {
     expectReturnType(
       "create table testje ( id int not null, name text);",

@@ -2479,14 +2479,21 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     );
   }
 
+  if (
+    eqQNames(e.function, { name: "bool_and" }) ||
+    eqQNames(e.function, { name: "bool_or" })
+  ) {
+    return unifyCallGeneral(
+      g,
+      e,
+      argTypes,
+      [BuiltinTypes.Boolean],
+      BuiltinTypes.Boolean
+    );
+  }
+
   if (eqQNames(e.function, { name: "count" })) {
     return BuiltinTypes.Bigint;
-    // return unifyCallGeneral(
-    //   e,
-    //   argTypes,
-    //   [AnyScalar],
-    //   BuiltinTypes.Bigint
-    // );
   }
 
   if (

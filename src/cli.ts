@@ -238,6 +238,7 @@ async function go() {
         console.error(err instanceof Error ? err.message : JSON.stringify(err));
         console.error("---------------------------------------------");
         console.error("");
+        process.exit(1);
       }
     }
 

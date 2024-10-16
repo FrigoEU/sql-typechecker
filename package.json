@@ -1,6 +1,6 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.92",
+  "version": "0.0.93",
   "main": "out/typeparsers.js",
   "files": ["out/**"],
   "bin": "out/cli.js",

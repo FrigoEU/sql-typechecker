@@ -126,7 +126,7 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
     } else if (t.name.name === "time") {
       return `LocalTime.parse(${literalVar})`;
     } else if (t.name.name === "timestamp with time zone") {
-      return `ZonedDateTime.parse((${literalVar}.match(/[\+\-]\d\d$/) ? ${literalVar} + ":00" : ${literalVar}).replace(" ", "T")).toInstant()`;
+      return `ZonedDateTime.parse(${literalVar}.trim().replace(/([\\+\\-]\\d\\d)$/, (_, cap) => cap + ":00").replace(" ", "T")).toInstant()`;
     } else if (t.name.name === "timestamp without time zone") {
       return `LocalDateTime.parse(${literalVar}.replace(" ", "T"))`;
     } else if (t.name.name === "jsonb") {

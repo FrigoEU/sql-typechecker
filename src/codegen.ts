@@ -300,7 +300,7 @@ export function genEnum(enu: {
 export function getImports() {
   return `
 import type { Pool } from "pg";
-import { ZonedDateTime, LocalDate, LocalTime, LocalDateTime} from "@js-joda/core";
+import { ZonedDateTime, Instant, LocalDate, LocalTime, LocalDateTime} from "@js-joda/core";
 import {parse as parseArray} from "postgres-array";
 `;
 }

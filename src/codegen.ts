@@ -126,7 +126,7 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
     } else if (t.name.name === "time") {
       return `LocalTime.parse(${literalVar})`;
     } else if (t.name.name === "timestamp with time zone") {
-      return `Instant.parse(${literalVar})`;
+      return `ZonedDateTime.parse((${literalVar}.match(/[\+\-]\d\d$/) ? ${literalVar} + ":00" : ${literalVar}).replace(" ", "T")).toInstant()`;
     } else if (t.name.name === "timestamp without time zone") {
       return `LocalDateTime.parse(${literalVar}.replace(" ", "T"))`;
     } else if (t.name.name === "jsonb") {
@@ -300,7 +300,7 @@ export function genEnum(enu: {
 export function getImports() {
   return `
 import type { Pool } from "pg";
-import { Instant, LocalDate, LocalTime, LocalDateTime} from "@js-joda/core";
+import { ZonedDateTime, LocalDate, LocalTime, LocalDateTime} from "@js-joda/core";
 import {parse as parseArray} from "postgres-array";
 `;
 }

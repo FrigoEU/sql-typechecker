@@ -19,14 +19,14 @@ import {
   Name,
   // astVisitor,
   NodeLocation,
-  parse,
   PGNode,
   QName,
-  SelectedColumn,
   SelectStatement,
+  SelectedColumn,
   Statement,
-  toSql,
   UpdateStatement,
+  parse,
+  toSql,
 } from "trader-pgsql-ast-parser";
 import { builtincasts } from "./builtincasts";
 import { builtinoperators } from "./builtinoperators";
@@ -1392,7 +1392,7 @@ export function doCreateFunction(
   }
 }
 
-type HandledFrom = { name: QName; rel: RecordT };
+type Joined = { name: QName; rel: RecordT };
 type Nullable<T> = T | null;
 
 function findRel(g: Global, c: Context, f: From, n: QName): Nullable<RecordT> {
@@ -1714,7 +1714,7 @@ function registerWarning(e: Expr, message: string) {
   warnings.push([e, message]);
 }
 
-function mergeHandledFroms(c: Context, handledFroms: HandledFrom[]): Context {
+function mergeJoined(c: Context, handledFroms: Joined[]): Context {
   return {
     ...c,
     froms: handledFroms
@@ -1731,10 +1731,10 @@ function mergeHandledFroms(c: Context, handledFroms: HandledFrom[]): Context {
 function doSingleFrom(
   g: Global,
   c: Context,
-  handledFroms: HandledFrom[],
+  currentJoined: Joined[],
   f: From
-): HandledFrom[] {
-  function getHandledFrom(f: From): HandledFrom {
+): Joined[] {
+  function getJoined(f: From): Joined {
     if (f.type === "statement") {
       const t = elabSelect(g, c, f.statement);
       if (t.kind === "void") {
@@ -1773,36 +1773,34 @@ function doSingleFrom(
     }
   }
 
-  const newHandledFrom_ = getHandledFrom(f);
-
-  const newHandledFrom =
-    f.join && (f.join.type === "FULL JOIN" || f.join.type === "LEFT JOIN")
-      ? { ...newHandledFrom_, rel: nullifyRecord(newHandledFrom_.rel) }
-      : newHandledFrom_;
-
-  const newHandledFroms_ =
-    f.join && (f.join.type === "FULL JOIN" || f.join.type === "RIGHT JOIN")
-      ? handledFroms.map((fr) => ({ ...fr, rel: nullifyRecord(fr.rel) }))
-      : handledFroms;
-
-  const newHandledFroms = newHandledFroms_.concat(newHandledFrom);
+  const newJoined = getJoined(f);
 
   if (f.join?.on) {
-    const t = elabExpr(g, mergeHandledFroms(c, newHandledFroms), f.join.on);
+    const t = elabExpr(
+      g,
+      mergeJoined(c, currentJoined.concat(newJoined)),
+      f.join.on
+    );
     requireBoolean(f.join.on, t);
   }
 
-  return newHandledFroms;
+  const newJoinedNullified =
+    f.join && (f.join.type === "FULL JOIN" || f.join.type === "LEFT JOIN")
+      ? { ...newJoined, rel: nullifyRecord(newJoined.rel) }
+      : newJoined;
+
+  const existingJoinedNullified =
+    f.join && (f.join.type === "FULL JOIN" || f.join.type === "RIGHT JOIN")
+      ? currentJoined.map((fr) => ({ ...fr, rel: nullifyRecord(fr.rel) }))
+      : currentJoined;
+
+  return existingJoinedNullified.concat(newJoinedNullified);
 }
 function addFromsToScope(g: Global, c: Context, froms: From[]): Context {
-  const inFroms: HandledFrom[] = froms.reduce(function (
-    acc: HandledFrom[],
-    f: From
-  ) {
+  const inFroms: Joined[] = froms.reduce(function (acc: Joined[], f: From) {
     return doSingleFrom(g, c, acc, f);
-  },
-  []);
-  return mergeHandledFroms(c, inFroms);
+  }, []);
+  return mergeJoined(c, inFroms);
 }
 
 function lookupInRecord(s: RecordT, name: Name): SimpleT | null {

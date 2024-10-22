@@ -830,6 +830,39 @@ $$ LANGUAGE sql;
   }
 
   @Test()
+  public leftJoinNotNullableInOnClause() {
+    expectReturnType(
+      `
+   create table testje ( id int not null, name text );
+   create table test2  ( id int not null, myarray int[] not null );
+`,
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+SELECT testje.id, test2.myarray
+FROM testje
+LEFT JOIN test2 on testje.id = ANY(test2.myarray)
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+          {
+            name: { name: "myarray" },
+            type: BuiltinTypeConstructors.Nullable(
+              BuiltinTypeConstructors.Array(BuiltinTypes.Integer)
+            ),
+          },
+        ],
+      },
+      { multipleRows: true }
+    );
+  }
+
+  @Test()
   public arraySelect() {
     expectReturnType(
       "create table testje ( id int not null, name text );",

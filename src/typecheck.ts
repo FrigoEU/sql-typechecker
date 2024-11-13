@@ -713,23 +713,23 @@ export function notImplementedYet(node: PGNode | null): any {
 }
 
 function mkType(g: Global, t: DataTypeDef, cs: ColumnConstraint[]): SimpleT {
+  let t_;
   if (t.kind === "array") {
     if (t.arrayOf.kind === "array") {
-      throw new Error("Array or array not supported");
+      throw new Error("Array of array not supported");
     } else {
       const elTypeName = normalizeTypeName(t.arrayOf.name);
       const scalarT = checkType(g, t.arrayOf._location, elTypeName);
-      return BuiltinTypeConstructors.Array(scalarT);
+      t_ = BuiltinTypeConstructors.Array(scalarT);
     }
   } else {
     const typeName = normalizeTypeName(t.name);
-    const t_ = checkType(g, t._location, typeName);
-
-    const notnullable = cs.some(
-      (c) => c.type === "not null" || c.type === "primary key"
-    );
-    return notnullable ? t_ : nullify(t_);
+    t_ = checkType(g, t._location, typeName);
   }
+  const notnullable = cs.some(
+    (c) => c.type === "not null" || c.type === "primary key"
+  );
+  return notnullable ? t_ : nullify(t_);
 }
 
 function checkType(

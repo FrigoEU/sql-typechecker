@@ -2138,4 +2138,33 @@ $$ LANGUAGE sql;
       }
     );
   }
+
+  @Test()
+  public ignore_group_by_and_having() {
+    expectReturnType(
+      "create table testje ( id int not null, name text );",
+      `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  SELECT id, name
+  FROM testje
+  GROUP BY id
+  HAVING COUNT(*) > 2
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
+          },
+
+          {
+            name: { name: "name" },
+            type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+        ],
+      }
+    );
+  }
 }

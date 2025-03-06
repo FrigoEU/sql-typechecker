@@ -178,8 +178,8 @@ $$ LANGUAGE sql;
     expectInputs(
       "create table testje ( id int not null, name text );",
       `
-CREATE FUNCTION myselect(myid int, myname text default null) RETURNS SETOF RECORD AS $$
-  SELECT id, name
+  CREATE FUNCTION myselect(myid int, myname text default null, array_with_nulls text[] default '{NULL}') RETURNS SETOF RECORD AS $$
+  SELECT id, name, array_with_nulls
   FROM testje
   WHERE id = myid
   AND myname = name;
@@ -193,6 +193,12 @@ $$ LANGUAGE sql;
         {
           name: { name: "myname" },
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+        },
+        {
+          name: { name: "array_with_nulls" },
+          type: BuiltinTypeConstructors.Array(
+            BuiltinTypeConstructors.Nullable(BuiltinTypes.Text)
+          ),
         },
       ]
     );
@@ -2162,6 +2168,29 @@ $$ LANGUAGE sql;
           {
             name: { name: "name" },
             type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
+          },
+        ],
+      }
+    );
+  }
+
+  @Test()
+  public array_position() {
+    expectReturnType(
+      "create table testje ( id int not null);",
+      `
+CREATE FUNCTION myselect( names text[] DEFAULT '{NULL}' ) RETURNS SETOF RECORD AS $$
+  SELECT id
+  FROM testje
+  WHERE array_position(names, NULL) IS NOT NULL
+$$ LANGUAGE sql;
+`,
+      {
+        kind: "record",
+        fields: [
+          {
+            name: { name: "id" },
+            type: BuiltinTypes.Integer,
           },
         ],
       }

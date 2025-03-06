@@ -41,7 +41,7 @@ export type NullableT<T extends SimpleT> = {
   kind: "nullable";
   typevar: T;
 };
-export type ArrayT<T> = {
+export type ArrayT<T extends SimpleT> = {
   kind: "array";
   subtype: "array" | "list";
   typevar: T;
@@ -1253,19 +1253,35 @@ export function doCreateFunction(
             showLocation(s._location)
         );
       }
+
+      const paramT = mkType(g, arg.type, [{ type: "not null" }]);
+      // !!!!!!!!!!!!
+      // Default rule of THIS typechecker:  params are NOT NULL
+      // , unless defined as eg: (myname int default null)
+      //   or nullable arrays  : (myname int default '{NULL}')
+      // !!!!!!!!!!!!
+      if (
+        arg.default &&
+        ((arg.default.type === "string" &&
+          arg.default.value.toLowerCase() === "{null}") ||
+          (arg.default.type === "array" &&
+            arg.default.expressions[0].type === "null")) &&
+        paramT.kind === "array"
+      ) {
+        return {
+          name: arg.name,
+          type: nullifyArray(paramT),
+        };
+      }
+      if (arg.default && arg.default.type === "null") {
+        return {
+          name: arg.name,
+          type: nullify(paramT),
+        };
+      }
       return {
         name: arg.name,
-        type: mkType(
-          g,
-          arg.type,
-          // !!!!!!!!!!!!
-          // Default rule of THIS typechecker:  params are NOT NULL
-          // , unless defined as eg: (myname int default null)
-          // !!!!!!!!!!!!
-          arg.default && arg.default.type === "null"
-            ? []
-            : [{ type: "not null" }]
-        ),
+        type: paramT,
       };
     });
     const contextForBody: Context = {
@@ -2367,6 +2383,36 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     }
   }
 
+  // (T[], T) -> int | null
+  if (eqQNames(e.function, { name: "array_position" })) {
+    if (e.args.length !== 2) {
+      throw new InvalidArguments(e, e.function, argTypes);
+    }
+
+    const t1_ = argTypes[0];
+    const t1 = toSimpleT(t1_);
+    if (t1 === null) {
+      throw new CantReduceToSimpleT(e.args[0], argTypes[0]);
+    }
+
+    const t2_ = argTypes[1];
+    const t2 = toSimpleT(t2_);
+    if (t2 === null) {
+      throw new CantReduceToSimpleT(e.args[1], argTypes[1]);
+    }
+
+    if (t1.kind !== "array") {
+      debugger;
+      throw new TypecheckerError(
+        e,
+        `Expecting array type instead of ${t1.kind}`
+      );
+    } else {
+      unifySimples(g, e, t1.typevar, t2);
+      return BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer);
+    }
+  }
+
   if (eqQNames(e.function, { name: "sum" })) {
     return unifyOverloadedCall(g, e, argTypes, [
       { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Bigint },
@@ -2884,6 +2930,18 @@ function nullifyRecord(s: RecordT): RecordT {
       type: nullify(c.type),
     })),
   };
+}
+
+function nullifyArray(s: ArrayT<SimpleT>): ArrayT<SimpleT> {
+  if (s.typevar.kind === "nullable") {
+    return s;
+  } else {
+    return {
+      kind: s.kind,
+      subtype: s.subtype,
+      typevar: nullify(s.typevar),
+    };
+  }
 }
 
 function nullify(s: SimpleT): SimpleT {

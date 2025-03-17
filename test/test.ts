@@ -2210,4 +2210,32 @@ $$ LANGUAGE sql;
       "Unused argument my_id"
     );
   }
+
+  @Test()
+  public update_check_set_unify() {
+    expectThrowLike(
+      "create table testje ( id int not null);",
+      `
+CREATE FUNCTION myupdate( my_name text ) RETURNS void AS $$
+      UPDATE testje
+      SET id = my_name;
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public update_check_set_correct_col() {
+    expectThrowLike(
+      "create table testje ( id int not null);",
+      `
+CREATE FUNCTION myupdate( my_name text ) RETURNS void AS $$
+      UPDATE testje
+      SET bloob = my_name;
+$$ LANGUAGE sql;
+`,
+      "UnknownField bloob"
+    );
+  }
 }

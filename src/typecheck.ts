@@ -1179,6 +1179,27 @@ function elabDeleteOrUpdate(
   const newContext =
     s.type === "update" && s.from ? addFromsToScope(g, newC_, [s.from]) : newC_;
 
+  if (s.type === "update") {
+    for (let setStatement of s.sets) {
+      const t = elabExpr(g, newContext, setStatement.value);
+      const field = tableDef.rel.fields.find(
+        (f) => f.name && eqQNames(f.name, setStatement.column)
+      );
+      if (!field) {
+        throw new UnknownField(
+          setStatement.column,
+          tableDef.rel,
+          setStatement.column
+        );
+      }
+      const simpleT = toSimpleT(t);
+      if (simpleT === null) {
+        throw new KindMismatch(setStatement.value, t, "");
+      }
+      unifySimples(g, setStatement.value, field.type, simpleT);
+    }
+  }
+
   if (s.where) {
     const whereT = elabExpr(g, newContext, s.where);
     requireBoolean(s.where, whereT);
@@ -1470,7 +1491,7 @@ ${JSON.stringify(node)} @ ${node._location}`
 }
 
 class UnknownField extends ErrorWithLocation {
-  constructor(e: Expr, s: RecordT, n: Name) {
+  constructor(e: PGNode, s: RecordT, n: Name) {
     super(
       e._location,
       `UnknownField ${n.name}.

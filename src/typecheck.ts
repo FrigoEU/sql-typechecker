@@ -699,6 +699,7 @@ export type Context = {
   }>;
   readonly decls: ReadonlyArray<{
     readonly name: Name;
+    referenceCounter?: number;
     readonly type:
       | Type
       | VoidT /* with statement can return bindings of type void */;
@@ -1271,17 +1272,20 @@ export function doCreateFunction(
         return {
           name: arg.name,
           type: nullifyArray(paramT),
+          referenceCounter: 0,
         };
       }
       if (arg.default && arg.default.type === "null") {
         return {
           name: arg.name,
           type: nullify(paramT),
+          referenceCounter: 0,
         };
       }
       return {
         name: arg.name,
         type: paramT,
+        referenceCounter: 0,
       };
     });
     const contextForBody: Context = {
@@ -1394,9 +1398,14 @@ export function doCreateFunction(
         }
       }
 
+      const unusedArgument = inputs.find((inp) => inp.referenceCounter === 0);
+      if (unusedArgument) {
+        throw new Error(`Unused argument ${showQName(unusedArgument.name)}`);
+      }
+
       return {
         name,
-        inputs,
+        inputs: inputs.map((inp) => ({ name: inp.name, type: inp.type })),
         returns: unifiedReturnType,
         multipleRows: (s.returns && s.returns.setof) || false,
         code: s.code,
@@ -1907,7 +1916,7 @@ function lookupRef(
         return null;
       } else {
         return t.name.name === e.name
-          ? { name: t.name.name, type: t.type }
+          ? { name: t.name.name, type: t.type, decl: t }
           : null;
       }
     });
@@ -1918,6 +1927,9 @@ function lookupRef(
       if (foundIdentifiers.length === 0) {
         return new UnknownIdentifier(e, e);
       } else if (foundIdentifiers.length === 1) {
+        if (!isNil(foundIdentifiers[0].decl.referenceCounter)) {
+          foundIdentifiers[0].decl.referenceCounter += 1;
+        }
         return { type: foundIdentifiers[0].type, from: null };
       } else {
         return new AmbiguousIdentifier(e, e, []);

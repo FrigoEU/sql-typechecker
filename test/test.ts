@@ -73,7 +73,7 @@ function expectInputs(
   });
 }
 
-function expectReturnType<T>(
+function expectReturnType<T extends SimpleT>(
   setupStr: string,
   queryStr: string,
   expectedReturnType: RecordT | ScalarT | ArrayT<T> | VoidT,
@@ -2194,6 +2194,20 @@ $$ LANGUAGE sql;
           },
         ],
       }
+    );
+  }
+
+  @Test()
+  public find_unused_vars() {
+    expectThrowLike(
+      "create table testje ( id int not null);",
+      `
+CREATE FUNCTION myselect( my_id int ) RETURNS SETOF RECORD AS $$
+  SELECT id
+  FROM testje
+$$ LANGUAGE sql;
+`,
+      "Unused argument my_id"
     );
   }
 }

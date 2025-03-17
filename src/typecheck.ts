@@ -985,6 +985,16 @@ export function elabSelect(
       return [{ name: n, type: t, _expr: c.expr }];
     });
 
+    if (s.limit && s.limit.limit) {
+      const t = elabExpr(g, newC, s.limit.limit);
+      unify(g, s.limit.limit, t, BuiltinTypes.Integer);
+    }
+
+    if (s.limit && s.limit.offset) {
+      const t = elabExpr(g, newC, s.limit.offset);
+      unify(g, s.limit.offset, t, BuiltinTypes.Integer);
+    }
+
     return {
       kind: "record",
       fields,
@@ -2135,6 +2145,13 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
     // No generics, so special casing this operator
     castSimples(g, e, t2, BuiltinTypeConstructors.List(t1), "implicit");
     return BuiltinTypes.Boolean;
+  }
+
+  if (e.op === "||") {
+    if (t1.kind === "array" && t2.kind !== "array") {
+      unifySimples(g, e, t1.typevar, t2);
+      return t1;
+    }
   }
 
   if (e.op === "OVERLAPS") {

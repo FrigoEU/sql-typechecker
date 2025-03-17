@@ -2238,4 +2238,33 @@ $$ LANGUAGE sql;
       "UnknownField bloob"
     );
   }
+
+  @Test()
+  public limit() {
+    expectThrowLike(
+      "create table testje ( id int not null);",
+      `
+CREATE FUNCTION myupdate( my_name text ) RETURNS SETOF RECORD AS $$
+      SELECT *
+        FROM testje
+       LIMIT my_name
+$$ LANGUAGE sql;
+`,
+      "TypeMismatch"
+    );
+  }
+
+  @Test()
+  public arrayConcat() {
+    expectReturnType(
+      "create table testje ( id int not null, numbers int[] NOT NULL );",
+      `
+CREATE FUNCTION myselect(mynum int) RETURNS void AS $$
+      UPDATE testje
+         SET numbers = numbers || mynum
+$$ LANGUAGE sql;
+`,
+      { kind: "void" }
+    );
+  }
 }

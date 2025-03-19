@@ -1,4 +1,4 @@
-import { unaryOp } from "./typecheck";
+import type { unaryOp } from "./typecheck.ts";
 
 const builtinunaryoperatorsFromSyntax: unaryOp[] = [
   {

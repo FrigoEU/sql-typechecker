@@ -1,37 +1,37 @@
 import assert from "assert";
-import { isNil, orderBy } from "lodash";
+import { isNil, orderBy } from "lodash-es";
 import {
-  AlterTableStatement,
-  ColumnConstraint,
-  CreateFunctionStatement,
-  CreateMaterializedViewStatement,
-  CreateTableStatement,
-  CreateViewStatement,
-  DataTypeDef,
-  DeleteStatement,
-  Expr,
-  ExprBinary,
-  ExprCall,
-  ExprRef,
-  ExprUnary,
-  From,
-  InsertStatement,
-  Name,
+  type AlterTableStatement,
+  type ColumnConstraint,
+  type CreateFunctionStatement,
+  type CreateMaterializedViewStatement,
+  type CreateTableStatement,
+  type CreateViewStatement,
+  type DataTypeDef,
+  type DeleteStatement,
+  type Expr,
+  type ExprBinary,
+  type ExprCall,
+  type ExprRef,
+  type ExprUnary,
+  type From,
+  type InsertStatement,
+  type Name,
   // astVisitor,
-  NodeLocation,
-  PGNode,
-  QName,
-  SelectStatement,
-  SelectedColumn,
-  Statement,
-  UpdateStatement,
+  type NodeLocation,
+  type PGNode,
+  type QName,
+  type SelectStatement,
+  type SelectedColumn,
+  type Statement,
+  type UpdateStatement,
   parse,
   toSql,
 } from "trader-pgsql-ast-parser";
-import { builtincasts } from "./builtincasts";
-import { builtinoperators } from "./builtinoperators";
-import { builtinUnaryOperators } from "./builtinunaryoperators";
-import { normalizeOperatorName, normalizeTypeName } from "./normalize";
+import { builtincasts } from "./builtincasts.ts";
+import { builtinoperators } from "./builtinoperators.ts";
+import { builtinUnaryOperators } from "./builtinunaryoperators.ts";
+import { normalizeOperatorName, normalizeTypeName } from "./normalize.ts";
 
 export type Type = SimpleT | RecordT;
 export type AnyScalarT = {

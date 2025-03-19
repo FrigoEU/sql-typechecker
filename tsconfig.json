@@ -1,23 +1,17 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
-    "target": "ES2019",
+    "target": "esnext",
+    "module": "nodenext",
     "rootDir": "",
     "sourceMap": true,
     "strict": true,
     "esModuleInterop": true,
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-    "declaration": true,
-    "lib": [
-      "es2019",
-      "dom"
-    ]
+    "noEmit": true,
+    "rewriteRelativeImportExtensions": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "lib": ["es2019", "dom"]
   },
-  "include": [
-    "index.ts",
-    "sample/**/*",
-    "src/**/*",
-    "test/**/*"
-  ]
+  "include": ["index.ts", "sample/**/*", "src/**/*", "test/**/*"]
 }

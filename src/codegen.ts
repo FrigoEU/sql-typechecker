@@ -1,15 +1,15 @@
-import { Name, QName } from "trader-pgsql-ast-parser";
+import { type Name, type QName } from "trader-pgsql-ast-parser";
 import {
   checkAllCasesHandled,
-  functionType,
-  JsonKnownT,
-  RecordT,
   showQName,
   showSqlType,
-  SimpleT,
-  Type,
-  VoidT,
-} from "./typecheck";
+  type JsonKnownT,
+  type RecordT,
+  type SimpleT,
+  type Type,
+  type VoidT,
+  type functionType,
+} from "./typecheck.ts";
 
 export function showTypeAsTypescriptType(t: Type): string {
   if (t.kind === "record") {

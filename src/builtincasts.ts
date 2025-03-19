@@ -1,5 +1,5 @@
-import { normalizeTypeName } from "./normalize";
-import { CastType, ScalarT } from "./typecheck";
+import { normalizeTypeName } from "./normalize.ts";
+import type { CastType, ScalarT } from "./typecheck.ts";
 
 export const builtincasts: {
   source: ScalarT;

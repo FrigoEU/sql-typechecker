@@ -1,27 +1,27 @@
 import * as fs from "fs/promises";
-import { min, repeat } from "lodash";
+import { min, repeat } from "lodash-es";
 import * as path from "path";
-import {
-  CreateFunctionStatement,
-  NodeLocation,
-  parse,
-  QName,
-  Statement,
-} from "trader-pgsql-ast-parser";
 import * as prettier from "prettier";
+import {
+  parse,
+  type CreateFunctionStatement,
+  type NodeLocation,
+  type QName,
+  type Statement,
+} from "trader-pgsql-ast-parser";
 import {
   functionToTypescript,
   genCrudOperations,
   genDomain,
   genEnum,
   getImports,
-} from "./codegen";
+} from "./codegen.ts";
 import {
-  Global,
-  doCreateFunction,
   ErrorWithLocation,
+  type Global,
+  doCreateFunction,
   parseSetupScripts,
-} from "./typecheck";
+} from "./typecheck.ts";
 
 go();
 
@@ -294,7 +294,7 @@ function findInArgs(opts: { argv: string[]; flags: string[] }): string[] {
 }
 
 function mkImportDomainsStatement(
-  domains: ReadonlyArray<{
+  _domains: ReadonlyArray<{
     readonly name: QName;
   }>,
   thisFile: string,

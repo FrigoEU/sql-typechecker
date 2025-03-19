@@ -1,5 +1,5 @@
-import { normalizeOperatorName } from "./normalize";
-import { binaryOp } from "./typecheck";
+import { normalizeOperatorName } from "./normalize.ts";
+import type { binaryOp } from "./typecheck.ts";
 
 const builtinoperatorsFromSyntax: binaryOp[] = [
   {

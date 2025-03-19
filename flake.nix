@@ -1,6 +1,7 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/22.05";
+
+    nixpkgs.url = "github:NixOS/nixpkgs/24.11";
     flake-utils.url = "github:numtide/flake-utils";
   };
   outputs = {self, nixpkgs, flake-utils} :
@@ -13,7 +14,7 @@
             devShell = pkgs.mkShell {
               name = "sqltypechecker-env";
               buildInputs = [
-                             pkgs.nodejs-18_x
+                             pkgs.nodejs_22
                             ];
             };
           }

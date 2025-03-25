@@ -188,6 +188,7 @@ const allNumericBuiltinTypes: ScalarT[] = [
   BuiltinTypes.Float2,
   BuiltinTypes.Float4,
   BuiltinTypes.Float8,
+  BuiltinTypes.Money,
 ];
 
 function requireBoolean(e: Expr, t: Type): void {
@@ -2478,6 +2479,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       { expectedArgs: [BuiltinTypes.Float2], returnT: BuiltinTypes.Double },
       { expectedArgs: [BuiltinTypes.Float4], returnT: BuiltinTypes.Double },
       { expectedArgs: [BuiltinTypes.Float8], returnT: BuiltinTypes.Double },
+      { expectedArgs: [BuiltinTypes.Money], returnT: BuiltinTypes.Money },
     ]);
   }
 
@@ -2492,6 +2494,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       { expectedArgs: [BuiltinTypes.Float2], returnT: BuiltinTypes.Double },
       { expectedArgs: [BuiltinTypes.Float4], returnT: BuiltinTypes.Double },
       { expectedArgs: [BuiltinTypes.Float8], returnT: BuiltinTypes.Double },
+      { expectedArgs: [BuiltinTypes.Money], returnT: BuiltinTypes.Money },
     ]);
   }
 
@@ -2527,20 +2530,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       e,
       argTypes,
       allNumericBuiltinTypes
-        .concat([
-          BuiltinTypes.Date,
-          BuiltinTypes.Time,
-          BuiltinTypes.Timestamp,
-          BuiltinTypes.Numeric,
-          BuiltinTypes.Integer,
-          BuiltinTypes.Bigint,
-          BuiltinTypes.Smallint,
-          BuiltinTypes.Double,
-          BuiltinTypes.Float2,
-          BuiltinTypes.Float4,
-          BuiltinTypes.Float8,
-          BuiltinTypes.Real,
-        ])
+        .concat([BuiltinTypes.Date, BuiltinTypes.Time, BuiltinTypes.Timestamp])
         .flatMap((t) => [{ expectedArgs: [t], returnT: nullify(t) }])
     );
   }

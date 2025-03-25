@@ -140,6 +140,10 @@ export const BuiltinTypes = {
     kind: "scalar",
     name: { name: "date" },
   },
+  Money: {
+    kind: "scalar",
+    name: { name: "money" },
+  },
   Time: {
     kind: "scalar",
     name: { name: "time" },

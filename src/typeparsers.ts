@@ -17,6 +17,12 @@ export function registerSqlTypecheckerTypeParsers() {
   // "timestamp with time zone" 2022-06-23T15:52:39.77314+00:00
   types.setTypeParser(types.builtins.TIMESTAMPTZ, (v) => v);
 
+  // types.builtins.MONEY -> number, faster to push into currency.js
+  types.setTypeParser(
+    types.builtins.MONEY,
+    types.getTypeParser(types.builtins.NUMERIC)
+  );
+
   // https://www.npmjs.com/package/postgres-range
   // Range includes Included/Excluded bounds specification!
   types.setTypeParser(3908 as TypeId, range.parse); // tsrange

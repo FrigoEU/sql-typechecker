@@ -1,6 +1,6 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.103",
+  "version": "0.0.104",
   "main": "out/typeparsers.js",
   "files": ["out/**"],
   "bin": "out/cli.js",
@@ -17,6 +17,7 @@
     "build": "node --trace-warnings --experimental-transform-types esbuild.ts && npm run build:types",
     "prepare": "npm run build",
     "build:types": "tsc --emitDeclarationOnly --declaration --outDir ./out --module commonjs --target ES2019 --esModuleInterop src/typeparsers.ts",
+    "start": "npm run build && node --enable-source-maps ./out/cli.js -d ./sample -o ./sample/out",
     "test": "node --experimental-transform-types --test-reporter=spec --test 'test/test.ts'",
     "test_debug": "node --experimental-transform-types --inspect-brk --test 'test/test.ts'"
   },
@@ -31,7 +32,7 @@
     "purify-ts": "^1.0.0",
     "ts-node": "^10.7.0",
     "tsx": "^4.7.1",
-    "typescript": "5.3.3",
+    "typescript": "5.8.2",
     "typescript-language-server": "^4.3.3"
   }
 }

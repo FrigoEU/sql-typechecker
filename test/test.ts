@@ -16,6 +16,7 @@ import {
   type Type,
   type VoidT,
 } from "../src/typecheck.ts";
+import { registerSqlTypecheckerTypeParsers } from "../src/typeparsers.ts";
 
 function testCreateFunction(
   setupStr: string,
@@ -125,6 +126,8 @@ function expectThrowLike(
     });
   });
 }
+
+registerSqlTypecheckerTypeParsers();
 
 test("select", () => {
   expectReturnType(

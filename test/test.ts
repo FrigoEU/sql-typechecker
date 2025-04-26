@@ -1548,6 +1548,27 @@ $$ LANGUAGE sql;
   );
 });
 
+test("substring without for", () => {
+  expectReturnType(
+    "create table testje ( id int not null, name text not null);",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+SELECT SUBSTRING(name from 5) as name
+FROM testje
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "name" },
+          type: BuiltinTypes.Text,
+        },
+      ],
+    }
+  );
+});
+
 test("substringNotnullable", () => {
   expectReturnType(
     "create table testje ( id int not null, name text not null);",
@@ -2171,5 +2192,47 @@ CREATE FUNCTION myselect(mynum int) RETURNS void AS $$
 $$ LANGUAGE sql;
 `,
     { kind: "void" }
+  );
+});
+
+test("length", () => {
+  expectReturnType(
+    "create table testje ( id int not null, name text not null );",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+    SELECT length(name) as l
+    FROM testje
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "l" },
+          type: BuiltinTypes.Integer,
+        },
+      ],
+    }
+  );
+});
+
+test("starts_with", () => {
+  expectReturnType(
+    "create table testje ( id int not null, name text not null );",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+    SELECT starts_with(name, 'haha') AS l
+    FROM testje
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "l" },
+          type: BuiltinTypes.Boolean,
+        },
+      ],
+    }
   );
 });

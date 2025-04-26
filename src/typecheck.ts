@@ -2314,6 +2314,43 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     return BuiltinTypes.Integer;
   }
 
+  if (eqQNames(e.function, { name: "starts_with" })) {
+    // string -> string -> boolean
+    return unifyCallGeneral(
+      g,
+      e,
+      argTypes,
+      [BuiltinTypes.Text, BuiltinTypes.Text],
+      BuiltinTypes.Boolean
+    );
+  }
+
+  // Parser can't handle
+  // if (
+  //   eqQNames(e.function, { name: "left" }) ||
+  //   eqQNames(e.function, { name: "right" })
+  // ) {
+  //   // string -> string -> boolean
+  //   return unifyCallGeneral(
+  //     g,
+  //     e,
+  //     argTypes,
+  //     [BuiltinTypes.Text, BuiltinTypes.Integer],
+  //     BuiltinTypes.Text
+  //   );
+  // }
+
+  if (eqQNames(e.function, { name: "length" })) {
+    // string -> string -> boolean
+    return unifyCallGeneral(
+      g,
+      e,
+      argTypes,
+      [BuiltinTypes.Text],
+      BuiltinTypes.Integer
+    );
+  }
+
   if (eqQNames(e.function, { name: "generate_series" })) {
     // Generate_series doesn't return an array, but rather makes extra rows!
     return unifyOverloadedCall(g, e, argTypes, [

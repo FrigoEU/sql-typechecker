@@ -1,5 +1,5 @@
 # SQL-Typechecker
-SQL-Typechecker is a CLI tool written in TypeScript for working with PostgreSQL in Typescript.
+SQL-Typechecker is a CLI tool written in TypeScript, typechecking PostgreSQL files and generating TypeScript type definitions for them.
 
 It reads your SQL DDL statements (CREATE TABLE, etc) on one hand and your SQL functions (CREATE FUNCTION ...) on the other. It then typechecks your SQL functions and generates TypeScript files for them.
 

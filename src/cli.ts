@@ -172,7 +172,7 @@ async function go() {
     );
     const fParsed = path.parse(f.fileName);
     const outFileName = path.format({
-      dir: fParsed.dir,
+      dir: outDir,
       name: fParsed.name,
       ext: ".ts",
     });

@@ -10,7 +10,7 @@
     "rewriteRelativeImportExtensions": true,
     "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true,
-    "verbatimModuleSyntax": true,
+    "verbatimModuleSyntax": false,
     "lib": ["es2019", "dom"]
   },
   "include": ["index.ts", "sample/**/*", "src/**/*", "test/**/*"]

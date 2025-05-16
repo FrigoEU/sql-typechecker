@@ -64,6 +64,8 @@ export function showTypeAsTypescriptType(t: Type): string {
         return "LocalDateTime";
       } else if (t.name.name === "timestamp with time zone") {
         return "Instant";
+      } else if (t.name.name === "interval") {
+        return "Duration";
       } else if (t.name.name === "money") {
         return "currency";
       } else if (t.isEnum) {
@@ -131,6 +133,8 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
       return `ZonedDateTime.parse(${literalVar}.trim().replace(/([\\+\\-]\\d\\d)$/, (_:string, cap:string) => cap + ":00").replace(" ", "T")).toInstant()`;
     } else if (t.name.name === "timestamp without time zone") {
       return `LocalDateTime.parse(${literalVar}.replace(" ", "T"))`;
+    } else if (t.name.name === "interval") {
+      return `Duration.todo(${literalVar})`;
     } else if (t.name.name === "jsonb") {
       return `JSON.parse(${literalVar})`;
     } else if (t.name.name === "money") {
@@ -304,7 +308,7 @@ export function genEnum(enu: {
 export function getImports() {
   return `
 import type { Pool } from "pg";
-import { ZonedDateTime, Instant, LocalDate, LocalTime, LocalDateTime} from "@js-joda/core";
+import { ZonedDateTime, Instant, LocalDate, LocalTime, LocalDateTime, Duration} from "@js-joda/core";
 import {parse as parseArray} from "postgres-array";
 import currency from "currency.js";
 `;

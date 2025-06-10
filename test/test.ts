@@ -862,6 +862,27 @@ $$ LANGUAGE sql;
   );
 });
 
+test("Array coalesce", () => {
+  expectReturnType(
+    "create table testje ( id int not null, name text );",
+    `
+CREATE FUNCTION myselect(arr int[]) RETURNS SETOF RECORD AS $$
+    SELECT COALESCE(arr, ARRAY[]::int[])
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "coalesce" },
+          type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
+        },
+      ],
+    },
+    { multipleRows: true }
+  );
+});
+
 test("arraySelectWithSubquery", () => {
   expectReturnType(
     "create table testje ( id int not null, name text );",
@@ -2148,6 +2169,31 @@ $$ LANGUAGE sql;
         {
           name: { name: "len" },
           type: BuiltinTypes.Integer,
+        },
+      ],
+    }
+  );
+});
+
+test("array_length", () => {
+  expectReturnType(
+    "create table testje ( id int not null);",
+    `
+CREATE FUNCTION myselect( names text[] DEFAULT NULL) RETURNS SETOF RECORD AS $$
+  SELECT id, array_length(names, 1) AS len
+    FROM testje
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "id" },
+          type: BuiltinTypes.Integer,
+        },
+        {
+          name: { name: "len" },
+          type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
         },
       ],
     }

@@ -2476,6 +2476,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   // (T[], int) -> int
+  // (T[] | null, int) -> int | null
   if (eqQNames(e.function, { name: "array_length" })) {
     if (e.args.length !== 2) {
       throw new InvalidArguments(e, e.function, argTypes);
@@ -2486,7 +2487,14 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       throw new CantReduceToSimpleT(e.args[0], argTypes[0]);
     }
 
-    if (t1.kind !== "array") {
+    if (t1.kind === "nullable") {
+      if (t1.typevar.kind !== "array") {
+        throw new TypecheckerError(
+          e,
+          `Expecting array type instead of ${t1.kind}`
+        );
+      }
+    } else if (t1.kind !== "array") {
       throw new TypecheckerError(
         e,
         `Expecting array type instead of ${t1.kind}`
@@ -2500,7 +2508,9 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
 
     unifySimples(g, e, t2, BuiltinTypes.Integer);
 
-    return BuiltinTypes.Integer;
+    return t1.kind === "nullable"
+      ? BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer)
+      : BuiltinTypes.Integer;
   }
 
   // (T[], T) -> int | null

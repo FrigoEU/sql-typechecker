@@ -2129,6 +2129,31 @@ $$ LANGUAGE sql;
   );
 });
 
+test("array_length", () => {
+  expectReturnType(
+    "create table testje ( id int not null);",
+    `
+CREATE FUNCTION myselect( names text[] DEFAULT '{NULL}' ) RETURNS SETOF RECORD AS $$
+  SELECT id, array_length(names, 1) AS len
+    FROM testje
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "id" },
+          type: BuiltinTypes.Integer,
+        },
+        {
+          name: { name: "len" },
+          type: BuiltinTypes.Integer,
+        },
+      ],
+    }
+  );
+});
+
 test("find_unused_vars", () => {
   expectThrowLike(
     "create table testje ( id int not null);",

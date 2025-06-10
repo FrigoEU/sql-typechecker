@@ -2475,6 +2475,34 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     }
   }
 
+  // (T[], int) -> int
+  if (eqQNames(e.function, { name: "array_length" })) {
+    if (e.args.length !== 2) {
+      throw new InvalidArguments(e, e.function, argTypes);
+    }
+
+    const t1 = toSimpleT(argTypes[0]);
+    if (t1 === null) {
+      throw new CantReduceToSimpleT(e.args[0], argTypes[0]);
+    }
+
+    if (t1.kind !== "array") {
+      throw new TypecheckerError(
+        e,
+        `Expecting array type instead of ${t1.kind}`
+      );
+    }
+
+    const t2 = toSimpleT(argTypes[1]);
+    if (t2 === null) {
+      throw new CantReduceToSimpleT(e.args[1], argTypes[1]);
+    }
+
+    unifySimples(g, e, t2, BuiltinTypes.Integer);
+
+    return BuiltinTypes.Integer;
+  }
+
   // (T[], T) -> int | null
   if (eqQNames(e.function, { name: "array_position" })) {
     if (e.args.length !== 2) {
@@ -2494,7 +2522,6 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     }
 
     if (t1.kind !== "array") {
-      debugger;
       throw new TypecheckerError(
         e,
         `Expecting array type instead of ${t1.kind}`

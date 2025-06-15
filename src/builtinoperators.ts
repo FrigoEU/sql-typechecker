@@ -905,8 +905,8 @@ const builtinoperatorsFromSchema: binaryOp[] = [
   {
     name: { schema: "pg_catalog", name: "+" },
     left: { kind: "scalar", name: { name: "interval" } },
-    right: { kind: "scalar", name: { name: "timestamp without time zone" } },
-    result: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    right: { kind: "scalar", name: { name: "timestamp with time zone" } },
+    result: { kind: "scalar", name: { name: "timestamp with time zone" } },
     description: "add",
   },
   {
@@ -1002,9 +1002,9 @@ const builtinoperatorsFromSchema: binaryOp[] = [
   },
   {
     name: { schema: "pg_catalog", name: "+" },
-    left: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    left: { kind: "scalar", name: { name: "timestamp with time zone" } },
     right: { kind: "scalar", name: { name: "interval" } },
-    result: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    result: { kind: "scalar", name: { name: "timestamp with time zone" } },
     description: "add",
   },
   {
@@ -1269,15 +1269,15 @@ const builtinoperatorsFromSchema: binaryOp[] = [
   },
   {
     name: { schema: "pg_catalog", name: "-" },
-    left: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    left: { kind: "scalar", name: { name: "timestamp with time zone" } },
     right: { kind: "scalar", name: { name: "interval" } },
-    result: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    result: { kind: "scalar", name: { name: "timestamp with time zone" } },
     description: "subtract",
   },
   {
     name: { schema: "pg_catalog", name: "-" },
-    left: { kind: "scalar", name: { name: "timestamp without time zone" } },
-    right: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    left: { kind: "scalar", name: { name: "timestamp with time zone" } },
+    right: { kind: "scalar", name: { name: "timestamp with time zone" } },
     result: { kind: "scalar", name: { name: "interval" } },
     description: "subtract",
   },
@@ -1857,8 +1857,8 @@ const builtinoperatorsFromSchema: binaryOp[] = [
   },
   {
     name: { schema: "pg_catalog", name: "<" },
-    left: { kind: "scalar", name: { name: "timestamp without time zone" } },
-    right: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    left: { kind: "scalar", name: { name: "timestamp with time zone" } },
+    right: { kind: "scalar", name: { name: "timestamp with time zone" } },
     result: { kind: "scalar", name: { name: "boolean" } },
     description: "less than",
   },
@@ -2501,8 +2501,8 @@ const builtinoperatorsFromSchema: binaryOp[] = [
   },
   {
     name: { schema: "pg_catalog", name: "<=" },
-    left: { kind: "scalar", name: { name: "timestamp without time zone" } },
-    right: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    left: { kind: "scalar", name: { name: "timestamp with time zone" } },
+    right: { kind: "scalar", name: { name: "timestamp with time zone" } },
     result: { kind: "scalar", name: { name: "boolean" } },
     description: "less than or equal",
   },
@@ -2886,8 +2886,8 @@ const builtinoperatorsFromSchema: binaryOp[] = [
   },
   {
     name: { schema: "pg_catalog", name: "<>" },
-    left: { kind: "scalar", name: { name: "timestamp without time zone" } },
-    right: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    left: { kind: "scalar", name: { name: "timestamp with time zone" } },
+    right: { kind: "scalar", name: { name: "timestamp with time zone" } },
     result: { kind: "scalar", name: { name: "boolean" } },
     description: "not equal",
   },
@@ -3453,8 +3453,8 @@ const builtinoperatorsFromSchema: binaryOp[] = [
   },
   {
     name: { schema: "pg_catalog", name: "=" },
-    left: { kind: "scalar", name: { name: "timestamp without time zone" } },
-    right: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    left: { kind: "scalar", name: { name: "timestamp with time zone" } },
+    right: { kind: "scalar", name: { name: "timestamp with time zone" } },
     result: { kind: "scalar", name: { name: "boolean" } },
     description: "equal",
   },
@@ -3859,8 +3859,8 @@ const builtinoperatorsFromSchema: binaryOp[] = [
   },
   {
     name: { schema: "pg_catalog", name: ">" },
-    left: { kind: "scalar", name: { name: "timestamp without time zone" } },
-    right: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    left: { kind: "scalar", name: { name: "timestamp with time zone" } },
+    right: { kind: "scalar", name: { name: "timestamp with time zone" } },
     result: { kind: "scalar", name: { name: "boolean" } },
     description: "greater than",
   },
@@ -4251,8 +4251,8 @@ const builtinoperatorsFromSchema: binaryOp[] = [
   },
   {
     name: { schema: "pg_catalog", name: ">=" },
-    left: { kind: "scalar", name: { name: "timestamp without time zone" } },
-    right: { kind: "scalar", name: { name: "timestamp without time zone" } },
+    left: { kind: "scalar", name: { name: "timestamp with time zone" } },
+    right: { kind: "scalar", name: { name: "timestamp with time zone" } },
     result: { kind: "scalar", name: { name: "boolean" } },
     description: "greater than or equal",
   },

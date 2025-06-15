@@ -2604,7 +2604,12 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       e,
       argTypes,
       allNumericBuiltinTypes
-        .concat([BuiltinTypes.Date, BuiltinTypes.Time, BuiltinTypes.Timestamp])
+        .concat([
+          BuiltinTypes.Date,
+          BuiltinTypes.Time,
+          BuiltinTypes.Timestamp,
+          BuiltinTypes.TimestampTz,
+        ])
         .flatMap((t) => [{ expectedArgs: [t], returnT: nullify(t) }])
     );
   }

@@ -1221,7 +1221,7 @@ SELECT CURRENT_TIMESTAMP
 from testje
 $$ LANGUAGE sql;
 `,
-    { kind: "record", fields: [{ name: null, type: BuiltinTypes.Timestamp }] }
+    { kind: "record", fields: [{ name: null, type: BuiltinTypes.TimestampTz }] }
   );
 });
 

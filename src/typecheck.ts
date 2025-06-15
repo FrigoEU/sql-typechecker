@@ -2817,12 +2817,13 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     } else if (e.keyword === "current_date") {
       return BuiltinTypes.Date;
     } else if (
-      e.keyword === "current_role" ||
-      e.keyword === "current_timestamp" ||
       e.keyword === "localtimestamp" ||
-      e.keyword === "localtime"
+      e.keyword === "localtime" ||
+      e.keyword === "current_role" // TODO
     ) {
       return BuiltinTypes.Timestamp;
+    } else if (e.keyword === "current_timestamp") {
+      return BuiltinTypes.TimestampTz;
     } else if (
       e.keyword === "current_catalog" ||
       e.keyword === "current_schema" ||

@@ -258,7 +258,7 @@ $$${f.code}$$ LANGUAGE ${f.language};
         )});`
       : `
 const row = res.rows[0];
-if (row.some(f => f !== null)){
+if (row && row.some(f => f !== null)){
   return ${genFunctionResDeserialization(f.returns, "row")}
 } else {
   return null;

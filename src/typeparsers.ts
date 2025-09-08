@@ -45,5 +45,8 @@ export function registerSqlTypecheckerTypeParsers() {
   types.setTypeParser(1008 as TypeId, (v) => v); // array string?
   types.setTypeParser(1009 as TypeId, (v) => v); // array string?
 
+  types.setTypeParser(types.builtins.JSON, (v) => v);
+  types.setTypeParser(types.builtins.JSONB, (v) => v);
+
   return types;
 }

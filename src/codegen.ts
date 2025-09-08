@@ -136,7 +136,7 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
     } else if (t.name.name === "interval") {
       return `Duration.todo(${literalVar})`;
     } else if (t.name.name === "jsonb" || t.name.name === "json") {
-      return `JSON.parse(${literalVar})`;
+      return literalVar;
     } else if (t.name.name === "money") {
       return `currency(${literalVar})`;
     } else if (

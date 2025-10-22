@@ -2344,7 +2344,7 @@ $$ LANGUAGE sql;
   );
 });
 
-test.only("casting int domain to text", () => {
+test("casting int domain to text", () => {
   expectReturnType(
     `
     create domain my_id AS int;
@@ -2362,6 +2362,46 @@ $$ LANGUAGE sql;
         {
           name: { name: "id" },
           type: BuiltinTypes.Text,
+        },
+      ],
+    }
+  );
+});
+
+test("union with domains", () => {
+  expectReturnType(
+    `
+    create domain my_id AS int;
+    create table testje ( id my_id not null);
+`,
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+    SELECT id
+      FROM testje 
+     UNION
+    SELECT id
+      FROM testje
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "id" },
+          type: {
+            domain: {
+              realtype: {
+                kind: "scalar",
+                name: {
+                  name: "integer",
+                },
+              },
+            },
+            kind: "scalar",
+            name: {
+              name: "my_id",
+            },
+          },
         },
       ],
     }

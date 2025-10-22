@@ -1,6 +1,6 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.117",
+  "version": "0.0.118",
   "main": "out/typeparsers.js",
   "files": ["out/**"],
   "bin": "out/cli.js",
@@ -19,6 +19,7 @@
     "start": "npm run build && node --enable-source-maps ./out/cli.js -d ./sample -o ./sample/out",
     "extendedexample": "npm run build && node --enable-source-maps ./out/cli.js -d ./extendedexample -o ./extendedexample/out",
     "test": "tsx --test-reporter=spec --test 'test/test.ts'",
+    "test_only": "tsx --test-reporter=spec --test --test-only 'test/test.ts'",
     "test_debug": "node --experimental-transform-types --inspect-brk --test 'test/test.ts'"
   },
   "devDependencies": {

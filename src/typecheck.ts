@@ -656,6 +656,10 @@ function findMatchingCast(
     return { source: from, target: to, type: "implicit" };
   }
 
+  if (foundDomainFrom && foundDomainFrom.realtype.kind === "scalar") {
+    return findMatchingCast(g, [], foundDomainFrom.realtype, to, type);
+  }
+
   if (eqQNames(from.name, to.name)) {
     return { source: from, target: to, type: "implicit" };
   } else {

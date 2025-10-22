@@ -2307,3 +2307,63 @@ $$ LANGUAGE sql;
     }
   );
 });
+
+test("&& OK", () => {
+  expectReturnType(
+    "create table testje ( id int not null);",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+    SELECT id
+      FROM testje
+     WHERE '{}'::int[] && '{}'::int[]
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "id" },
+          type: BuiltinTypes.Integer,
+        },
+      ],
+    }
+  );
+});
+
+test("&& error: strict", () => {
+  expectThrowLike(
+    "create table testje ( id int not null);",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+    SELECT id
+      FROM testje 
+     WHERE '{}'::text[] && '{}'::int[]
+$$ LANGUAGE sql;
+`,
+    "TypeMismatch"
+  );
+});
+
+test.only("casting int domain to text", () => {
+  expectReturnType(
+    `
+    create domain my_id AS int;
+    create table testje ( id my_id not null);
+`,
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+    SELECT id::text AS id
+      FROM testje 
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "id" },
+          type: BuiltinTypes.Text,
+        },
+      ],
+    }
+  );
+});

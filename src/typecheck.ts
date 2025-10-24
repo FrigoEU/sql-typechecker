@@ -152,6 +152,14 @@ export const BuiltinTypes = {
     kind: "scalar",
     name: { name: "timestamp without time zone" },
   },
+  TimestampRange: {
+    kind: "scalar",
+    name: { name: "tsrange" },
+  },
+  TimestampMultiRange: {
+    kind: "scalar",
+    name: { name: "tsmultirange" },
+  },
   TimestampTz: {
     kind: "scalar",
     name: { name: "timestamp with time zone" },
@@ -2152,6 +2160,16 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
     return BuiltinTypes.Boolean;
   }
 
+  if (
+    e.op === "-" &&
+    t1.kind === "scalar" &&
+    eqQNames(t1.name, BuiltinTypes.TimestampMultiRange.name) &&
+    t2.kind === "scalar" &&
+    eqQNames(t2.name, BuiltinTypes.TimestampMultiRange.name)
+  ) {
+    return BuiltinTypes.TimestampMultiRange;
+  }
+
   if (e.op === "IN" || e.op === "NOT IN") {
     // TODO use elabAnyCall?
     // No generics, so special casing this operator
@@ -2355,6 +2373,28 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       argTypes,
       [BuiltinTypes.Text],
       BuiltinTypes.Integer
+    );
+  }
+
+  if (eqQNames(e.function, { name: "tsrange" })) {
+    // timestamp -> timestamp -> tsrange
+    return unifyCallGeneral(
+      g,
+      e,
+      argTypes,
+      [BuiltinTypes.Timestamp, BuiltinTypes.Timestamp],
+      BuiltinTypes.TimestampRange
+    );
+  }
+
+  if (eqQNames(e.function, { name: "range_agg" })) {
+    // timestamp  -> tsrange
+    return unifyCallGeneral(
+      g,
+      e,
+      argTypes,
+      [BuiltinTypes.TimestampRange],
+      BuiltinTypes.TimestampMultiRange
     );
   }
 

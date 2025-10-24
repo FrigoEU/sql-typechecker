@@ -2477,3 +2477,44 @@ $$ LANGUAGE sql;
     }
   );
 });
+
+test.only("tsmultirange", () => {
+  expectReturnType(
+    `
+    create table testje ( id int8 not null, name text NOT NULL, date date NOT NULL, time time NOT NULL, interval interval NOT NULL);
+`,
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  select name,
+    range_agg(
+      tsrange(
+        date + time,
+        date + time + interval
+      )
+    )::tsmultirange
+    - 
+    range_agg(
+      tsrange(
+        date + time,
+        date + time + interval
+      )
+    )::tsmultirange as ranges
+  from testje
+  group by name
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "name" },
+          type: BuiltinTypes.Text,
+        },
+        {
+          name: { name: "ranges" },
+          type: BuiltinTypes.TimestampMultiRange,
+        },
+      ],
+    }
+  );
+});

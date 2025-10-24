@@ -1,15 +1,17 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.123",
+  "version": "0.0.124",
   "main": "out/typeparsers.js",
   "files": ["out/**"],
   "bin": "out/cli.js",
   "dependencies": {
-    "@js-joda/core": "^4.3.1",
     "lodash-es": "^4.17.21",
     "pg": "^8.7.3",
     "postgres-range": "^1.1.2",
     "trader-pgsql-ast-parser": "10.5.9"
+  },
+  "peerDependencies": {
+    "@js-joda/core": "^4.3.x"
   },
   "scripts": {
     "check": "tsc -p . --noEmit",

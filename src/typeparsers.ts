@@ -1,6 +1,7 @@
 import { types } from "pg";
 import { TypeId } from "pg-types";
 import range from "postgres-range";
+import { LocalDateTime } from "@js-joda/core";
 
 // We basically disable most parsing by 'pg', so we can do the parsing
 // ourselves in the generated code
@@ -46,4 +47,41 @@ export function registerSqlTypecheckerTypeParsers() {
   types.setTypeParser(1009 as TypeId, (v) => v); // array string?
 
   return types;
+}
+
+export function parseTsmultirange(multirangeStr: string) {
+  if (multirangeStr === "{}") {
+    return []; // Return an empty array for an empty multirange.
+  }
+
+  // Remove the outer curly braces and split into individual range strings.
+  const content = multirangeStr.substring(1, multirangeStr.length - 1);
+
+  // Regex to capture each range, including brackets and quoted timestamps.
+  const rangeRegex = /(\[|\()(\"[^\"]*\"|),(\"[^\"]*\"|)(\]|\))/g;
+  const ranges = [];
+  let match;
+
+  while ((match = rangeRegex.exec(content)) !== null) {
+    const [_, startBracket, startStr, endStr, endBracket] = match;
+
+    // Remove double quotes and create Date objects.
+    console.log(startStr);
+    const start = startStr
+      ? LocalDateTime.parse(startStr.replace(/"/g, "").replace(" ", "T"))
+      : null;
+    console.log(endStr);
+    const end = endStr
+      ? LocalDateTime.parse(endStr.replace(/"/g, "").replace(" ", "T"))
+      : null;
+    const bounds = `${startBracket}${endBracket}`;
+
+    ranges.push({
+      start,
+      end,
+      bounds,
+    });
+  }
+
+  return ranges;
 }

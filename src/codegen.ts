@@ -68,6 +68,8 @@ export function showTypeAsTypescriptType(t: Type): string {
         return "Duration";
       } else if (t.name.name === "money") {
         return "currency";
+      } else if (t.name.name === "tsmultirange") {
+        return "{start: LocalDateTime, end: LocalDateTime, bounds: string}[]";
       } else if (t.isEnum) {
         return "types." + t.name.name;
       } else {
@@ -139,6 +141,8 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
       return literalVar;
     } else if (t.name.name === "money") {
       return `currency(${literalVar})`;
+    } else if (t.name.name === "tsmultirange") {
+      return `parseTsmultirange(${literalVar})`;
     } else if (
       t.name.name === "bigint" ||
       t.name.name === "smallint" ||
@@ -311,6 +315,7 @@ import type { Pool } from "pg";
 import { ZonedDateTime, Instant, LocalDate, LocalTime, LocalDateTime, Duration} from "@js-joda/core";
 import {parse as parseArray} from "postgres-array";
 import currency from "currency.js";
+import {parseTsmultirange} from "sql-typechecker";
 `;
 }
 

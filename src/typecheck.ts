@@ -866,7 +866,8 @@ function doCreateView(
       decls: [],
     },
     // Bug in parser
-    Array.isArray(s.query) ? s.query[0] : s.query
+    Array.isArray(s.query) ? s.query[0] : s.query,
+    null
   );
   if (sel.kind === "void") {
     throw new ErrorWithLocation(s._location, "View returns void");
@@ -911,7 +912,8 @@ function deriveNameFromExpr(expr: Expr): Name | null {
 export function elabSelect(
   g: Global,
   c: Context,
-  s: SelectStatement
+  s: SelectStatement,
+  columnNames: Name[] | null
 ): RecordT | VoidT {
   if (s.type === "select") {
     const newC = ((): Context => {
@@ -1009,8 +1011,8 @@ export function elabSelect(
       fields,
     };
   } else if (s.type === "union" || s.type === "union all") {
-    const typeL = elabSelect(g, c, s.left);
-    const typeR = elabSelect(g, c, s.right);
+    const typeL = elabSelect(g, c, s.left, null);
+    const typeR = elabSelect(g, c, s.right, null);
     if (typeL.kind === "void") {
       throw new KindMismatch(
         s.left,
@@ -1028,13 +1030,14 @@ export function elabSelect(
     return unifyRecords(g, s, typeL, typeR);
   } else if (s.type === "values") {
     const typesPerRow: RecordT[] = s.values.map((exprs) => {
-      const fields = exprs.map((exp) => {
+      const fields = exprs.map((exp, i) => {
         const t_ = elabExpr(g, c, exp);
         const t = toSimpleT(t_);
         if (t === null) {
           throw new CantReduceToSimpleT(exp, t_);
         } else {
-          return { name: null, type: t, _expr: exp };
+          const colName = (columnNames ? columnNames[i] : null) || null;
+          return { name: colName, type: t, _expr: exp };
         }
       });
       return {
@@ -1116,7 +1119,7 @@ function elabInsert(
       })
     : insertingInto.rel.fields;
 
-  const insertT = elabSelect(g, c, s.insert);
+  const insertT = elabSelect(g, c, s.insert, null);
 
   if (insertT.kind === "void") {
     throw new ColumnsMismatch(s.insert, {
@@ -1801,7 +1804,7 @@ function doSingleFrom(
 ): Joined[] {
   function getJoined(f: From): Joined {
     if (f.type === "statement") {
-      const t = elabSelect(g, c, f.statement);
+      const t = elabSelect(g, c, f.statement, f.columnNames || null);
       if (t.kind === "void") {
         throw new KindMismatch(
           f.statement,
@@ -2749,7 +2752,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
   } else if (e.type === "call") {
     return elabCall(g, c, e);
   } else if (e.type === "array select") {
-    const selectType = elabSelect(g, c, e.select);
+    const selectType = elabSelect(g, c, e.select, null);
     if (selectType.kind === "void") {
       throw new KindMismatch(
         e.select,
@@ -2912,7 +2915,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     e.type === "with" ||
     e.type === "with recursive"
   ) {
-    const t = elabSelect(g, c, e);
+    const t = elabSelect(g, c, e, null);
     if (t.kind === "void") {
       throw new KindMismatch(
         e,

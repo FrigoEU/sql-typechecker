@@ -2407,3 +2407,73 @@ $$ LANGUAGE sql;
     }
   );
 });
+
+test("select from values", () => {
+  expectReturnType(
+    `
+    create table testje ( id int8 not null);
+`,
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  SELECT weekday, date
+    FROM (VALUES
+    ('Monday',    '0 days'::interval),
+    ('Tuesday',   '1 days'::interval),
+    ('Wednesday', '2 days'::interval),
+    ('Thursday',  '3 days'::interval),
+    ('Friday',    '4 days'::interval),
+    ('Saturday',  '5 days'::interval),
+    ('Sunday',    '6 days'::interval)
+  ) AS t(weekday, date)
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "weekday" },
+          type: BuiltinTypes.Text,
+        },
+        {
+          name: { name: "date" },
+          type: BuiltinTypes.Interval,
+        },
+      ],
+    }
+  );
+});
+
+test("select from values", () => {
+  expectReturnType(
+    `
+    create table testje ( id int8 not null);
+`,
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  SELECT weekday, date
+    FROM (VALUES
+    ('Monday',    '0 days'::interval),
+    ('Tuesday',   '1 days'::interval),
+    ('Wednesday', '2 days'::interval),
+    ('Thursday',  '3 days'::interval),
+    ('Friday',    '4 days'::interval),
+    ('Saturday',  '5 days'::interval),
+    ('Sunday',    '6 days'::interval)
+  ) AS t(weekday, date)
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "weekday" },
+          type: BuiltinTypes.Text,
+        },
+        {
+          name: { name: "date" },
+          type: BuiltinTypes.Interval,
+        },
+      ],
+    }
+  );
+});

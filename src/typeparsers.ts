@@ -49,7 +49,9 @@ export function registerSqlTypecheckerTypeParsers() {
   return types;
 }
 
-export function parseTsmultirange(multirangeStr: string) {
+export function parseTsmultirange(
+  multirangeStr: string
+): { start: LocalDateTime; end: LocalDateTime; bounds: string }[] {
   if (multirangeStr === "{}") {
     return []; // Return an empty array for an empty multirange.
   }
@@ -66,12 +68,13 @@ export function parseTsmultirange(multirangeStr: string) {
     const [_, startBracket, startStr, endStr, endBracket] = match;
 
     // Remove double quotes and create Date objects.
-    const start = startStr
-      ? LocalDateTime.parse(startStr.replace(/"/g, "").replace(" ", "T"))
-      : null;
-    const end = endStr
-      ? LocalDateTime.parse(endStr.replace(/"/g, "").replace(" ", "T"))
-      : null;
+    if (startStr === undefined || endStr === undefined) {
+      throw new Error("Invalid tsmultirange");
+    }
+    const start = LocalDateTime.parse(
+      startStr.replace(/"/g, "").replace(" ", "T")
+    );
+    const end = LocalDateTime.parse(endStr.replace(/"/g, "").replace(" ", "T"));
     const bounds = `${startBracket}${endBracket}`;
 
     ranges.push({

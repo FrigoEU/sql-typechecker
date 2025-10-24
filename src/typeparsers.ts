@@ -66,11 +66,9 @@ export function parseTsmultirange(multirangeStr: string) {
     const [_, startBracket, startStr, endStr, endBracket] = match;
 
     // Remove double quotes and create Date objects.
-    console.log(startStr);
     const start = startStr
       ? LocalDateTime.parse(startStr.replace(/"/g, "").replace(" ", "T"))
       : null;
-    console.log(endStr);
     const end = endStr
       ? LocalDateTime.parse(endStr.replace(/"/g, "").replace(" ", "T"))
       : null;

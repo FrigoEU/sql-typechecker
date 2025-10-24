@@ -7,7 +7,6 @@ esbuild
     bundle: true,
     sourcemap: true,
     platform: "node",
-    format: "esm",
     outdir: "out",
     banner: {
       js: `#!/usr/bin/env node`,

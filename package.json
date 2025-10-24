@@ -11,7 +11,7 @@
     "trader-pgsql-ast-parser": "10.5.9"
   },
   "peerDependencies": {
-    "@js-joda/core": "^4.3.x"
+    "@js-joda/core": "^5.3.x"
   },
   "scripts": {
     "check": "tsc -p . --noEmit",

@@ -2339,6 +2339,11 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     return BuiltinTypes.Integer;
   }
 
+  if (eqQNames(e.function, { name: "tsmultirange" })) {
+    // () -> tsmultirange
+    return BuiltinTypes.TimestampMultiRange;
+  }
+
   if (eqQNames(e.function, { name: "starts_with" })) {
     // string -> string -> boolean
     return unifyCallGeneral(

@@ -2478,7 +2478,7 @@ $$ LANGUAGE sql;
   );
 });
 
-test.only("tsmultirange", () => {
+test("tsmultirange", () => {
   expectReturnType(
     `
     create table testje ( id int8 not null, name text NOT NULL, date date NOT NULL, time time NOT NULL, interval interval NOT NULL);
@@ -2499,6 +2499,34 @@ CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
         date + time + interval
       )
     )::tsmultirange as ranges
+  from testje
+  group by name
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "name" },
+          type: BuiltinTypes.Text,
+        },
+        {
+          name: { name: "ranges" },
+          type: BuiltinTypes.TimestampMultiRange,
+        },
+      ],
+    }
+  );
+});
+
+test("tsmultirange constructor", () => {
+  expectReturnType(
+    `
+    create table testje ( id int8 not null, name text not null);
+`,
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  select name, tsmultirange() as ranges
   from testje
   group by name
 $$ LANGUAGE sql;

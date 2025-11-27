@@ -2344,7 +2344,7 @@ $$ LANGUAGE sql;
   );
 });
 
-test("comparing different domains", () => {
+test("comparing different domains should error", () => {
   expectThrowLike(
     `
     create domain my_id AS int;
@@ -2359,6 +2359,59 @@ CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 $$ LANGUAGE sql;
 `,
     'Can\'t apply operator "=" to my_id and my_other_id'
+  );
+});
+
+test("comparing same domain should be ok", () => {
+  expectReturnType(
+    `
+    create domain my_id AS int;
+    create table testje ( id my_id not null);
+`,
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+    SELECT 1::int as dummy
+      FROM testje 
+     WHERE id = id
+       AND id > id
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "dummy" },
+          type: BuiltinTypes.Integer,
+        },
+      ],
+    }
+  );
+});
+
+test("aggregate function on numeric domain should result in same domain", () => {
+  expectReturnType(
+    `
+    create domain my_id AS int;
+    create table testje ( id my_id not null);
+`,
+    `
+CREATE FUNCTION myselect() RETURNS RECORD AS $$
+    SELECT sum(id) as sum_id
+      FROM testje 
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "sum_id" },
+          type: {
+            kind: "scalar",
+            name: { name: "my_id" },
+          },
+        },
+      ],
+    }
   );
 });
 

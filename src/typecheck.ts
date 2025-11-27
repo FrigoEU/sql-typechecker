@@ -2009,14 +2009,14 @@ export type binaryOp = {
   right: SimpleT;
   result: SimpleT;
   name: QName;
-  description: string;
+  // description: string;
 };
 
 export type unaryOp = {
   operand: SimpleT;
   result: SimpleT;
   name: QName;
-  description: string;
+  // description: string;
 };
 
 function isNotEmpty<A>(a: A | null | undefined): a is A {
@@ -2198,6 +2198,23 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
         result: { kind: "scalar", name: { name: "boolean" } },
         description: "equal",
       }))
+    )
+    .concat(
+      g.domains
+        // For all numeric domain types, we add numeric operators
+        .flatMap((d) => {
+          const numericType = allNumericBuiltinTypes.find((t) =>
+            eqType(t, d.realtype)
+          );
+          if (!isNil(numericType)) {
+            return makeBuiltinBinaryOperatorsForNumericDomain({
+              kind: "scalar" as const,
+              name: d.name,
+            });
+          } else {
+            return [];
+          }
+        })
     )
     .concat(
       g.enums.map((d) => ({
@@ -2604,6 +2621,15 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       { expectedArgs: [BuiltinTypes.Float4], returnT: BuiltinTypes.Double },
       { expectedArgs: [BuiltinTypes.Float8], returnT: BuiltinTypes.Double },
       { expectedArgs: [BuiltinTypes.Money], returnT: BuiltinTypes.Money },
+      // Add all numeric domain types
+      ...g.domains
+        .filter((d) =>
+          allNumericBuiltinTypes.some((t) => eqType(t, d.realtype))
+        )
+        .flatMap((d) => {
+          const asSimpleT = { kind: "scalar" as const, name: d.name };
+          return { expectedArgs: [asSimpleT], returnT: asSimpleT };
+        }),
     ]);
   }
 
@@ -3178,3 +3204,19 @@ function mapPartial<T, U>(
 //   });
 //   return newA.reverse();
 // }
+
+function makeBuiltinBinaryOperatorsForNumericDomain(t: ScalarT): binaryOp[] {
+  const comparisons: binaryOp[] = ["<", "<=", ">", ">="].map((op) => ({
+    name: { schema: "pg_catalog", name: op },
+    left: t,
+    right: t,
+    result: { kind: "scalar", name: { name: "boolean" } },
+  }));
+  const monads: binaryOp[] = ["+", "-", "*", "/", "%"].map((op) => ({
+    name: { schema: "pg_catalog", name: op },
+    left: t,
+    right: t,
+    result: t,
+  }));
+  return comparisons.concat(monads);
+}

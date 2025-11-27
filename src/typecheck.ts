@@ -2009,14 +2009,14 @@ export type binaryOp = {
   right: SimpleT;
   result: SimpleT;
   name: QName;
-  // description: string;
+  description?: string;
 };
 
 export type unaryOp = {
   operand: SimpleT;
   result: SimpleT;
   name: QName;
-  // description: string;
+  description?: string;
 };
 
 function isNotEmpty<A>(a: A | null | undefined): a is A {
@@ -2191,15 +2191,6 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
 
   const found = builtinoperators
     .concat(
-      g.domains.map((d) => ({
-        name: { schema: "pg_catalog", name: "=" },
-        left: { kind: "scalar", name: d.name },
-        right: { kind: "scalar", name: d.name },
-        result: { kind: "scalar", name: { name: "boolean" } },
-        description: "equal",
-      }))
-    )
-    .concat(
       g.domains
         // For all numeric domain types, we add numeric operators
         .flatMap((d) => {
@@ -2217,8 +2208,35 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
         })
     )
     .concat(
+      g.domains.map((d) => ({
+        name: { schema: "pg_catalog", name: "=" },
+        left: { kind: "scalar", name: d.name },
+        right: { kind: "scalar", name: d.name },
+        result: { kind: "scalar", name: { name: "boolean" } },
+        description: "equal",
+      }))
+    )
+    .concat(
+      g.domains.map((d) => ({
+        name: { schema: "pg_catalog", name: "<>" },
+        left: { kind: "scalar", name: d.name },
+        right: { kind: "scalar", name: d.name },
+        result: { kind: "scalar", name: { name: "boolean" } },
+        description: "equal",
+      }))
+    )
+    .concat(
       g.enums.map((d) => ({
         name: { schema: "pg_catalog", name: "=" },
+        left: { kind: "scalar", name: d.name },
+        right: { kind: "scalar", name: d.name },
+        result: { kind: "scalar", name: { name: "boolean" } },
+        description: "equal",
+      }))
+    )
+    .concat(
+      g.enums.map((d) => ({
+        name: { schema: "pg_catalog", name: "<>" },
         left: { kind: "scalar", name: d.name },
         right: { kind: "scalar", name: d.name },
         result: { kind: "scalar", name: { name: "boolean" } },

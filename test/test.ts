@@ -2373,6 +2373,7 @@ CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
     SELECT 1::int as dummy
       FROM testje 
      WHERE id = id
+       AND id <> id
        AND id > id
 $$ LANGUAGE sql;
 `,

@@ -659,18 +659,16 @@ function findMatchingCast(
   if (
     foundDomainFrom &&
     foundDomainFrom.realtype.kind === "scalar" &&
-    eqQNames(foundDomainFrom.realtype.name, to.name)
+    eqQNames(foundDomainFrom.realtype.name, to.name) &&
+    type === "explicit"
   ) {
+    // domain(int)::int
     return { source: from, target: to, type: "implicit" };
   }
 
   if (eqQNames(from.name, to.name)) {
     return { source: from, target: to, type: "implicit" };
   } else {
-    if (foundDomainFrom && foundDomainFrom.realtype.kind === "scalar") {
-      return findMatchingCast(g, [], foundDomainFrom.realtype, to, type);
-    }
-
     const halfMatching = casts.filter(
       (c) =>
         eqQNames(c.source.name, from.name) &&

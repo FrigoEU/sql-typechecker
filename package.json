@@ -1,6 +1,6 @@
 {
   "name": "sql-typechecker",
-  "version": "0.0.130",
+  "version": "0.0.131",
   "main": "out/typeparsers.ts",
   "files": ["out/**"],
   "bin": "out/cli.js",
@@ -22,7 +22,7 @@
     "extendedexample": "npm run build && node --enable-source-maps ./out/cli.js -d ./extendedexample -o ./extendedexample/out",
     "test": "tsx --test-reporter=spec --test 'test/test.ts'",
     "test_only": "tsx --test-reporter=spec --test --test-only 'test/test.ts'",
-    "test_debug": "node --experimental-transform-types --inspect-brk --test 'test/test.ts'"
+    "test_debug": "tsx --test-reporter=spec --test --test-only --inspect-brk 'test/test.ts'"
   },
   "devDependencies": {
     "@types/lodash-es": "^4.14.182",

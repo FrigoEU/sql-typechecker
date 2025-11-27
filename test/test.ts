@@ -2344,6 +2344,24 @@ $$ LANGUAGE sql;
   );
 });
 
+test("comparing different domains", () => {
+  expectThrowLike(
+    `
+    create domain my_id AS int;
+    create domain my_other_id AS int;
+    create table testje ( id my_id not null, other_id my_other_id not null);
+`,
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+    SELECT 1
+      FROM testje 
+     WHERE id = other_id
+$$ LANGUAGE sql;
+`,
+    'Can\'t apply operator "=" to my_id and my_other_id'
+  );
+});
+
 test("casting int domain to text", () => {
   expectReturnType(
     `
@@ -2352,7 +2370,7 @@ test("casting int domain to text", () => {
 `,
     `
 CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
-    SELECT id::text AS id
+    SELECT id::int::text AS id
       FROM testje 
 $$ LANGUAGE sql;
 `,

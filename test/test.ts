@@ -1,7 +1,7 @@
 import { isPlainObject, mapValues, omit } from "lodash-es";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { type Either, Left, Right } from "purify-ts";
+import { type Either, Left, nullable, Right } from "purify-ts";
 import { parse, type Name, type QName } from "trader-pgsql-ast-parser";
 import {
   doCreateFunction,
@@ -422,7 +422,7 @@ test("left join lateral", () => {
 CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT t1.id as id1, t2.id as id2
 FROM testje t1
-JOIN LATERAL
+LEFT JOIN LATERAL
 (SELECT t3.id
    FROM testje t3
   WHERE t3.name = t1.name
@@ -438,7 +438,7 @@ $$ LANGUAGE sql;
         },
         {
           name: { name: "id2" },
-          type: BuiltinTypes.Integer,
+          type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
         },
       ],
     }

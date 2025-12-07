@@ -1810,7 +1810,9 @@ function doSingleFrom(
 ): Joined[] {
   function getJoined(f: From): Joined {
     if (f.type === "statement") {
-      const t = elabSelect(g, c, f.statement, f.columnNames || null);
+      const cWithLateral =
+        f.lateral === true ? mergeJoined(c, currentJoined) : c;
+      const t = elabSelect(g, cWithLateral, f.statement, f.columnNames || null);
       if (t.kind === "void") {
         throw new KindMismatch(
           f.statement,

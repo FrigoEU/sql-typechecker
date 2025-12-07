@@ -415,6 +415,36 @@ $$ LANGUAGE sql;
   );
 });
 
+test("left join lateral", () => {
+  expectReturnType(
+    "create table testje ( id int not null, name text );",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+SELECT t1.id as id1, t2.id as id2
+FROM testje t1
+JOIN LATERAL
+(SELECT t3.id
+   FROM testje t3
+  WHERE t3.name = t1.name
+) AS t2 ON TRUE
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "id1" },
+          type: BuiltinTypes.Integer,
+        },
+        {
+          name: { name: "id2" },
+          type: BuiltinTypes.Integer,
+        },
+      ],
+    }
+  );
+});
+
 test("ambiguousIdentifier", () => {
   expectThrowLike(
     "create table testje ( id int not null, name text );",

@@ -83,7 +83,7 @@ function buildCastIndex(g: Global): CastIndex {
 }
 ```
 
-### 3. `checkType` does a linear scan of `Object.values(BuiltinTypes)` on every call
+### 3. `checkType` does a linear scan of `Object.values(BuiltinTypes)` on every call ✅ Done
 
 **Where**: `checkType` (~line 436)
 

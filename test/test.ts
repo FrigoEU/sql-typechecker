@@ -2649,19 +2649,19 @@ $$ LANGUAGE sql;
   );
 });
 
-// test("cast wrong to enum", () => {
-//   expectThrowLike(
-//     `
-//     CREATE TYPE my_enum AS ENUM ('1', '2');
-//     create table testje ( id int8 not null, the_enum my_enum not null);
-// `,
-//     `
-// CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
-//   select 1 as dummy
-//     from testje
-//     where the_enum = 'incorrect'::my_enum
-// $$ LANGUAGE sql;
-// `,
-//     "Can't cast value 'incorrect' to enum my_enum"
-//   );
-// });
+test.skip("cast wrong to enum", () => {
+  expectThrowLike(
+    `
+    CREATE TYPE my_enum AS ENUM ('1', '2');
+    create table testje ( id int8 not null, the_enum my_enum not null);
+`,
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  select 1 as dummy
+    from testje
+    where the_enum = 'incorrect'::my_enum
+$$ LANGUAGE sql;
+`,
+    "Can't cast value 'incorrect' to enum my_enum"
+  );
+});

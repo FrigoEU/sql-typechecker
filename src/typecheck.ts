@@ -186,6 +186,10 @@ export const AnyScalar: AnyScalarT = {
   kind: "anyscalar",
 };
 
+const builtinTypeNames = new Set(
+  Object.values(BuiltinTypes).map((v) => v.name.name.toLowerCase())
+);
+
 const allNumericBuiltinTypes: ScalarT[] = [
   BuiltinTypes.Smallint,
   BuiltinTypes.Integer,
@@ -824,11 +828,7 @@ function checkType(
     };
   }
 
-  const builtintype = Object.values(BuiltinTypes)
-    .map((v) => v.name.name)
-    .find((b) => b.toLowerCase() === name);
-
-  if (builtintype) {
+  if (builtinTypeNames.has(name)) {
     return {
       kind: "scalar",
       name: { _location: l, name: name },

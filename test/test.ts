@@ -1187,6 +1187,27 @@ $$ LANGUAGE sql;
   );
 });
 
+test("Max on nullable", () => {
+  expectReturnType(
+    "create table testje ( id int not null, my_date date);",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+      SELECT MAX(my_date)
+      from testje
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "max" },
+          type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Date),
+        },
+      ],
+    }
+  );
+});
+
 test("Coalesce", () => {
   expectReturnType(
     "create table testje ( id int not null, name text);",

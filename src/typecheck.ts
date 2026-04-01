@@ -743,7 +743,10 @@ function unifyCallGeneral(
     if (simplifiedArg === null) {
       return new CantReduceToSimpleT(call.args[i], arg);
     }
-    unifySimplesOrThrow(g, call, simplifiedArg, expectedArg);
+    const err = unifySimples(g, call, simplifiedArg, expectedArg);
+    if (err instanceof ErrorWithLocation) {
+      return err;
+    }
   }
   return returnT;
 }

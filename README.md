@@ -116,7 +116,7 @@ Note `types.customer_id`, declared as branded type:
 ```typescript
 // types.ts
 export type customer_id = number & { readonly __tag: "customer_id" };
-```;
+```
 
 ## Project status
 Is this project finished? No, quite a few functions, syntax elements, etc., are not implemented yet. It has some rough edges, and performance can also be significantly improved.

@@ -6,7 +6,7 @@ Fix obvious performance problems in `src/typecheck.ts`. The typechecker rebuilds
 
 ## Problems and fixes
 
-### 1. `elabBinaryOp` rebuilds the full operator list on every call
+### 1. `elabBinaryOp` rebuilds the full operator list on every call ✅ Done
 
 **Where**: `elabBinaryOp` (~line 2262)
 

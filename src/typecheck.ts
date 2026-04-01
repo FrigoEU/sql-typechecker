@@ -216,6 +216,77 @@ function getCastIndex(g: Global): CastIndex {
   return index;
 }
 
+type OperatorIndex = Map<string, binaryOp[]>;
+const operatorIndexCache = new WeakMap<Global, OperatorIndex>();
+
+function getOperatorIndex(g: Global): OperatorIndex {
+  const cached = operatorIndexCache.get(g);
+  if (cached) return cached;
+
+  const allOps: binaryOp[] = builtinoperators
+    .concat(
+      g.domains.flatMap((d) => {
+        const numericType = allNumericBuiltinTypes.find((t) =>
+          eqType(t, d.realtype)
+        );
+        if (!isNil(numericType)) {
+          return makeBuiltinBinaryOperatorsForNumericDomain({
+            kind: "scalar" as const,
+            name: d.name,
+          });
+        } else {
+          return [];
+        }
+      })
+    )
+    .concat(
+      g.domains.map((d) => ({
+        name: { schema: "pg_catalog", name: "=" },
+        left: { kind: "scalar" as const, name: d.name },
+        right: { kind: "scalar" as const, name: d.name },
+        result: { kind: "scalar" as const, name: { name: "boolean" } },
+        description: "equal",
+      }))
+    )
+    .concat(
+      g.domains.map((d) => ({
+        name: { schema: "pg_catalog", name: "<>" },
+        left: { kind: "scalar" as const, name: d.name },
+        right: { kind: "scalar" as const, name: d.name },
+        result: { kind: "scalar" as const, name: { name: "boolean" } },
+        description: "equal",
+      }))
+    )
+    .concat(
+      g.enums.map((d) => ({
+        name: { schema: "pg_catalog", name: "=" },
+        left: { kind: "scalar" as const, name: d.name },
+        right: { kind: "scalar" as const, name: d.name },
+        result: { kind: "scalar" as const, name: { name: "boolean" } },
+        description: "equal",
+      }))
+    )
+    .concat(
+      g.enums.map((d) => ({
+        name: { schema: "pg_catalog", name: "<>" },
+        left: { kind: "scalar" as const, name: d.name },
+        right: { kind: "scalar" as const, name: d.name },
+        result: { kind: "scalar" as const, name: { name: "boolean" } },
+        description: "equal",
+      }))
+    );
+
+  const index: OperatorIndex = new Map();
+  for (const op of allOps) {
+    const key = op.name.name.toLowerCase();
+    const existing = index.get(key);
+    if (existing) existing.push(op);
+    else index.set(key, [op]);
+  }
+  operatorIndexCache.set(g, index);
+  return index;
+}
+
 const allNumericBuiltinTypes: ScalarT[] = [
   BuiltinTypes.Smallint,
   BuiltinTypes.Integer,
@@ -2262,70 +2333,10 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
     return BuiltinTypes.Boolean;
   }
 
-  const found = builtinoperators
-    .concat(
-      g.domains
-        // For all numeric domain types, we add numeric operators
-        .flatMap((d) => {
-          const numericType = allNumericBuiltinTypes.find((t) =>
-            eqType(t, d.realtype)
-          );
-          if (!isNil(numericType)) {
-            return makeBuiltinBinaryOperatorsForNumericDomain({
-              kind: "scalar" as const,
-              name: d.name,
-            });
-          } else {
-            return [];
-          }
-        })
-    )
-    .concat(
-      g.domains.map((d) => ({
-        name: { schema: "pg_catalog", name: "=" },
-        left: { kind: "scalar", name: d.name },
-        right: { kind: "scalar", name: d.name },
-        result: { kind: "scalar", name: { name: "boolean" } },
-        description: "equal",
-      }))
-    )
-    .concat(
-      g.domains.map((d) => ({
-        name: { schema: "pg_catalog", name: "<>" },
-        left: { kind: "scalar", name: d.name },
-        right: { kind: "scalar", name: d.name },
-        result: { kind: "scalar", name: { name: "boolean" } },
-        description: "equal",
-      }))
-    )
-    .concat(
-      g.enums.map((d) => ({
-        name: { schema: "pg_catalog", name: "=" },
-        left: { kind: "scalar", name: d.name },
-        right: { kind: "scalar", name: d.name },
-        result: { kind: "scalar", name: { name: "boolean" } },
-        description: "equal",
-      }))
-    )
-    .concat(
-      g.enums.map((d) => ({
-        name: { schema: "pg_catalog", name: "<>" },
-        left: { kind: "scalar", name: d.name },
-        right: { kind: "scalar", name: d.name },
-        result: { kind: "scalar", name: { name: "boolean" } },
-        description: "equal",
-      }))
-    )
-    .filter(function (op) {
-      return eqQNames(
-        {
-          name: normalizeOperatorName(e.op),
-          schema: e.opSchema,
-        },
-        op.name
-      );
-    })
-    // TODO do this only once?
+  const opKey = normalizeOperatorName(e.op).toLowerCase();
+  const opsForName = getOperatorIndex(g).get(opKey) || [];
+
+  const found = opsForName
     .sort(function (op) {
       // prefer operators on same type
       // mostly (only?) if one of the operators is "anyscalar" (= NULL expr)

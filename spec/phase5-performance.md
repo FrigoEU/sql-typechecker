@@ -137,7 +137,7 @@ function tryElabAnyCall(
 
 Then `unifyOverloadedCall` and the operator resolution in `elabBinaryOp`/`elabUnaryOp` use the non-throwing variants to check candidates.
 
-### 5. `eqQNames` does `.toLowerCase()` on every call
+### 5. `eqQNames` does `.toLowerCase()` on every call ✅ Done
 
 **Where**: `eqQNames` (~line 3209), called everywhere
 

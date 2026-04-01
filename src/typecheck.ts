@@ -3274,11 +3274,11 @@ export function showQName(n: QName): string {
 
 function eqQNames<U extends QName, V extends QName>(u: U, v: V): boolean {
   return (
-    u.name.toLowerCase() === v.name.toLowerCase() &&
+    u.name === v.name &&
     ((!u.schema && (v.schema === "dbo" || v.schema === "pg_catalog")) ||
       ((u.schema === "dbo" || u.schema === "pg_catalog") && !v.schema) ||
       (!u.schema && !v.schema) ||
-      u.schema?.toLowerCase() === v.schema?.toLowerCase())
+      u.schema === v.schema)
   );
 }
 

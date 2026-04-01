@@ -2,12 +2,13 @@
 
 ## Overview
 
-This spec describes four phases of work to evolve the SQL typechecker:
+This spec describes five phases of work to evolve the SQL typechecker:
 
 1. **[Phase 1: Parser Migration](./phase1-parser-migration.md)** - Replace `trader-pgsql-ast-parser` with `libpg-query` (the actual PostgreSQL C parser via WASM)
 2. **[Phase 2: PL/pgSQL Support](./phase2-plpgsql.md)** - Typecheck `LANGUAGE plpgsql` function bodies
 3. **[Phase 3: Parameter Inference](./phase3-parameter-inference.md)** - Infer types of `$1`, `$2`, etc. from query context
 4. **[Phase 4: Autocomplete / LSP](./phase4-autocomplete.md)** - Type-aware SQL autocompletions
+5. **[Phase 5: Performance](./phase5-performance.md)** - Fix obvious performance problems in the typechecker
 
 ## Phase dependencies
 
@@ -19,9 +20,11 @@ Phase 1 (parser migration)
   └──> Phase 3 (parameter inference) - needs ParamRef handling
           |
           └──> Phase 4 (autocomplete) - builds on diagnostic accumulation from Phase 3
+
+Phase 5 (performance) - no dependencies, can be done at any time
 ```
 
-Phases 2 and 3 are independent of each other and can be done in either order. Phase 4 depends on the diagnostic accumulation work partially done in Phase 3.
+Phases 2 and 3 are independent of each other and can be done in either order. Phase 4 depends on the diagnostic accumulation work partially done in Phase 3. Phase 5 has no dependencies on other phases and can be done at any time.
 
 Each phase is independently shippable.
 

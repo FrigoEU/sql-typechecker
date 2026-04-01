@@ -304,9 +304,19 @@ function unify(g: Global, e: Expr, source: Type, target: Type): Type {
     if (target.kind === "record") {
       return unifyRecordWithSimple(g, e, target, source);
     } else {
-      return unifySimples(g, e, source, target);
+      return unifySimplesOrThrow(g, e, source, target);
     }
   }
+}
+
+function castOrThrow(
+  g: Global,
+  e: Expr,
+  source: Type,
+  target: Type,
+  casttype: CastType
+): void {
+  throwIfError(cast(g, e, source, target, casttype));
 }
 
 function cast(
@@ -315,18 +325,18 @@ function cast(
   source: Type,
   target: Type,
   casttype: CastType
-): void {
+): null | ErrorWithLocation {
   if (source.kind === "record") {
     if (target.kind === "record") {
-      castRecords(g, e, source, target, casttype);
+      return castRecords(g, e, source, target, casttype);
     } else {
-      castRecordToSimple(g, e, source, target, casttype);
+      return castRecordToSimple(g, e, source, target, casttype);
     }
   } else {
     if (target.kind === "record") {
-      castSimpleToRecord(g, e, source, target, casttype);
+      return castSimpleToRecord(g, e, source, target, casttype);
     } else {
-      castSimples(g, e, source, target, casttype);
+      return castSimples(g, e, source, target, casttype);
     }
   }
 }
@@ -337,18 +347,24 @@ function castRecords(
   source: RecordT,
   target: RecordT,
   casttype: CastType
-): void {
+): null | ErrorWithLocation {
   if (source.fields.length !== target.fields.length) {
-    throw new TypeMismatch(
+    return new TypeMismatch(
       e,
       { expected: source, actual: target },
       "Amount of fields is not the same"
     );
   }
-  source.fields.forEach((sf, i) => {
+  let i = 0;
+  for (const sf of source.fields) {
     const tf = target.fields[i];
-    castSimples(g, e, sf.type, tf.type, casttype);
-  });
+    const res = castSimples(g, e, sf.type, tf.type, casttype);
+    if (res instanceof ErrorWithLocation) {
+      return res;
+    }
+    i++;
+  }
+  return null;
 }
 
 function unifyRecords(
@@ -366,7 +382,7 @@ function unifyRecords(
   }
   const newFields = source.fields.map((sf, i) => {
     const tf: Field = target.fields[i];
-    const t = unifySimples(g, tf._expr || e, sf.type, tf.type);
+    const t = unifySimplesOrThrow(g, tf._expr || e, sf.type, tf.type);
     return {
       name: sf.name || tf.name,
       type: t,
@@ -385,23 +401,23 @@ function castRecordToSimple(
   source: RecordT,
   target: SimpleT,
   casttype: CastType
-): void {
+): null | ErrorWithLocation {
   // TODO add warning if no LIMIT 1
   if (source.fields.length === 0) {
-    throw new TypeMismatch(
+    return new TypeMismatch(
       e,
       { expected: source, actual: target },
       "Record has no fields"
     );
   }
   if (source.fields.length > 1) {
-    throw new TypeMismatch(
+    return new TypeMismatch(
       e,
       { expected: source, actual: target },
       "More than one row returned by a subquery used as an expression"
     );
   }
-  castSimples(g, e, source.fields[0].type, target, casttype);
+  return castSimples(g, e, source.fields[0].type, target, casttype);
 }
 
 function castSimpleToRecord(
@@ -410,23 +426,23 @@ function castSimpleToRecord(
   source: SimpleT,
   target: RecordT,
   casttype: CastType
-): void {
+): null | ErrorWithLocation {
   // TODO add warning if no LIMIT 1
   if (target.fields.length === 0) {
-    throw new TypeMismatch(
+    return new TypeMismatch(
       e,
       { expected: source, actual: target },
       "Record has no fields"
     );
   }
   if (target.fields.length > 1) {
-    throw new TypeMismatch(
+    return new TypeMismatch(
       e,
       { expected: source, actual: target },
       "More than one row returned by a subquery used as an expression"
     );
   }
-  castSimples(g, e, source, target.fields[0].type, casttype);
+  return castSimples(g, e, source, target.fields[0].type, casttype);
 }
 
 function unifyRecordWithSimple(
@@ -450,7 +466,7 @@ function unifyRecordWithSimple(
       "More than one row returned by a subquery used as an expression"
     );
   }
-  return unifySimples(g, e, source.fields[0].type, target);
+  return unifySimplesOrThrow(g, e, source.fields[0].type, target);
 }
 
 function castSimples(
@@ -459,7 +475,7 @@ function castSimples(
   source: SimpleT,
   target: SimpleT,
   type: CastType
-): void {
+): null | ErrorWithLocation {
   // T -> Nullable<T> is a universal cast
   if (target.kind === "nullable" && source.kind !== "nullable") {
     return castSimples(g, e, source, target.typevar, type);
@@ -467,12 +483,12 @@ function castSimples(
 
   if (source.kind === "anyscalar") {
     // ok
-    return;
+    return null;
   } else if (source.kind === "nullable") {
     if (target.kind === "nullable") {
       return castSimples(g, e, source.typevar, target.typevar, type);
     } else {
-      throw new TypeMismatch(
+      return new TypeMismatch(
         e,
         { expected: source, actual: target },
         "Nullability is different"
@@ -482,7 +498,7 @@ function castSimples(
     if (target.kind === "array" && source.subtype === target.subtype) {
       return castSimples(g, e, source.typevar, target.typevar, type);
     } else {
-      throw new TypeMismatch(
+      return new TypeMismatch(
         e,
         { expected: source, actual: target },
         "Can't unify array with non-array"
@@ -493,7 +509,7 @@ function castSimples(
       return castScalars(g, e, source, target, type);
     } else {
       // simple - parametrized
-      throw new TypeMismatch(
+      return new TypeMismatch(
         e,
         { expected: source, actual: target },
         "Can't unify scalar with non-scalar"
@@ -506,19 +522,25 @@ function castSimples(
           (f) => f.name === field.name
         );
         if (!matchingFieldInTarget) {
-          throw new TypeMismatch(
+          return new TypeMismatch(
             e,
             { expected: source, actual: target },
             `Missing field ${field.name}`
           );
         } else {
-          castSimples(g, e, field.type, matchingFieldInTarget.type, type);
+          return castSimples(
+            g,
+            e,
+            field.type,
+            matchingFieldInTarget.type,
+            type
+          );
         }
       }
-      return;
+      return null;
     } else {
       // simple - parametrized
-      throw new TypeMismatch(
+      return new TypeMismatch(
         e,
         { expected: source, actual: target },
         "Can't unify JSON with non-JSON"
@@ -530,18 +552,32 @@ function castSimples(
 }
 
 // Get the "biggest" type back, if implicit casting is possible
-function unifySimples(
+function unifySimplesOrThrow(
   g: Global,
   e: Expr,
   source: SimpleT,
   target: SimpleT
 ): SimpleT {
-  try {
-    castSimples(g, e, source, target, "implicit");
+  return throwIfError(unifySimples(g, e, source, target));
+}
+
+// Get the "biggest" type back, if implicit casting is possible
+function unifySimples(
+  g: Global,
+  e: Expr,
+  source: SimpleT,
+  target: SimpleT
+): SimpleT | ErrorWithLocation {
+  const err = castSimples(g, e, source, target, "implicit");
+  if (err === null) {
     return target;
-  } catch {
-    castSimples(g, e, target, source, "implicit");
-    return source;
+  } else {
+    const err2 = castSimples(g, e, target, source, "implicit");
+    if (err2 === null) {
+      return source;
+    } else {
+      return err; // Think this is the best one to return?
+    }
   }
 }
 
@@ -561,20 +597,32 @@ function unifyOverloadedCall(
     (ol) => (eqType(ol.expectedArgs[0], argTypes[0]) ? 2 : 1),
     ["desc"]
   )) {
-    try {
-      const res = unifyCallGeneral(
-        g,
-        call,
-        argTypes,
-        overload.expectedArgs,
-        overload.returnT
-      );
-      return res;
-    } catch (err) {
+    const res = unifyCallGeneral(
+      g,
+      call,
+      argTypes,
+      overload.expectedArgs,
+      overload.returnT
+    );
+    if (res instanceof ErrorWithLocation) {
       // do nothing, we try the next one
+    } else {
+      return res;
     }
   }
   throw new InvalidArguments(call, call.function, argTypes);
+}
+
+function unifyCallGeneralOrThrow(
+  g: Global,
+  call: ExprCall,
+  argTypes: Type[],
+  expectedArgs: SimpleT[],
+  returnT: SimpleT
+): SimpleT {
+  return throwIfError(
+    unifyCallGeneral(g, call, argTypes, expectedArgs, returnT)
+  );
 }
 
 function unifyCallGeneral(
@@ -583,18 +631,18 @@ function unifyCallGeneral(
   argTypes: Type[],
   expectedArgs: SimpleT[],
   returnT: SimpleT
-): SimpleT {
+): SimpleT | ErrorWithLocation {
   if (argTypes.length !== expectedArgs.length) {
-    throw new InvalidArguments(call, call.function, argTypes);
+    return new InvalidArguments(call, call.function, argTypes);
   }
   for (let i = 0; i < expectedArgs.length; i++) {
     const arg = argTypes[i];
     const expectedArg = expectedArgs[i];
     const simplifiedArg = toSimpleT(arg);
     if (simplifiedArg === null) {
-      throw new CantReduceToSimpleT(call.args[i], arg);
+      return new CantReduceToSimpleT(call.args[i], arg);
     }
-    unifySimples(g, call, simplifiedArg, expectedArg);
+    unifySimplesOrThrow(g, call, simplifiedArg, expectedArg);
   }
   return returnT;
 }
@@ -618,22 +666,23 @@ function castScalars(
   source: ScalarT,
   target: ScalarT,
   type: CastType
-): void {
+): null | ErrorWithLocation {
   // list casts = \dC+
 
   // You can cast text to anything, but it might throw
   // We need this for literal input, like '1 day'::interval
   if (type === "explicit" && eqType(source, BuiltinTypes.Text)) {
-    return;
+    return null;
   }
   const matchingCast = findMatchingCast(g, [source.name], source, target, type);
   if (matchingCast === null) {
-    throw new TypeMismatch(
+    return new TypeMismatch(
       e,
       { expected: target, actual: source },
       "Couldn't find matching cast"
     );
   }
+  return null;
 }
 
 function findMatchingCast(
@@ -1144,7 +1193,7 @@ function elabInsert(
   insertT.fields.forEach((insertField, i) => {
     const col = columns[i];
 
-    cast(
+    castOrThrow(
       g,
       insertField._expr || s.insert,
       insertField.type,
@@ -1224,7 +1273,7 @@ function elabDeleteOrUpdate(
       if (simpleT === null) {
         throw new KindMismatch(setStatement.value, t, "");
       }
-      unifySimples(g, setStatement.value, field.type, simpleT);
+      unifySimplesOrThrow(g, setStatement.value, field.type, simpleT);
     }
   }
 
@@ -1415,7 +1464,7 @@ export function doCreateFunction(
           try {
             return unify(g, dummyExpr, returnType, annotatedType);
           } catch (err) {
-            const mess = err instanceof Error ? err.message : "";
+            const mess = err instanceof ErrorWithLocation ? err.message : "";
             if (err instanceof TypeMismatch) {
               throw new TypeMismatch(
                 dummyExpr,
@@ -1500,10 +1549,11 @@ function showLocation(loc: NodeLocation | undefined): string {
   }
 }
 
-export class ErrorWithLocation extends Error {
+export class ErrorWithLocation {
   public l: NodeLocation | undefined;
+  public message: string;
   constructor(l: NodeLocation | undefined, m: string) {
-    super(m);
+    this.message = m;
     this.l = l;
   }
 }
@@ -1693,14 +1743,14 @@ ${JSON.stringify(type)}
     );
   }
 }
-class UnableToDeriveFieldName extends ErrorWithLocation {
-  constructor(e: Expr) {
-    super(
-      e._location,
-      `Unable to derive field name for expression ${e}, please provide an alias with <expr> AS <name>`
-    );
-  }
-}
+// class UnableToDeriveFieldName extends ErrorWithLocation {
+//   constructor(e: Expr) {
+//     super(
+//       e._location,
+//       `Unable to derive field name for expression ${e}, please provide an alias with <expr> AS <name>`
+//     );
+//   }
+// }
 class DuplicateFieldNames extends ErrorWithLocation {
   constructor(e: Expr, name: string) {
     super(
@@ -1908,12 +1958,7 @@ function elabRef(c: Context, e: ExprRef): Type {
       };
     }
   } else {
-    const found = lookupRef(c, e);
-    if (found instanceof Error) {
-      throw found;
-    } else {
-      return found.type;
-    }
+    return throwIfError(lookupRef(c, e)).type;
   }
 }
 
@@ -1921,7 +1966,7 @@ function lookupRef(
   c: Context,
   e: ExprRef
 ):
-  | Error
+  | ErrorWithLocation
   | {
       from: null | {
         fromName: QName;
@@ -2032,42 +2077,46 @@ function elabAnyCall(
   nullPolicy: "CALLED ON NULL INPUT" | "STRICT", // RETURNS NULL ON NULL INPUT = STRICT
   sourceTypes: Type[],
   targetTypes: Type[]
-): {
-  nullifyResultType: boolean;
-  score: number; // amount of coersions we had to do gets you into minus, so higher score is better
-} {
+):
+  | ErrorWithLocation
+  | {
+      nullifyResultType: boolean;
+      score: number; // amount of coersions we had to do gets you into minus, so higher score is better
+    } {
   if (sourceTypes.length !== targetTypes.length) {
-    throw new InvalidArguments(
+    return new InvalidArguments(
       e,
       name,
       sourceTypes,
       `Number of arguments: ${sourceTypes.length} vs ${targetTypes.length}`
     );
   }
-  const { score, anySourceIsNullable } = sourceTypes.reduce(
-    function (acc, sourceT, i) {
-      const targetT = targetTypes[i];
-      if (sourceT.kind === "nullable") {
-        cast(g, e, sourceT.typevar, targetT, "implicit");
-        const score = eqType(sourceT.typevar, targetT) ? 0 : -1;
-        return {
-          score: acc.score + score,
-          anySourceIsNullable: true,
-        };
-      } else {
-        cast(g, e, sourceT, targetT, "implicit");
-        const score = eqType(sourceT, targetT) ? 0 : -1;
-        return {
-          score: acc.score + score,
-          anySourceIsNullable: acc.anySourceIsNullable || false,
-        };
+
+  let anySourceIsNullable = false;
+  let score = 0;
+
+  let i = 0;
+  for (const sourceT of sourceTypes) {
+    const targetT = targetTypes[i];
+    if (sourceT.kind === "nullable") {
+      const castErr = cast(g, e, sourceT.typevar, targetT, "implicit");
+      if (castErr) {
+        return castErr;
       }
-    },
-    {
-      score: 0 as number,
-      anySourceIsNullable: false as boolean,
+      const newScore = eqType(sourceT.typevar, targetT) ? 0 : -1;
+      score = score + newScore;
+      anySourceIsNullable = true;
+    } else {
+      const castErr = cast(g, e, sourceT, targetT, "implicit");
+      if (castErr) {
+        return castErr;
+      }
+      const newScore = eqType(sourceT, targetT) ? 0 : -1;
+      score = score + newScore;
     }
-  );
+    i++;
+  }
+
   return {
     score,
     nullifyResultType: nullPolicy === "STRICT" && anySourceIsNullable,
@@ -2100,18 +2149,18 @@ function elabUnaryOp(g: Global, c: Context, e: ExprUnary): Type {
       );
     })
     .map(function (op) {
-      try {
-        const { nullifyResultType, score } = elabAnyCall(
-          g,
-          e,
-          op.name,
-          "STRICT", // TODO?
-          [t1],
-          [op.operand]
-        );
-        return [score, op, nullifyResultType] as const;
-      } catch {
+      const res = elabAnyCall(
+        g,
+        e,
+        op.name,
+        "STRICT", // TODO?
+        [t1],
+        [op.operand]
+      );
+      if (res instanceof ErrorWithLocation) {
         return null;
+      } else {
+        return [res.score, op, res.nullifyResultType] as const;
       }
     })
     .filter(isNotEmpty)
@@ -2140,10 +2189,9 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
 
   // Specific test on = NULL, because it's always False (I think?) and is a cause of a lot of bugs
   if (e.op === "=" && (e.left.type === "null" || e.right.type === "null")) {
-    throw new Error(
-      `Don't use \"= NULL\", use "IS NULL" instead @ ${showLocation(
-        e._location
-      )}`
+    throw new ErrorWithLocation(
+      e._location,
+      `Don't use \"= NULL\", use "IS NULL" instead`
     );
   }
 
@@ -2156,7 +2204,7 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
     t1.kind === "array" &&
     t2.kind === "array"
   ) {
-    unifySimples(g, e, t1.typevar, t2.typevar);
+    unifySimplesOrThrow(g, e, t1.typevar, t2.typevar);
     return BuiltinTypes.Boolean;
   }
 
@@ -2173,21 +2221,23 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
   if (e.op === "IN" || e.op === "NOT IN") {
     // TODO use elabAnyCall?
     // No generics, so special casing this operator
-    castSimples(g, e, t2, BuiltinTypeConstructors.List(t1), "implicit");
+    throwIfError(
+      castSimples(g, e, t2, BuiltinTypeConstructors.List(t1), "implicit")
+    );
     return BuiltinTypes.Boolean;
   }
 
   if (e.op === "||") {
     if (t1.kind === "array" && t2.kind !== "array") {
-      unifySimples(g, e, t1.typevar, t2);
+      unifySimplesOrThrow(g, e, t1.typevar, t2);
       return t1;
     }
   }
 
   if (e.op === "OVERLAPS") {
-    unifySimples(g, e, t1, BuiltinTypeConstructors.List(AnyScalar));
-    unifySimples(g, e, t2, BuiltinTypeConstructors.List(AnyScalar));
-    unifySimples(g, e, t1, t2);
+    unifySimplesOrThrow(g, e, t1, BuiltinTypeConstructors.List(AnyScalar));
+    unifySimplesOrThrow(g, e, t2, BuiltinTypeConstructors.List(AnyScalar));
+    unifySimplesOrThrow(g, e, t1, t2);
     return BuiltinTypes.Boolean;
   }
 
@@ -2265,21 +2315,21 @@ function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
       }
     })
     .map(function (op) {
-      try {
-        const res = elabAnyCall(
-          g,
-          e,
-          op.name,
-          "STRICT" /* TODO ? */,
-          [t1, t2],
-          [op.left, op.right]
-        );
+      const res = elabAnyCall(
+        g,
+        e,
+        op.name,
+        "STRICT" /* TODO ? */,
+        [t1, t2],
+        [op.left, op.right]
+      );
+      if (res instanceof ErrorWithLocation) {
+        return null;
+      } else {
         return {
           ...res,
           op,
         };
-      } catch {
-        return null;
       }
     })
     .filter(isNotEmpty)
@@ -2381,7 +2431,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
 
   if (eqQNames(e.function, { name: "starts_with" })) {
     // string -> string -> boolean
-    return unifyCallGeneral(
+    return unifyCallGeneralOrThrow(
       g,
       e,
       argTypes,
@@ -2407,7 +2457,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
 
   if (eqQNames(e.function, { name: "length" })) {
     // string -> string -> boolean
-    return unifyCallGeneral(
+    return unifyCallGeneralOrThrow(
       g,
       e,
       argTypes,
@@ -2418,7 +2468,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
 
   if (eqQNames(e.function, { name: "tsrange" })) {
     // timestamp -> timestamp -> tsrange
-    return unifyCallGeneral(
+    return unifyCallGeneralOrThrow(
       g,
       e,
       argTypes,
@@ -2429,7 +2479,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
 
   if (eqQNames(e.function, { name: "range_agg" })) {
     // timestamp  -> tsrange
-    return unifyCallGeneral(
+    return unifyCallGeneralOrThrow(
       g,
       e,
       argTypes,
@@ -2522,7 +2572,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "nextval" })) {
-    return unifyCallGeneral(
+    return unifyCallGeneralOrThrow(
       g,
       e,
       argTypes,
@@ -2532,7 +2582,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "now" })) {
-    return unifyCallGeneral(g, e, argTypes, [], BuiltinTypes.Timestamp);
+    return unifyCallGeneralOrThrow(g, e, argTypes, [], BuiltinTypes.Timestamp);
   }
 
   if (
@@ -2549,7 +2599,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     if (t === null) {
       throw new CantReduceToSimpleT(e.args[0], argTypes[0]);
     }
-    const unifiedT = unifySimples(
+    const unifiedT = unifySimplesOrThrow(
       g,
       e,
       t,
@@ -2593,7 +2643,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       throw new CantReduceToSimpleT(e.args[1], argTypes[1]);
     }
 
-    unifySimples(g, e, t2, BuiltinTypes.Integer);
+    unifySimplesOrThrow(g, e, t2, BuiltinTypes.Integer);
 
     return t1.kind === "nullable"
       ? BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer)
@@ -2624,7 +2674,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
         `Expecting array type instead of ${t1.kind}`
       );
     } else {
-      unifySimples(g, e, t1.typevar, t2);
+      unifySimplesOrThrow(g, e, t1.typevar, t2);
       return BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer);
     }
   }
@@ -2711,7 +2761,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 
   if (eqQNames(e.function, { name: "to_tsvector" })) {
-    return unifyCallGeneral(
+    return unifyCallGeneralOrThrow(
       g,
       e,
       argTypes,
@@ -2720,7 +2770,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     );
   }
   if (eqQNames(e.function, { name: "to_tsquery" })) {
-    return unifyCallGeneral(
+    return unifyCallGeneralOrThrow(
       g,
       e,
       argTypes,
@@ -2733,7 +2783,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     eqQNames(e.function, { name: "upper" }) ||
     eqQNames(e.function, { name: "lower" })
   ) {
-    return unifyCallGeneral(
+    return unifyCallGeneralOrThrow(
       g,
       e,
       argTypes,
@@ -2746,7 +2796,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     eqQNames(e.function, { name: "bool_and" }) ||
     eqQNames(e.function, { name: "bool_or" })
   ) {
-    return unifyCallGeneral(
+    return unifyCallGeneralOrThrow(
       g,
       e,
       argTypes,
@@ -2794,7 +2844,7 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
         }
       });
     const unifiedType = types.reduce(
-      (acc, [arg, t]) => unifySimples(g, arg, acc, t),
+      (acc, [arg, t]) => unifySimplesOrThrow(g, arg, acc, t),
       types[0][1]
     );
     return { unifiedType, types };
@@ -2832,7 +2882,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
       if (t === null) {
         throw new CantReduceToSimpleT(e, t_);
       } else {
-        return unifySimples(g, e, t, acc);
+        return unifySimplesOrThrow(g, e, t, acc);
       }
     }, AnyScalar);
     return e.type === "list"
@@ -2875,17 +2925,17 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     // TODO use elabAnyCall?
     const t = elabExpr(g, c, e.from);
     try {
-      cast(g, e.from, t, BuiltinTypes.Timestamp, "implicit");
+      castOrThrow(g, e.from, t, BuiltinTypes.Timestamp, "implicit");
     } catch (err) {
       try {
         if (intervalIsValid(e.field.name)) {
-          cast(g, e.from, t, BuiltinTypes.Interval, "implicit");
+          castOrThrow(g, e.from, t, BuiltinTypes.Interval, "implicit");
         } else {
           throw err;
         }
       } catch (err) {
         if (timeIsValid(e.field.name)) {
-          cast(g, e.from, t, BuiltinTypes.Time, "implicit");
+          castOrThrow(g, e.from, t, BuiltinTypes.Time, "implicit");
         } else {
           throw err;
         }
@@ -2895,7 +2945,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
   } else if (e.type === "member") {
     const t = elabExpr(g, c, e.operand);
     try {
-      cast(
+      castOrThrow(
         g,
         e.operand,
         t,
@@ -2903,7 +2953,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
         "implicit"
       );
     } catch {
-      cast(
+      castOrThrow(
         g,
         e.operand,
         t,
@@ -2947,7 +2997,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
       arrayT,
       BuiltinTypeConstructors.Array(AnyScalar)
     );
-    cast(g, e.array, indexT, BuiltinTypes.Integer, "implicit");
+    castOrThrow(g, e.array, indexT, BuiltinTypes.Integer, "implicit");
     const unifiedArrayT = toSimpleT(unifiedArrayT_);
 
     if (unifiedArrayT === null) {
@@ -3017,20 +3067,22 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     const valueT = elabExpr(g, c, e.value);
     const hiT = elabExpr(g, c, e.hi);
     const loT = elabExpr(g, c, e.lo);
-    cast(g, e, valueT, loT, "implicit");
-    cast(g, e, valueT, hiT, "implicit");
+    castOrThrow(g, e, valueT, loT, "implicit");
+    castOrThrow(g, e, valueT, hiT, "implicit");
     return BuiltinTypes.Boolean;
   } else if (e.type === "substring" || e.type === "overlay") {
     const valueT = elabExpr(g, c, e.value);
     const fromT = e.from ? elabExpr(g, c, e.from) : BuiltinTypes.Integer;
     const forT = e.for ? elabExpr(g, c, e.for) : BuiltinTypes.Integer;
-    const res = elabAnyCall(
-      g,
-      e,
-      { name: e.type },
-      "STRICT",
-      [valueT, fromT, forT],
-      [BuiltinTypes.Text, BuiltinTypes.Integer, BuiltinTypes.Integer]
+    const res = throwIfError(
+      elabAnyCall(
+        g,
+        e,
+        { name: e.type },
+        "STRICT",
+        [valueT, fromT, forT],
+        [BuiltinTypes.Text, BuiltinTypes.Integer, BuiltinTypes.Integer]
+      )
     );
     return res.nullifyResultType
       ? nullify(BuiltinTypes.Text)
@@ -3041,7 +3093,7 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     const operandT = elabExpr(g, c, e.operand);
     const toT = mkType(g, e.to, []);
     try {
-      cast(g, e, operandT, toT, "explicit");
+      castOrThrow(g, e, operandT, toT, "explicit");
     } catch (err) {
       throw new CannotCast(e, { from: operandT, to: toT });
     }
@@ -3069,7 +3121,7 @@ function inferNullability(
     if (e.op === "IS NULL" || e.op === "IS NOT NULL") {
       if (e.operand.type === "ref") {
         const found = lookupRef(c, e.operand);
-        if (found instanceof Error) {
+        if (found instanceof ErrorWithLocation) {
           return [];
         } else {
           if (found.from === null) {
@@ -3239,4 +3291,11 @@ function makeBuiltinBinaryOperatorsForNumericDomain(t: ScalarT): binaryOp[] {
     result: t,
   }));
   return comparisons.concat(monads);
+}
+
+function throwIfError<T>(t: T | ErrorWithLocation): T {
+  if (t instanceof ErrorWithLocation) {
+    throw t;
+  }
+  return t;
 }

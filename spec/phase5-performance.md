@@ -107,7 +107,7 @@ const builtinTypeNames = new Set(
 if (builtinTypeNames.has(name.toLowerCase())) { ... }
 ```
 
-### 4. Exception-based control flow in overload resolution
+### 4. Exception-based control flow in overload resolution ✅ Done
 
 **Where**: `unifyOverloadedCall` (~line 315), `elabBinaryOp` (~line 2310), `elabUnaryOp` (~line 2211)
 

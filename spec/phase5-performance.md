@@ -48,7 +48,7 @@ function buildOperatorIndex(g: Global): OperatorIndex {
 }
 ```
 
-### 2. `findMatchingCast` rebuilds the cast list on every call
+### 2. `findMatchingCast` rebuilds the cast list on every call ✅ Done
 
 **Where**: `findMatchingCast` (~line 382)
 

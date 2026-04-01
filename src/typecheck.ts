@@ -190,6 +190,32 @@ const builtinTypeNames = new Set(
   Object.values(BuiltinTypes).map((v) => v.name.name.toLowerCase())
 );
 
+type Cast = { source: ScalarT; target: ScalarT; type: CastType };
+type CastIndex = Map<string, Cast[]>;
+const castIndexCache = new WeakMap<Global, CastIndex>();
+
+function getCastIndex(g: Global): CastIndex {
+  const cached = castIndexCache.get(g);
+  if (cached) return cached;
+
+  const allCasts: Cast[] = builtincasts.concat(
+    g.domains.map((d) => ({
+      source: d.realtype.kind === "scalar" ? d.realtype : BuiltinTypes.Null,
+      target: { kind: "scalar" as const, name: d.name },
+      type: "assignment" as const,
+    }))
+  );
+  const index: CastIndex = new Map();
+  for (const c of allCasts) {
+    const key = c.source.name.name.toLowerCase();
+    const existing = index.get(key);
+    if (existing) existing.push(c);
+    else index.set(key, [c]);
+  }
+  castIndexCache.set(g, index);
+  return index;
+}
+
 const allNumericBuiltinTypes: ScalarT[] = [
   BuiltinTypes.Smallint,
   BuiltinTypes.Integer,
@@ -700,13 +726,7 @@ function findMatchingCast(
   target: ScalarT;
   type: CastType;
 } | null {
-  const casts = builtincasts.concat(
-    g.domains.map((d) => ({
-      source: d.realtype.kind === "scalar" ? d.realtype : BuiltinTypes.Null,
-      target: { kind: "scalar" as const, name: d.name },
-      type: "assignment" as const,
-    }))
-  );
+  const castIndex = getCastIndex(g);
 
   const foundDomainFrom = g.domains.find((d) => eqQNames(d.name, from.name));
   if (
@@ -722,9 +742,10 @@ function findMatchingCast(
   if (eqQNames(from.name, to.name)) {
     return { source: from, target: to, type: "implicit" };
   } else {
-    const halfMatching = casts.filter(
+    const fromKey = from.name.name.toLowerCase();
+    const castsForSource = castIndex.get(fromKey) || [];
+    const halfMatching = castsForSource.filter(
       (c) =>
-        eqQNames(c.source.name, from.name) &&
         (c.type === type ||
           (c.type === "implicit" && type === "assignment") ||
           (c.type === "assignment" && type === "explicit") ||

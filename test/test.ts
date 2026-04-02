@@ -1146,6 +1146,31 @@ $$ LANGUAGE sql;
   );
 });
 
+test("trim (pg_catalog.btrim)", () => {
+  expectReturnType(
+    "create table testje ( id int not null, name text);",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+      SELECT id, lower(trim(name))
+      from testje
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "id" },
+          type: BuiltinTypes.Integer,
+        },
+        {
+          name: { name: "lower" },
+          type: BuiltinTypes.Text,
+        },
+      ],
+    }
+  );
+});
+
 test("bool_and", () => {
   expectReturnType(
     "create table testje ( id int not null, name text);",

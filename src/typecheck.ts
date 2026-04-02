@@ -2593,8 +2593,25 @@ function elabAExpr(g: Global, c: Context, e: Node, ae: A_Expr): Type {
   return best.nullifyResultType ? nullify(best.op.result) : best.op.result;
 }
 
+// Map pg_catalog internal function names to their SQL-facing names
+const pgCatalogAliases: Record<string, string> = {
+  btrim: "trim",
+  lpad: "lpad",
+  rpad: "rpad",
+};
+
 function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
-  const funcName = getQNameFromNodes(fc.funcname || []);
+  let funcName = getQNameFromNodes(fc.funcname || []);
+  // The real PG parser rewrites some SQL functions to pg_catalog.internal_name
+  if (funcName.schema === "pg_catalog") {
+    const alias = pgCatalogAliases[funcName.name];
+    if (alias) {
+      funcName = { name: alias };
+    } else {
+      // Strip pg_catalog schema for general lookup
+      funcName = { name: funcName.name, _location: funcName._location };
+    }
+  }
   const args = fc.args || [];
   const argTypes = args.map((arg) => elabExpr(g, c, arg));
 

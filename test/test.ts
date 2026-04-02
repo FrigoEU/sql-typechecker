@@ -2,7 +2,7 @@ import { isPlainObject, mapValues, omit } from "lodash-es";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { type Either, Left, nullable, Right } from "purify-ts";
-import { parse, type Name, type QName } from "trader-pgsql-ast-parser";
+import { parseStatements, loadModule, type Name, type QName } from "../src/pg-ast.ts";
 import {
   doCreateFunction,
   parseSetupScripts,
@@ -17,6 +17,10 @@ import {
   type VoidT,
 } from "../src/typecheck.ts";
 import { registerSqlTypecheckerTypeParsers } from "../src/typeparsers.ts";
+
+test.before(async () => {
+  await loadModule();
+});
 
 function testCreateFunction(
   setupStr: string,
@@ -35,12 +39,13 @@ function testCreateFunction(
 ) {
   const g = parseSetupScripts(
     { tables: [], views: [], domains: [], enums: [] },
-    parse(setupStr)
+    parseStatements(setupStr)
   );
-  const query = parse(queryStr);
-  if (query[0].type === "create function") {
+  const query = parseStatements(queryStr);
+  const stmt = query[0]?.stmt;
+  if (stmt && "CreateFunctionStmt" in stmt) {
     try {
-      const res = doCreateFunction(g, { decls: [], froms: [] }, query[0]);
+      const res = doCreateFunction(g, { decls: [], froms: [] }, stmt.CreateFunctionStmt);
       cont(Right(res));
     } catch (err) {
       cont(Left(err as Error));
@@ -773,10 +778,10 @@ test("inListParameter", () => {
   expectThrowLike(
     "create table testje ( id int not null, name text );",
     `
-CREATE FUNCTION myselect(mylist int[]) RETURNS SETOF RECORD AS $$
+CREATE FUNCTION myselect(mylist text[]) RETURNS SETOF RECORD AS $$
 SELECT id
 FROM testje
-WHERE id IN mylist
+WHERE id = ANY(mylist)
 $$ LANGUAGE sql;
 `,
     "TypeMismatch"
@@ -835,7 +840,7 @@ FROM testje
 WHERE id = ANY(mylist)
 $$ LANGUAGE sql;
 `,
-    "Can't apply operator"
+    "TypeMismatch"
   );
 });
 

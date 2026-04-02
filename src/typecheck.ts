@@ -1,33 +1,64 @@
 import assert from "assert";
 import { isNil, orderBy } from "lodash-es";
 import {
-  type AlterTableStatement,
-  type ColumnConstraint,
-  type CreateFunctionStatement,
-  type CreateMaterializedViewStatement,
-  type CreateTableStatement,
-  type CreateViewStatement,
-  type DataTypeDef,
-  type DeleteStatement,
-  type Expr,
-  type ExprBinary,
-  type ExprCall,
-  type ExprRef,
-  type ExprUnary,
-  type From,
-  type InsertStatement,
+  type Node,
+  type RawStmt,
+  type SelectStmt,
+  type InsertStmt,
+  type UpdateStmt,
+  type DeleteStmt,
+  type CreateStmt,
+  type ViewStmt,
+  type AlterTableStmt,
+  type CreateDomainStmt,
+  type CreateEnumStmt,
+  type CreateTableAsStmt,
+  type CreateFunctionStmt,
+  type ResTarget,
+  type RangeVar,
+  type FuncCall,
+  type A_Expr,
+  type ColumnRef,
+  type TypeName,
+  type TypeCast,
+  type CaseExpr,
+  type BoolExpr,
+  type NullTest,
+  type SubLink,
+  type A_ArrayExpr,
+  type A_Indirection,
+  type SQLValueFunction,
+  type JoinExpr,
+  type RangeSubselect,
+  type RangeFunction,
+  type ColumnDef,
+  type Constraint,
+  type FunctionParameter,
   type Name,
-  // astVisitor,
-  type NodeLocation,
-  type PGNode,
   type QName,
-  type SelectStatement,
-  type SelectedColumn,
-  type Statement,
-  type UpdateStatement,
-  parse,
-  toSql,
-} from "trader-pgsql-ast-parser";
+  parseStatements,
+  getColumnRef,
+  getTypeName,
+  getQNameFromNodes,
+  getOperatorName,
+  getOperatorSchema,
+  rangeVarToQName,
+  rangeVarAlias,
+  extractFunctionOptions,
+  nodeToSql,
+  nodeLocation,
+  A_Expr_Kind,
+  BoolExprType,
+  SetOperation,
+  JoinType,
+  SubLinkType,
+  NullTestType,
+  SQLValueFunctionOp,
+  ConstrType,
+  AlterTableType,
+  FunctionParameterMode,
+  enumEq,
+} from "./pg-ast.ts";
 import { builtincasts } from "./builtincasts.ts";
 import { builtinoperators } from "./builtinoperators.ts";
 import { builtinUnaryOperators } from "./builtinunaryoperators.ts";
@@ -72,7 +103,7 @@ export type SimpleT =
 export type Field = {
   name: Name | null;
   type: SimpleT;
-  _expr?: Expr;
+  _expr?: Node;
 };
 export type RecordT = {
   kind: "record";
@@ -300,7 +331,7 @@ const allNumericBuiltinTypes: ScalarT[] = [
   BuiltinTypes.Money,
 ];
 
-function requireBoolean(e: Expr, t: Type): void {
+function requireBoolean(e: Node, t: Type): void {
   if (
     (t.kind === "scalar" && eqQNames(t.name, BuiltinTypes.Boolean.name)) ||
     (t.kind === "nullable" &&
@@ -394,7 +425,7 @@ function eqType(t1: Type, t2: Type): boolean {
   }
 }
 
-function unify(g: Global, e: Expr, source: Type, target: Type): Type {
+function unify(g: Global, e: Node, source: Type, target: Type): Type {
   if (source.kind === "record") {
     if (target.kind === "record") {
       return unifyRecords(g, e, source, target);
@@ -412,7 +443,7 @@ function unify(g: Global, e: Expr, source: Type, target: Type): Type {
 
 function castOrThrow(
   g: Global,
-  e: Expr,
+  e: Node,
   source: Type,
   target: Type,
   casttype: CastType
@@ -422,7 +453,7 @@ function castOrThrow(
 
 function cast(
   g: Global,
-  e: Expr,
+  e: Node,
   source: Type,
   target: Type,
   casttype: CastType
@@ -444,7 +475,7 @@ function cast(
 
 function castRecords(
   g: Global,
-  e: Expr,
+  e: Node,
   source: RecordT,
   target: RecordT,
   casttype: CastType
@@ -470,7 +501,7 @@ function castRecords(
 
 function unifyRecords(
   g: Global,
-  e: Expr,
+  e: Node,
   source: RecordT,
   target: RecordT
 ): RecordT {
@@ -498,7 +529,7 @@ function unifyRecords(
 
 function castRecordToSimple(
   g: Global,
-  e: Expr,
+  e: Node,
   source: RecordT,
   target: SimpleT,
   casttype: CastType
@@ -523,7 +554,7 @@ function castRecordToSimple(
 
 function castSimpleToRecord(
   g: Global,
-  e: Expr,
+  e: Node,
   source: SimpleT,
   target: RecordT,
   casttype: CastType
@@ -548,7 +579,7 @@ function castSimpleToRecord(
 
 function unifyRecordWithSimple(
   g: Global,
-  e: Expr,
+  e: Node,
   source: RecordT,
   target: SimpleT
 ): SimpleT {
@@ -572,7 +603,7 @@ function unifyRecordWithSimple(
 
 function castSimples(
   g: Global,
-  e: Expr,
+  e: Node,
   source: SimpleT,
   target: SimpleT,
   type: CastType
@@ -655,7 +686,7 @@ function castSimples(
 // Get the "biggest" type back, if implicit casting is possible
 function unifySimplesOrThrow(
   g: Global,
-  e: Expr,
+  e: Node,
   source: SimpleT,
   target: SimpleT
 ): SimpleT {
@@ -665,7 +696,7 @@ function unifySimplesOrThrow(
 // Get the "biggest" type back, if implicit casting is possible
 function unifySimples(
   g: Global,
-  e: Expr,
+  e: Node,
   source: SimpleT,
   target: SimpleT
 ): SimpleT | ErrorWithLocation {
@@ -684,7 +715,9 @@ function unifySimples(
 
 function unifyOverloadedCall(
   g: Global,
-  call: ExprCall,
+  call: Node,
+  funcName: QName,
+  args: Node[],
   argTypes: Type[],
   overloads: {
     expectedArgs: SimpleT[];
@@ -701,6 +734,8 @@ function unifyOverloadedCall(
     const res = unifyCallGeneral(
       g,
       call,
+      funcName,
+      args,
       argTypes,
       overload.expectedArgs,
       overload.returnT
@@ -711,37 +746,41 @@ function unifyOverloadedCall(
       return res;
     }
   }
-  throw new InvalidArguments(call, call.function, argTypes);
+  throw new InvalidArguments(call, funcName, argTypes);
 }
 
 function unifyCallGeneralOrThrow(
   g: Global,
-  call: ExprCall,
+  call: Node,
+  funcName: QName,
+  args: Node[],
   argTypes: Type[],
   expectedArgs: SimpleT[],
   returnT: SimpleT
 ): SimpleT {
   return throwIfError(
-    unifyCallGeneral(g, call, argTypes, expectedArgs, returnT)
+    unifyCallGeneral(g, call, funcName, args, argTypes, expectedArgs, returnT)
   );
 }
 
 function unifyCallGeneral(
   g: Global,
-  call: ExprCall,
+  call: Node,
+  funcName: QName,
+  args: Node[],
   argTypes: Type[],
   expectedArgs: SimpleT[],
   returnT: SimpleT
 ): SimpleT | ErrorWithLocation {
   if (argTypes.length !== expectedArgs.length) {
-    return new InvalidArguments(call, call.function, argTypes);
+    return new InvalidArguments(call, funcName, argTypes);
   }
   for (let i = 0; i < expectedArgs.length; i++) {
     const arg = argTypes[i];
     const expectedArg = expectedArgs[i];
     const simplifiedArg = toSimpleT(arg);
     if (simplifiedArg === null) {
-      return new CantReduceToSimpleT(call.args[i], arg);
+      return new CantReduceToSimpleT(args[i], arg);
     }
     const err = unifySimples(g, call, simplifiedArg, expectedArg);
     if (err instanceof ErrorWithLocation) {
@@ -766,7 +805,7 @@ function unifyCallGeneral(
 export type CastType = "implicit" | "assignment" | "explicit";
 function castScalars(
   g: Global,
-  e: Expr,
+  e: Node,
   source: ScalarT,
   target: ScalarT,
   type: CastType
@@ -872,33 +911,30 @@ export type Context = {
   }>;
 };
 
-export function notImplementedYet(node: PGNode | null): any {
+export function notImplementedYet(node: any): any {
   throw new NotImplementedYet(node);
 }
 
-function mkType(g: Global, t: DataTypeDef, cs: ColumnConstraint[]): SimpleT {
+function mkType(g: Global, tn: TypeName, constraints: Constraint[]): SimpleT {
+  const typeInfo = getTypeName(tn);
   let t_;
-  if (t.kind === "array") {
-    if (t.arrayOf.kind === "array") {
-      throw new Error("Array of array not supported");
-    } else {
-      const elTypeName = normalizeTypeName(t.arrayOf.name);
-      const scalarT = checkType(g, t.arrayOf._location, elTypeName);
-      t_ = BuiltinTypeConstructors.Array(scalarT);
-    }
+  if (typeInfo.isArray) {
+    const elTypeName = normalizeTypeName(typeInfo.name);
+    const scalarT = checkType(g, tn.location, elTypeName);
+    t_ = BuiltinTypeConstructors.Array(scalarT);
   } else {
-    const typeName = normalizeTypeName(t.name);
-    t_ = checkType(g, t._location, typeName);
+    const typeName = normalizeTypeName(typeInfo.name);
+    t_ = checkType(g, tn.location, typeName);
   }
-  const notnullable = cs.some(
-    (c) => c.type === "not null" || c.type === "primary key"
+  const notnullable = constraints.some(
+    (c) => enumEq(c.contype, ConstrType, ConstrType.CONSTR_NOTNULL) || enumEq(c.contype, ConstrType, ConstrType.CONSTR_PRIMARY)
   );
   return notnullable ? t_ : nullify(t_);
 }
 
 function checkType(
   g: Global,
-  l: NodeLocation | undefined,
+  l: number | undefined,
   name: string
 ): ScalarT {
   const foundDom = g.domains.find((d) => d.name.name === name);
@@ -929,75 +965,89 @@ function checkType(
       name: { _location: l, name: name },
     };
   }
-  throw new UnknownIdentifier({ _location: l }, { name });
+  throw new UnknownIdentifier(l, { name });
 }
 
-function doCreateTable(g: Global, s: CreateTableStatement): Global {
-  if ((s.inherits || []).length !== 0) {
-    // Reusing the columns is not hard (see LIKE TABLE)
-    // but subsequent alters to the parent table(s) also alter the children
-    // so that's a bit more work. Not a huge amount though, just didnt do it yet
+function doCreateTable(g: Global, s: CreateStmt): Global {
+  if ((s.inhRelations || []).length !== 0) {
     return notImplementedYet(s);
   }
-  const fields = s.columns.reduce(function (acc: Field[], c) {
-    if (c.kind === "like table") {
-      const targetTable = c.like;
+  const tableElts = s.tableElts || [];
+  const fields = tableElts.reduce(function (acc: Field[], elt) {
+    if ("TableLikeClause" in elt) {
+      const tlc = elt.TableLikeClause;
+      const targetTable = rangeVarToQName(tlc.relation!);
       const found = g.tables.find((t) => eqQNames(t.name, targetTable));
       if (!found) {
-        throw new UnknownIdentifier(c.like, targetTable);
+        throw new UnknownIdentifier(tlc.relation?.location, targetTable);
       }
       return acc.concat(found.rel.fields);
-    } else {
+    } else if ("ColumnDef" in elt) {
+      const col = elt.ColumnDef;
+      const constraints = extractConstraints(col.constraints || []);
       return acc.concat({
-        name: c.name,
-        type: mkType(g, c.dataType, c.constraints || []),
+        name: { name: col.colname || "" },
+        type: mkType(g, col.typeName!, constraints),
       });
+    } else {
+      return acc;
     }
   }, []);
 
   const primaryKey = (function () {
-    const primaryKeyConstraint = mapPartial(s.constraints || [], (c) =>
-      c.type === "primary key" ? c : null
+    // Check table-level constraints
+    const tableConstraints = (s.constraints || [])
+      .filter((n): n is { Constraint: Constraint } => "Constraint" in n)
+      .map((n) => n.Constraint);
+    const pkConstraint = tableConstraints.find(
+      (c) => enumEq(c.contype, ConstrType, ConstrType.CONSTR_PRIMARY)
     );
-    if (primaryKeyConstraint.length > 0) {
-      return primaryKeyConstraint[0].columns;
+    if (pkConstraint) {
+      return (pkConstraint.keys || []).map((k): Name => {
+        if ("String" in k) {
+          return { name: k.String.sval || "" };
+        }
+        return { name: "" };
+      });
     }
-    const columnWithPrimaryKey = mapPartial(s.columns, (c) =>
-      c.kind === "column" &&
-      (c.constraints || []).some(
-        (constr: ColumnConstraint) => constr.type === "primary key"
-      )
-        ? c
-        : null
-    );
-    if (columnWithPrimaryKey.length > 0) {
-      return columnWithPrimaryKey.map((c) => c.name);
-    } else {
-      return [];
+    // Check column-level constraints
+    const columnsWithPK = tableElts.filter((elt) => {
+      if (!("ColumnDef" in elt)) return false;
+      const col = elt.ColumnDef;
+      return extractConstraints(col.constraints || []).some(
+        (c) => enumEq(c.contype, ConstrType, ConstrType.CONSTR_PRIMARY)
+      );
+    });
+    if (columnsWithPK.length > 0) {
+      return columnsWithPK.map((elt) => {
+        const col = (elt as { ColumnDef: ColumnDef }).ColumnDef;
+        return { name: col.colname || "" } as Name;
+      });
     }
+    return [];
   })();
 
-  const defaults = mapPartial(s.columns, (col) => {
-    if (col.kind !== "column") {
-      return null;
-    }
-    const t = mkType(g, col.dataType, col.constraints || []);
+  const defaults = mapPartial(tableElts, (elt) => {
+    if (!("ColumnDef" in elt)) return null;
+    const col = elt.ColumnDef;
+    const constraints = extractConstraints(col.constraints || []);
+    const t = mkType(g, col.typeName!, constraints);
     if (t.kind === "scalar" && t.name.name.toLowerCase() === "serial") {
       return col;
     }
-    if ((col.constraints || []).some((constr) => constr.type === "default")) {
+    if (constraints.some((c) => enumEq(c.contype, ConstrType, ConstrType.CONSTR_DEFAULT))) {
       return col;
-    } else {
-      return null;
     }
+    return null;
   });
 
+  const tableName = rangeVarToQName(s.relation!);
   return {
     ...g,
     tables: g.tables.concat({
-      name: s.name,
+      name: tableName,
       primaryKey,
-      defaults: defaults.map((c) => c.name),
+      defaults: defaults.map((c) => ({ name: c.colname || "" })),
       rel: {
         kind: "record",
         fields,
@@ -1005,55 +1055,104 @@ function doCreateTable(g: Global, s: CreateTableStatement): Global {
     }),
   };
 }
-function doCreateView(
-  g: Global,
-  s: CreateViewStatement | CreateMaterializedViewStatement
-): Global {
+
+function extractConstraints(nodes: Node[]): Constraint[] {
+  return nodes
+    .filter((n): n is { Constraint: Constraint } => "Constraint" in n)
+    .map((n) => n.Constraint);
+}
+function doCreateView(g: Global, s: ViewStmt): Global {
+  const queryNode = s.query;
+  if (!queryNode || !("SelectStmt" in queryNode)) {
+    throw new ErrorWithLocation(s.view?.location, "View without query");
+  }
   const sel = elabSelect(
     g,
-    {
-      froms: [],
-      decls: [],
-    },
-    // Bug in parser
-    Array.isArray(s.query) ? s.query[0] : s.query,
+    { froms: [], decls: [] },
+    queryNode.SelectStmt,
     null
   );
   if (sel.kind === "void") {
-    throw new ErrorWithLocation(s._location, "View returns void");
+    throw new ErrorWithLocation(s.view?.location, "View returns void");
   }
+  const viewName = rangeVarToQName(s.view!);
   return {
     ...g,
     views: g.views.concat({
-      name: s.name,
+      name: viewName,
       rel: sel,
     }),
   };
 }
-function doAlterTable(g: Global, s: AlterTableStatement): Global {
-  if (
-    s.changes.every(
-      (c) =>
-        c.type === "add constraint" ||
-        c.type === "rename constraint" ||
-        c.type === "drop constraint" ||
-        c.type === "owner"
-    )
-  ) {
+
+function doCreateMaterializedView(g: Global, s: CreateTableAsStmt): Global {
+  const queryNode = s.query;
+  if (!queryNode || !("SelectStmt" in queryNode)) {
+    throw new ErrorWithLocation(undefined, "Materialized view without query");
+  }
+  const sel = elabSelect(
+    g,
+    { froms: [], decls: [] },
+    queryNode.SelectStmt,
+    null
+  );
+  if (sel.kind === "void") {
+    throw new ErrorWithLocation(undefined, "Materialized view returns void");
+  }
+  const viewName = rangeVarToQName(s.into?.rel!);
+  return {
+    ...g,
+    views: g.views.concat({
+      name: viewName,
+      rel: sel,
+    }),
+  };
+}
+function doAlterTable(g: Global, s: AlterTableStmt): Global {
+  const cmds = s.cmds || [];
+  const allHandled = cmds.every((cmdNode) => {
+    if (!("AlterTableCmd" in cmdNode)) return false;
+    const cmd = cmdNode.AlterTableCmd;
+    return (
+      enumEq(cmd.subtype, AlterTableType, AlterTableType.AT_AddConstraint) ||
+      enumEq(cmd.subtype, AlterTableType, AlterTableType.AT_DropConstraint) ||
+      enumEq(cmd.subtype, AlterTableType, AlterTableType.AT_ChangeOwner)
+    );
+  });
+  if (allHandled) {
     return g;
   }
   return notImplementedYet(s);
 }
 
-function deriveNameFromExpr(expr: Expr): Name | null {
-  if (expr.type === "ref") {
-    return { name: expr.name };
-  } else if (expr.type === "call") {
-    return expr.function;
-  } else if (expr.type === "parameter") {
+function deriveNameFromExpr(expr: Node): Name | null {
+  if ("ColumnRef" in expr) {
+    const ref = getColumnRef(expr.ColumnRef);
+    return { name: ref.column };
+  } else if ("FuncCall" in expr) {
+    const qname = getQNameFromNodes(expr.FuncCall.funcname || []);
+    // pg_catalog functions (extract, overlaps, etc.) are internal representations
+    // of SQL syntax; don't derive a name from them
+    if (qname.schema === "pg_catalog") {
+      return null;
+    }
+    return qname;
+  } else if ("CoalesceExpr" in expr) {
+    return { name: "coalesce" };
+  } else if ("NullIfExpr" in expr) {
+    return { name: "nullif" };
+  } else if ("MinMaxExpr" in expr) {
+    const op = (expr.MinMaxExpr as any).op;
+    return { name: op === "IS_GREATEST" || op === 0 ? "greatest" : "least" };
+  } else if ("A_Expr" in expr) {
+    const ae = expr.A_Expr;
+    if (enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_NULLIF)) {
+      return { name: "nullif" };
+    }
+    return null;
+  } else if ("ParamRef" in expr) {
     return null;
   } else {
-    // return notImplementedYet(expr);
     return null;
   }
 }
@@ -1062,124 +1161,65 @@ function deriveNameFromExpr(expr: Expr): Name | null {
 export function elabSelect(
   g: Global,
   c: Context,
-  s: SelectStatement,
+  s: SelectStmt,
   columnNames: Name[] | null
 ): RecordT | VoidT {
-  if (s.type === "select") {
-    const newC = ((): Context => {
-      const newC_: Context = addFromsToScope(g, c, s.from || []);
-
-      const inferredNullability = s.where
-        ? inferNullability(newC_, s.where)
-        : [];
-
+  // WITH clause
+  if (s.withClause) {
+    if (s.withClause.recursive) {
+      return notImplementedYet(s);
+    }
+    const ctes = s.withClause.ctes || [];
+    const resultingContext = ctes.reduce((ctx, cteNode) => {
+      if (!("CommonTableExpr" in cteNode)) return ctx;
+      const cte = cteNode.CommonTableExpr;
+      if (!cte.ctequery) return ctx;
+      const innerStmt = cte.ctequery;
+      const t = elabStatementNode(g, ctx, innerStmt);
       return {
-        ...newC_,
-        froms: newC_.froms.map((fr) => ({
-          name: fr.name,
-          type: {
-            kind: "record",
-            fields: fr.type.fields.map((fi) => {
-              const foundNullabilityInference = inferredNullability.find(
-                (inf) =>
-                  eqQNames(inf.fromName, fr.name) &&
-                  inf.fieldName === fi.name?.name
-              );
-              if (foundNullabilityInference && isNullable(fi.type)) {
-                const t =
-                  foundNullabilityInference.isNull === true
-                    ? fi.type
-                    : unnullify(fi.type);
-                return { name: fi.name, type: t, _expr: fi._expr };
-              } else {
-                return fi;
-              }
-            }),
-          },
-        })),
+        ...ctx,
+        decls: ctx.decls.concat({
+          name: { name: cte.ctename || "" },
+          type: t || { kind: "void" },
+        }),
       };
-    })();
-
-    if (s.where) {
-      const t = elabExpr(g, newC, s.where);
-      requireBoolean(s.where, t);
+    }, c);
+    // Elab the main statement (same SelectStmt but without withClause)
+    const mainSelect: SelectStmt = { ...s, withClause: undefined };
+    const res = elabSelectOrStatement(g, resultingContext, mainSelect);
+    if (res.kind !== "void" && res.kind !== "record") {
+      return {
+        kind: "record",
+        fields: [{ name: null, type: res, _expr: { SelectStmt: s } }],
+      };
+    } else {
+      return res;
     }
+  }
 
-    const names: string[] = [];
-    const fields = (s.columns || []).flatMap((c: SelectedColumn): Field[] => {
-      const n = c.alias ? c.alias : deriveNameFromExpr(c.expr);
-      // if (n === null) {
-      //   throw new UnableToDeriveFieldName(c.expr);
-      // }
-      if (!isNil(n)) {
-        if (names.includes(n.name)) {
-          throw new DuplicateFieldNames(c.expr, n.name);
-        }
-        names.push(n.name);
-      }
-
-      const t = elabExpr(g, newC, c.expr);
-
-      if (t.kind === "record") {
-        if (t.fields.length === 0) {
-          throw new KindMismatch(c.expr, t, "Record with no fields");
-        } else if (t.fields.length === 1) {
-          if (c.expr.type === "ref" && c.expr.name === "*") {
-            return t.fields;
-          } else {
-            return [{ name: n, type: t.fields[0].type, _expr: c.expr }];
-          }
-        } else {
-          // AFAIK, * is the only way to introduce multiple fields with one expression
-          if (c.expr.type === "ref" && c.expr.name === "*") {
-            return t.fields;
-          } else {
-            throw new KindMismatch(
-              c.expr,
-              t,
-              "Record with more than one field"
-            );
-          }
-        }
-      }
-
-      return [{ name: n, type: t, _expr: c.expr }];
-    });
-
-    if (s.limit && s.limit.limit) {
-      const t = elabExpr(g, newC, s.limit.limit);
-      unify(g, s.limit.limit, t, BuiltinTypes.Integer);
+  // UNION / INTERSECT / EXCEPT
+  if (s.op !== undefined && !enumEq(s.op, SetOperation, SetOperation.SETOP_NONE)) {
+    if (!s.larg || !s.rarg) {
+      throw new Error("Set operation without left/right args");
     }
-
-    if (s.limit && s.limit.offset) {
-      const t = elabExpr(g, newC, s.limit.offset);
-      unify(g, s.limit.offset, t, BuiltinTypes.Integer);
-    }
-
-    return {
-      kind: "record",
-      fields,
-    };
-  } else if (s.type === "union" || s.type === "union all") {
-    const typeL = elabSelect(g, c, s.left, null);
-    const typeR = elabSelect(g, c, s.right, null);
+    const typeL = elabSelect(g, c, s.larg, null);
+    const typeR = elabSelect(g, c, s.rarg, null);
+    const dummyNode: Node = { SelectStmt: s };
     if (typeL.kind === "void") {
-      throw new KindMismatch(
-        s.left,
-        typeL,
-        "Can't union a statement that returns nothing"
-      );
+      throw new KindMismatch(dummyNode, typeL, "Can't union a statement that returns nothing");
     }
     if (typeR.kind === "void") {
-      throw new KindMismatch(
-        s.right,
-        typeR,
-        "Can't union a statement that returns nothing"
-      );
+      throw new KindMismatch(dummyNode, typeR, "Can't union a statement that returns nothing");
     }
-    return unifyRecords(g, s, typeL, typeR);
-  } else if (s.type === "values") {
-    const typesPerRow: RecordT[] = s.values.map((exprs) => {
+    return unifyRecords(g, dummyNode, typeL, typeR);
+  }
+
+  // VALUES
+  if (s.valuesLists && s.valuesLists.length > 0) {
+    const dummyNode: Node = { SelectStmt: s };
+    const typesPerRow: RecordT[] = s.valuesLists.map((rowNode) => {
+      // Each row is a List node
+      const exprs: Node[] = "List" in rowNode ? (rowNode.List.items || []) : [];
       const fields = exprs.map((exp, i) => {
         const t_ = elabExpr(g, c, exp);
         const t = toSimpleT(t_);
@@ -1190,96 +1230,170 @@ export function elabSelect(
           return { name: colName, type: t, _expr: exp };
         }
       });
-      return {
-        kind: "record",
-        fields: fields,
-      };
+      return { kind: "record" as const, fields };
     });
     return typesPerRow.reduce(
-      (acc: RecordT, t: RecordT) => unifyRecords(g, s, acc, t),
+      (acc: RecordT, t: RecordT) => unifyRecords(g, dummyNode, acc, t),
       typesPerRow[0]
     );
-  } else if (s.type === "with") {
-    const resultingContext = s.bind.reduce((c, bind) => {
-      const t = elabStatement(g, c, bind.statement);
-      return {
-        ...c,
-        decls: c.decls.concat({
-          name: bind.alias,
-          type: t || { kind: "void" },
-        }),
-      };
-    }, c);
-    const res = elabStatement(g, resultingContext, s.in);
-    if (res.kind !== "void" && res.kind !== "record") {
-      return {
-        kind: "record",
-        fields: [
-          {
-            name: null,
-            type: res,
-            _expr: s,
-          },
-        ],
-      };
-    } else {
-      return res;
-    }
-  } else if (s.type === "with recursive") {
-    return notImplementedYet(s);
-  } else {
-    return checkAllCasesHandled(s.type);
   }
+
+  // Regular SELECT
+  const newC = ((): Context => {
+    const newC_: Context = addFromsToScope(g, c, s.fromClause || []);
+    const inferredNullability = s.whereClause
+      ? inferNullability(newC_, s.whereClause)
+      : [];
+    return {
+      ...newC_,
+      froms: newC_.froms.map((fr) => ({
+        name: fr.name,
+        type: {
+          kind: "record" as const,
+          fields: fr.type.fields.map((fi) => {
+            const foundNullabilityInference = inferredNullability.find(
+              (inf) =>
+                eqQNames(inf.fromName, fr.name) &&
+                inf.fieldName === fi.name?.name
+            );
+            if (foundNullabilityInference && isNullable(fi.type)) {
+              const t =
+                foundNullabilityInference.isNull === true
+                  ? fi.type
+                  : unnullify(fi.type);
+              return { name: fi.name, type: t, _expr: fi._expr };
+            } else {
+              return fi;
+            }
+          }),
+        },
+      })),
+    };
+  })();
+
+  if (s.whereClause) {
+    const t = elabExpr(g, newC, s.whereClause);
+    requireBoolean(s.whereClause, t);
+  }
+
+  const names: string[] = [];
+  const targetList = s.targetList || [];
+  const fields = targetList.flatMap((resTargetNode): Field[] => {
+    if (!("ResTarget" in resTargetNode)) return [];
+    const rt = resTargetNode.ResTarget;
+    const val = rt.val;
+    if (!val) return [];
+    const alias = rt.name ? { name: rt.name } : null;
+    const n = alias || deriveNameFromExpr(val);
+
+    if (!isNil(n)) {
+      if (names.includes(n.name)) {
+        throw new DuplicateFieldNames(val, n.name);
+      }
+      names.push(n.name);
+    }
+
+    const t = elabExpr(g, newC, val);
+
+    if (t.kind === "record") {
+      if (t.fields.length === 0) {
+        throw new KindMismatch(val, t, "Record with no fields");
+      } else if (t.fields.length === 1) {
+        if ("ColumnRef" in val) {
+          const ref = getColumnRef(val.ColumnRef);
+          if (ref.column === "*") return t.fields;
+        }
+        return [{ name: n, type: t.fields[0].type, _expr: val }];
+      } else {
+        if ("ColumnRef" in val) {
+          const ref = getColumnRef(val.ColumnRef);
+          if (ref.column === "*") return t.fields;
+        }
+        throw new KindMismatch(val, t, "Record with more than one field");
+      }
+    }
+
+    return [{ name: n, type: t, _expr: val }];
+  });
+
+  if (s.limitCount) {
+    const t = elabExpr(g, newC, s.limitCount);
+    unify(g, s.limitCount, t, BuiltinTypes.Integer);
+  }
+
+  if (s.limitOffset) {
+    const t = elabExpr(g, newC, s.limitOffset);
+    unify(g, s.limitOffset, t, BuiltinTypes.Integer);
+  }
+
+  return { kind: "record", fields };
+}
+
+// Helper to elab a SelectStmt that might have a with clause, returning VoidT or Type
+function elabSelectOrStatement(
+  g: Global,
+  c: Context,
+  s: SelectStmt
+): VoidT | Type {
+  // If the select has a selectStmt (InsertStmt etc nested), dispatch through elabStatementNode
+  return elabSelect(g, c, s, null);
 }
 
 function elabInsert(
   g: Global,
   c: Context,
-  s: InsertStatement
+  s: InsertStmt
 ): VoidT | RecordT {
+  const intoRV = s.relation!;
+  const intoName = rangeVarToQName(intoRV);
   const insertingInto: null | {
     readonly name: QName;
     readonly rel: RecordT;
-  } = g.tables.find((t) => eqQNames(t.name, s.into)) || null;
+  } = g.tables.find((t) => eqQNames(t.name, intoName)) || null;
   if (!insertingInto) {
-    throw new UnknownIdentifier(s, s.into);
+    throw new UnknownIdentifier(intoRV.location, intoName);
   }
 
-  const nameToAddInContext = s.into.alias || s.into.name;
+  const aliasName = rangeVarAlias(intoRV) || intoName.name;
   const newContext = {
     ...c,
     froms: c.froms.concat({
-      name: { name: nameToAddInContext },
+      name: { name: aliasName },
       type: insertingInto.rel,
     }),
   };
 
-  const columns: Field[] = s.columns
-    ? s.columns.map((c) => {
+  const dummyNode: Node = { InsertStmt: s };
+
+  const columns: Field[] = s.cols
+    ? s.cols.map((colNode) => {
+        if (!("ResTarget" in colNode)) throw new Error("Expected ResTarget in INSERT cols");
+        const rt = colNode.ResTarget;
+        const colName: QName = { name: rt.name || "" };
         const foundField = insertingInto.rel.fields.find((f) => {
-          if (!f.name) {
-            throw new Error("Assertion error: Table field without name");
-          }
-          return eqQNames(c, f.name);
+          if (!f.name) throw new Error("Assertion error: Table field without name");
+          return eqQNames(colName, f.name);
         });
         if (!foundField) {
-          throw new UnknownIdentifier(s, c);
+          throw new UnknownIdentifier(rt.location, colName);
         }
         return foundField;
       })
     : insertingInto.rel.fields;
 
-  const insertT = elabSelect(g, c, s.insert, null);
+  // The selectStmt contains the VALUES or SELECT
+  if (!s.selectStmt || !("SelectStmt" in s.selectStmt)) {
+    throw new ColumnsMismatch(dummyNode, { expected: columns.length, actual: 0 });
+  }
+  const insertSelect = s.selectStmt.SelectStmt;
+  const insertT = elabSelect(g, c, insertSelect, null);
 
   if (insertT.kind === "void") {
-    throw new ColumnsMismatch(s.insert, {
-      expected: columns.length,
-      actual: 0,
-    });
+    throw new ColumnsMismatch(dummyNode, { expected: columns.length, actual: 0 });
   }
 
   if (insertT.fields.length !== columns.length) {
-    throw new ColumnsMismatch(s.insert, {
+    throw new ColumnsMismatch(dummyNode, {
       expected: columns.length,
       actual: insertT.fields.length,
     });
@@ -1287,115 +1401,142 @@ function elabInsert(
 
   insertT.fields.forEach((insertField, i) => {
     const col = columns[i];
-
     castOrThrow(
       g,
-      insertField._expr || s.insert,
+      insertField._expr || dummyNode,
       insertField.type,
       col.type,
       "assignment"
     );
   });
 
-  if (s.returning) {
+  if (s.returningList && s.returningList.length > 0) {
     return {
       kind: "record",
-      fields: s.returning.map((selectedCol) => {
-        const t_ = elabExpr(g, newContext, selectedCol.expr);
+      fields: s.returningList.map((rtNode) => {
+        if (!("ResTarget" in rtNode)) throw new Error("Expected ResTarget in RETURNING");
+        const rt = rtNode.ResTarget;
+        const val = rt.val!;
+        const t_ = elabExpr(g, newContext, val);
         const t = toSimpleT(t_);
         if (!t) {
-          throw new KindMismatch(
-            selectedCol.expr,
-            t_,
-            "Need simple type here, not a record"
-          );
-        } else {
-          return {
-            name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
-            type: t,
-            _expr: selectedCol.expr,
-          };
+          throw new KindMismatch(val, t_, "Need simple type here, not a record");
         }
+        return {
+          name: (rt.name ? { name: rt.name } : null) || deriveNameFromExpr(val),
+          type: t,
+          _expr: val,
+        };
       }),
     };
   } else {
     return { kind: "void" };
   }
-
-  // TODO: typecheck s.onConflict
 }
 
-function elabDeleteOrUpdate(
+function elabDelete(
   g: Global,
   c: Context,
-  s: DeleteStatement | UpdateStatement
+  s: DeleteStmt
 ): VoidT | RecordT {
-  const tableName = s.type === "delete" ? s.from : s.table;
-  const tableDef: null | {
-    readonly name: QName;
-    readonly rel: RecordT;
-  } = g.tables.find((t) => eqQNames(t.name, tableName)) || null;
-
+  const rv = s.relation!;
+  const tableName = rangeVarToQName(rv);
+  const tableDef = g.tables.find((t) => eqQNames(t.name, tableName)) || null;
   if (!tableDef) {
-    throw new UnknownIdentifier(s, tableName);
+    throw new UnknownIdentifier(rv.location, tableName);
   }
-  const nameToAddInContext = tableName.alias || tableName.name;
+  const aliasName = rangeVarAlias(rv) || tableName.name;
+  const newContext = {
+    ...c,
+    froms: c.froms.concat({
+      name: { name: aliasName },
+      type: tableDef.rel,
+    }),
+  };
+
+  if (s.whereClause) {
+    const whereT = elabExpr(g, newContext, s.whereClause);
+    requireBoolean(s.whereClause, whereT);
+  }
+
+  return elabReturningList(g, newContext, s.returningList);
+}
+
+function elabUpdate(
+  g: Global,
+  c: Context,
+  s: UpdateStmt
+): VoidT | RecordT {
+  const rv = s.relation!;
+  const tableName = rangeVarToQName(rv);
+  const tableDef = g.tables.find((t) => eqQNames(t.name, tableName)) || null;
+  if (!tableDef) {
+    throw new UnknownIdentifier(rv.location, tableName);
+  }
+  const aliasName = rangeVarAlias(rv) || tableName.name;
   const newC_ = {
     ...c,
     froms: c.froms.concat({
-      name: { name: nameToAddInContext },
+      name: { name: aliasName },
       type: tableDef.rel,
     }),
   };
 
   const newContext =
-    s.type === "update" && s.from ? addFromsToScope(g, newC_, [s.from]) : newC_;
+    s.fromClause && s.fromClause.length > 0
+      ? addFromsToScope(g, newC_, s.fromClause)
+      : newC_;
 
-  if (s.type === "update") {
-    for (let setStatement of s.sets) {
-      const t = elabExpr(g, newContext, setStatement.value);
-      const field = tableDef.rel.fields.find(
-        (f) => f.name && eqQNames(f.name, setStatement.column)
-      );
-      if (!field) {
-        throw new UnknownField(
-          setStatement.column,
-          tableDef.rel,
-          setStatement.column
-        );
-      }
-      const simpleT = toSimpleT(t);
-      if (simpleT === null) {
-        throw new KindMismatch(setStatement.value, t, "");
-      }
-      unifySimplesOrThrow(g, setStatement.value, field.type, simpleT);
+  for (let rtNode of s.targetList || []) {
+    if (!("ResTarget" in rtNode)) continue;
+    const rt = rtNode.ResTarget;
+    const colName: QName = { name: rt.name || "" };
+    const val = rt.val;
+    if (!val) continue;
+    const t = elabExpr(g, newContext, val);
+    const field = tableDef.rel.fields.find(
+      (f) => f.name && eqQNames(f.name, colName)
+    );
+    if (!field) {
+      throw new UnknownField(val, tableDef.rel, colName);
     }
+    const simpleT = toSimpleT(t);
+    if (simpleT === null) {
+      throw new KindMismatch(val, t, "");
+    }
+    unifySimplesOrThrow(g, val, field.type, simpleT);
   }
 
-  if (s.where) {
-    const whereT = elabExpr(g, newContext, s.where);
-    requireBoolean(s.where, whereT);
+  if (s.whereClause) {
+    const whereT = elabExpr(g, newContext, s.whereClause);
+    requireBoolean(s.whereClause, whereT);
   }
 
-  if (s.returning) {
+  return elabReturningList(g, newContext, s.returningList);
+}
+
+function elabReturningList(
+  g: Global,
+  c: Context,
+  returningList: Node[] | undefined
+): VoidT | RecordT {
+  if (returningList && returningList.length > 0) {
     return {
       kind: "record",
-      fields: s.returning.map((selectedCol) => {
-        const t_ = elabExpr(g, newContext, selectedCol.expr);
+      fields: returningList.map((rtNode) => {
+        if (!("ResTarget" in rtNode)) throw new Error("Expected ResTarget");
+        const rt = rtNode.ResTarget;
+        const val = rt.val!;
+        const t_ = elabExpr(g, c, val);
         const t = toSimpleT(t_);
         if (!t) {
-          throw new KindMismatch(
-            selectedCol.expr,
-            t_,
-            "Need simple type here, not a record"
-          );
-        } else {
-          return {
-            name: selectedCol.alias || deriveNameFromExpr(selectedCol.expr),
-            type: t,
-            _expr: selectedCol.expr,
-          };
+          throw new KindMismatch(val, t_, "Need simple type here, not a record");
         }
+        return {
+          name: (rt.name ? { name: rt.name } : null) || deriveNameFromExpr(val),
+          type: t,
+          _expr: val,
+        };
       }),
     };
   } else {
@@ -1427,56 +1568,69 @@ export type functionType = {
 export function doCreateFunction(
   g: Global,
   c: Context,
-  s: CreateFunctionStatement
+  s: CreateFunctionStmt
 ): functionType {
-  const name = s.name;
-  if (!s.language) {
-    throw new Error(`Please provide language at ${showLocation(s._location)}`);
+  const name = getQNameFromNodes(s.funcname || []);
+  const funcOpts = extractFunctionOptions(s);
+  const language = funcOpts.language;
+  const code = funcOpts.code;
+  if (!language) {
+    throw new Error(`Please provide language for function ${showQName(name)}`);
   }
-  if (s.code === undefined) {
-    throw new ErrorWithLocation(
-      s._location,
-      "Function definition without body"
-    );
+  if (code === undefined) {
+    throw new ErrorWithLocation(undefined, "Function definition without body");
   }
-  if (s.language && s.language.name.toLowerCase() === "sql") {
-    const inputs = s.arguments.map((arg) => {
+  if (language.toLowerCase() === "sql") {
+    const params = (s.parameters || [])
+      .filter((n): n is { FunctionParameter: FunctionParameter } => "FunctionParameter" in n)
+      .map((n) => n.FunctionParameter)
+      .filter((p) => !p.mode || enumEq(p.mode, FunctionParameterMode, FunctionParameterMode.FUNC_PARAM_IN) || enumEq(p.mode, FunctionParameterMode, FunctionParameterMode.FUNC_PARAM_DEFAULT));
+
+    const inputs = params.map((arg) => {
       if (!arg.name) {
         throw new Error(
-          "Please provide name for all function arguments at " +
-            showLocation(s._location)
+          "Please provide name for all function arguments for " + showQName(name)
         );
       }
-
-      const paramT = mkType(g, arg.type, [{ type: "not null" }]);
-      // !!!!!!!!!!!!
-      // Default rule of THIS typechecker:  params are NOT NULL
-      // , unless defined as eg: (myname int default null)
-      //   or nullable arrays  : (myname int default '{NULL}')
-      // !!!!!!!!!!!!
-      if (
-        arg.default &&
-        ((arg.default.type === "string" &&
-          arg.default.value.toLowerCase() === "{null}") ||
-          (arg.default.type === "array" &&
-            arg.default.expressions[0].type === "null")) &&
-        paramT.kind === "array"
-      ) {
-        return {
-          name: arg.name,
-          type: nullifyArray(paramT),
-          referenceCounter: 0,
-        };
-      }
-      if (arg.default && arg.default.type === "null") {
-        return {
-          name: arg.name,
-          type: nullify(paramT),
-          referenceCounter: 0,
-        };
+      const paramT = mkType(g, arg.argType!, [{ contype: ConstrType.CONSTR_NOTNULL } as unknown as Constraint]);
+      // Default rule: params are NOT NULL unless default is null
+      if (arg.defexpr) {
+        const defNode = arg.defexpr;
+        // Check for DEFAULT NULL
+        if ("A_Const" in defNode && defNode.A_Const.isnull) {
+          return {
+            name: { name: arg.name },
+            type: nullify(paramT),
+            referenceCounter: 0,
+          };
+        }
+        // Check for DEFAULT '{NULL}' (string) for nullable arrays
+        if (
+          "A_Const" in defNode &&
+          defNode.A_Const.sval &&
+          defNode.A_Const.sval.sval?.toLowerCase() === "{null}" &&
+          paramT.kind === "array"
+        ) {
+          return {
+            name: { name: arg.name },
+            type: nullifyArray(paramT),
+            referenceCounter: 0,
+          };
+        }
+        // Check for DEFAULT ARRAY[NULL] for nullable arrays
+        if ("A_ArrayExpr" in defNode && paramT.kind === "array") {
+          const elts = defNode.A_ArrayExpr.elements || [];
+          if (elts.length > 0 && "A_Const" in elts[0] && elts[0].A_Const.isnull) {
+            return {
+              name: { name: arg.name },
+              type: nullifyArray(paramT),
+              referenceCounter: 0,
+            };
+          }
+        }
       }
       return {
-        name: arg.name,
+        name: { name: arg.name },
         type: paramT,
         referenceCounter: 0,
       };
@@ -1486,63 +1640,49 @@ export function doCreateFunction(
       decls: c.decls.concat(inputs),
     };
 
-    // TODO adjust locations based on location of "s.code"
-    const body = parse(s.code, { locationTracking: true });
+    const bodyStatements = parseStatements(code);
 
-    if (body.length === 0) {
-      // empty function body
+    if (bodyStatements.length === 0) {
       return {
         name,
         inputs,
         returns: { kind: "void" },
         multipleRows: false,
-        code: s.code,
-        language: s.language.name,
+        code,
+        language,
       };
     } else {
-      // TODO check rest of body for type errors
-      const lastStatement = body[body.length - 1];
-      const returnType = elabStatement(g, contextForBody, lastStatement);
+      const lastStatement = bodyStatements[bodyStatements.length - 1];
+      const returnType = elabStatementNode(g, contextForBody, lastStatement.stmt!);
+
+      const returnTypeName = s.returnType;
+      const isSetof = s.returnType ? (function () {
+        // Check if returnType has setof by checking if it has arrayBounds or the setof field
+        // In the new AST, setof is indicated in the CreateFunctionStmt itself
+        // Actually, the returnType in CreateFunctionStmt is a TypeName which has setof field
+        return (s.returnType as any)?.setof === true;
+      })() : false;
 
       const unifiedReturnType = (function (): Type | VoidT {
-        const location =
-          s.returns?.type._location || s.name._location || s._location;
-        const dummyExpr = {
-          // TODO!
-          _location: location,
-          type: "null" as const,
-        };
+        const location = returnTypeName?.location || name._location;
+        const dummyExpr: Node = { A_Const: { isnull: true, location } };
 
         if (returnType.kind === "void") {
-          if (
-            !s.returns ||
-            (s.returns.type.kind === undefined &&
-              s.returns.type.name === "void")
-          ) {
+          if (!returnTypeName) {
             return { kind: "void" };
-          } else if (s.returns.type.kind === "table") {
-            throw new Error("RETURNS TABLE is not supported yet");
-          } else {
-            const annotatedType = mkType(g, s.returns.type, []);
-            throw new KindMismatch(
-              dummyExpr,
-              annotatedType,
-              "Function returns void"
-            );
           }
+          const retTypeInfo = getTypeName(returnTypeName);
+          if (retTypeInfo.name === "void") {
+            return { kind: "void" };
+          }
+          const annotatedType = mkType(g, returnTypeName, []);
+          throw new KindMismatch(dummyExpr, annotatedType, "Function returns void");
         }
-        if (!s.returns) {
-          throw new KindMismatch(
-            dummyExpr,
-            { kind: "void" },
-            "Function needs return type"
-          );
-        } else if (s.returns.type.kind === "table") {
-          throw new Error("RETURNS TABLE is not supported yet");
-        } else if (
-          s.returns.type.kind === undefined &&
-          s.returns.type.name === "record"
-        ) {
+        if (!returnTypeName) {
+          throw new KindMismatch(dummyExpr, { kind: "void" }, "Function needs return type");
+        }
+        const retTypeInfo = getTypeName(returnTypeName);
+        if (retTypeInfo.name === "record") {
           if (returnType.kind === "record") {
             return returnType;
           } else {
@@ -1552,42 +1692,38 @@ export function doCreateFunction(
               "Function returns record type but type annotation disagrees"
             );
           }
-        } else {
-          const annotatedType = mkType(g, s.returns.type, [
-            { type: "not null" } /* not sure about this one */,
-          ]);
-          try {
-            return unify(g, dummyExpr, returnType, annotatedType);
-          } catch (err) {
-            const mess = err instanceof ErrorWithLocation ? err.message : "";
-            if (err instanceof TypeMismatch) {
-              throw new TypeMismatch(
-                dummyExpr,
-                { expected: err.expected, actual: err.actual },
-                "Function return type mismatch"
-              );
-            } else {
-              throw new ErrorWithLocation(
-                location,
-                "Function return type mismatch: \n" + mess
-              );
-            }
+        }
+        const annotatedType = mkType(g, returnTypeName, [
+          { contype: ConstrType.CONSTR_NOTNULL } as unknown as Constraint,
+        ]);
+        try {
+          return unify(g, dummyExpr, returnType, annotatedType);
+        } catch (err) {
+          const mess = err instanceof ErrorWithLocation ? err.message : "";
+          if (err instanceof TypeMismatch) {
+            throw new TypeMismatch(
+              dummyExpr,
+              { expected: err.expected, actual: err.actual },
+              "Function return type mismatch"
+            );
+          } else {
+            throw new ErrorWithLocation(
+              location,
+              "Function return type mismatch: \n" + mess
+            );
           }
         }
       })();
 
-      if (
-        s.returns &&
-        s.returns.type.kind === undefined &&
-        s.returns.type.name === "record"
-      ) {
-        if (unifiedReturnType.kind !== "record") {
-          throw new ErrorWithLocation(
-            s._location,
-            `Function should return record, but returns ${JSON.stringify(
-              unifiedReturnType
-            )}`
-          );
+      if (returnTypeName) {
+        const retTypeInfo = getTypeName(returnTypeName);
+        if (retTypeInfo.name === "record") {
+          if (unifiedReturnType.kind !== "record") {
+            throw new ErrorWithLocation(
+              undefined,
+              `Function should return record, but returns ${JSON.stringify(unifiedReturnType)}`
+            );
+          }
         }
       }
 
@@ -1600,9 +1736,9 @@ export function doCreateFunction(
         name,
         inputs: inputs.map((inp) => ({ name: inp.name, type: inp.type })),
         returns: unifiedReturnType,
-        multipleRows: (s.returns && s.returns.setof) || false,
-        code: s.code,
-        language: s.language.name,
+        multipleRows: isSetof,
+        code,
+        language,
       };
     }
   } else {
@@ -1613,13 +1749,13 @@ export function doCreateFunction(
 type Joined = { name: QName; rel: RecordT };
 type Nullable<T> = T | null;
 
-function findRel(g: Global, c: Context, f: From, n: QName): Nullable<RecordT> {
+function findRel(g: Global, c: Context, fromNode: Node, n: QName): Nullable<RecordT> {
   const d = c.decls.find((d) => eqQNames(d.name, n));
   if (d) {
     if (d.type.kind === "record") {
       return d.type;
     } else {
-      throw new KindMismatch_From(f, d.type, "Expecting a record or table");
+      throw new KindMismatch_From(fromNode, d.type, "Expecting a record or table");
     }
   } else {
     const t = g.tables.find((t) => eqQNames(t.name, n));
@@ -1636,37 +1772,37 @@ function findRel(g: Global, c: Context, f: From, n: QName): Nullable<RecordT> {
   }
 }
 
-function showLocation(loc: NodeLocation | undefined): string {
-  if (!loc) {
+function showLocation(loc: number | undefined): string {
+  if (loc === undefined) {
     return "??";
   } else {
-    return loc.start + " - " + loc.end;
+    return String(loc);
   }
 }
 
 export class ErrorWithLocation {
-  public l: NodeLocation | undefined;
+  public l: number | undefined;
   public message: string;
-  constructor(l: NodeLocation | undefined, m: string) {
+  constructor(l: number | undefined, m: string) {
     this.message = m;
     this.l = l;
   }
 }
 
 class NotImplementedYet extends ErrorWithLocation {
-  constructor(node: PGNode | null) {
+  constructor(node: any) {
     const m = node
-      ? `: \n
-${JSON.stringify(node)} @ ${node._location}`
+      ? `: \n${JSON.stringify(node).slice(0, 500)}`
       : "";
-    super(node?._location, `NotImplementedYet: ${m}`);
+    super(nodeLocation(node), `NotImplementedYet: ${m}`);
   }
 }
 
 class UnknownField extends ErrorWithLocation {
-  constructor(e: PGNode, s: RecordT, n: Name) {
+  constructor(e: Node | number | undefined, s: RecordT, n: Name | QName) {
+    const loc = typeof e === "number" || e === undefined ? e : nodeLocation(e);
     super(
-      e._location,
+      loc,
       `UnknownField ${n.name}.
 Keys present:
 ${s.fields
@@ -1676,13 +1812,14 @@ ${s.fields
   }
 }
 export class UnknownIdentifier extends ErrorWithLocation {
-  constructor(e: PGNode, m: QName) {
-    super(e._location, `UnknownIdentifier ${showQName(m)}`);
+  constructor(e: Node | number | undefined, m: QName) {
+    const loc = typeof e === "number" || e === undefined ? e : nodeLocation(e);
+    super(loc, `UnknownIdentifier ${showQName(m)}`);
   }
 }
 export class CantReduceToSimpleT extends ErrorWithLocation {
-  constructor(e: PGNode, m: Type) {
-    super(e._location, `Can't reduce to simple type: ${showType(m)}`);
+  constructor(e: Node, m: Type) {
+    super(nodeLocation(e), `Can't reduce to simple type: ${showType(m)}`);
   }
 }
 
@@ -1750,85 +1887,63 @@ export function showSqlType(t: Type): string {
   }
 }
 export class UnknownUnaryOp extends ErrorWithLocation {
-  constructor(e: Expr, n: QName, t1: Type) {
+  constructor(e: Node, n: QName, t1: Type) {
     super(
-      e._location,
+      nodeLocation(e),
       `Can't apply unary operator "${showQName(n)}" to ${showType(t1)}`
     );
   }
 }
 export class UnknownBinaryOp extends ErrorWithLocation {
-  constructor(e: Expr, n: QName, t1: Type, t2: Type) {
+  constructor(e: Node, n: QName, t1: Type, t2: Type) {
     super(
-      e._location,
-      `Can't apply operator "${showQName(n)}" to ${showType(t1)} and ${showType(
-        t2
-      )}`
+      nodeLocation(e),
+      `Can't apply operator "${showQName(n)}" to ${showType(t1)} and ${showType(t2)}`
     );
   }
 }
 export class UnknownFunction extends ErrorWithLocation {
-  constructor(e: Expr, n: QName) {
-    super(e._location, `Unknown function "${showQName(n)}"`);
+  constructor(e: Node, n: QName) {
+    super(nodeLocation(e), `Unknown function "${showQName(n)}"`);
   }
 }
 export class InvalidArguments extends ErrorWithLocation {
-  constructor(e: Expr, n: QName, argTs: Type[], reason?: string) {
+  constructor(e: Node, n: QName, argTs: Type[], reason?: string) {
     const argsString = argTs.map((t) => showType(t)).join(", ");
     super(
-      e._location,
-      `Can't apply function "${showQName(n)}" to arguments: ${argsString}. ${
-        reason || ""
-      }`
+      nodeLocation(e),
+      `Can't apply function "${showQName(n)}" to arguments: ${argsString}. ${reason || ""}`
     );
   }
 }
 export class TypecheckerError extends ErrorWithLocation {
-  constructor(e: Expr, m: string) {
-    super(e._location, `Typechecker error: ${m}`);
+  constructor(e: Node, m: string) {
+    super(nodeLocation(e), `Typechecker error: ${m}`);
   }
 }
 class AmbiguousIdentifier extends ErrorWithLocation {
-  constructor(e: Expr, m: QName, records: QName[]) {
+  constructor(e: Node, m: QName, records: QName[]) {
     super(
-      e._location,
-      `AmbiguousIdentifier ${showQName(m)} @ ${showLocation(
-        m._location
-      )} present in ${JSON.stringify(records)}`
+      nodeLocation(e),
+      `AmbiguousIdentifier ${showQName(m)} @ ${showLocation(m._location)} present in ${JSON.stringify(records)}`
     );
   }
 }
 class ColumnsMismatch extends ErrorWithLocation {
-  constructor(e: Expr, opts: { expected: number; actual: number }) {
+  constructor(e: Node, opts: { expected: number; actual: number }) {
     super(
-      e._location,
+      nodeLocation(e),
       `ColumnsMismatch: Expecting ${opts.expected} columns, got ${opts.actual} columns`
     );
   }
 }
 class KindMismatch extends ErrorWithLocation {
-  constructor(e: Expr, type: Type | VoidT, errormsg: string) {
+  constructor(e: Node, type: Type | VoidT, errormsg: string) {
     super(
-      e._location,
+      nodeLocation(e),
       `
 KindMismatch:
-${toSql.expr(e)}
-
-${errormsg}}
-
-Type: 
-${JSON.stringify(type)}
-`
-    );
-  }
-}
-class KindMismatch_From extends ErrorWithLocation {
-  constructor(f: From, type: Type | VoidT, errormsg: string) {
-    super(
-      f._location,
-      `
-KindMismatch_From:
-${toSql.from(f)}
+${nodeToSql(e)}
 
 ${errormsg}}
 
@@ -1838,21 +1953,29 @@ ${JSON.stringify(type)}
     );
   }
 }
-// class UnableToDeriveFieldName extends ErrorWithLocation {
-//   constructor(e: Expr) {
-//     super(
-//       e._location,
-//       `Unable to derive field name for expression ${e}, please provide an alias with <expr> AS <name>`
-//     );
-//   }
-// }
-class DuplicateFieldNames extends ErrorWithLocation {
-  constructor(e: Expr, name: string) {
+class KindMismatch_From extends ErrorWithLocation {
+  constructor(f: Node, type: Type | VoidT, errormsg: string) {
     super(
-      e._location,
+      nodeLocation(f),
+      `
+KindMismatch_From:
+${nodeToSql(f)}
+
+${errormsg}}
+
+Type:
+${JSON.stringify(type)}
+`
+    );
+  }
+}
+class DuplicateFieldNames extends ErrorWithLocation {
+  constructor(e: Node, name: string) {
+    super(
+      nodeLocation(e),
       `Duplicate column names: expression:
 
-${toSql.expr(e)}
+${nodeToSql(e)}
 
 has field name
 
@@ -1870,7 +1993,7 @@ export class TypeMismatch extends ErrorWithLocation {
   public actual: Type;
   public mess?: string;
   constructor(
-    e: Expr,
+    e: Node,
     ts: {
       expected: Type;
       actual: Type;
@@ -1878,10 +2001,10 @@ export class TypeMismatch extends ErrorWithLocation {
     mess?: string
   ) {
     super(
-      e._location,
+      nodeLocation(e),
       `
 TypeMismatch:
-${toSql.expr(e)}
+${nodeToSql(e)}
 
 ${mess ? mess : ""}
 
@@ -1903,14 +2026,14 @@ export class CannotCast extends ErrorWithLocation {
   public from: Type;
   public to: Type;
   constructor(
-    e: Expr,
+    e: Node,
     ts: {
       from: Type;
       to: Type;
     }
   ) {
     super(
-      e._location,
+      nodeLocation(e),
       `
 Cannot cast:
 ${JSON.stringify(ts.from)}
@@ -1919,7 +2042,7 @@ to
 ${JSON.stringify(ts.to)}}
 
 in expr:
-${toSql.expr(e)}
+${nodeToSql(e)}
 `
     );
 
@@ -1928,8 +2051,8 @@ ${toSql.expr(e)}
   }
 }
 
-const warnings: [Expr, string][] = [];
-function registerWarning(e: Expr, message: string) {
+const warnings: [Node, string][] = [];
+function registerWarning(e: Node, message: string) {
   warnings.push([e, message]);
 }
 
@@ -1951,74 +2074,98 @@ function doSingleFrom(
   g: Global,
   c: Context,
   currentJoined: Joined[],
-  f: From
+  f: Node
 ): Joined[] {
-  function getJoined(f: From): Joined {
-    if (f.type === "statement") {
-      const cWithLateral =
-        f.lateral === true ? mergeJoined(c, currentJoined) : c;
-      const t = elabSelect(g, cWithLateral, f.statement, f.columnNames || null);
+  // Handle JoinExpr by recursively processing left and right
+  if ("JoinExpr" in f) {
+    const je = f.JoinExpr;
+    // Process left side first
+    let joined = currentJoined;
+    if (je.larg) {
+      joined = doSingleFrom(g, c, joined, je.larg);
+    }
+    // Process right side
+    if (je.rarg) {
+      joined = doSingleFrom(g, c, joined, je.rarg);
+    }
+    // Process ON clause
+    if (je.quals) {
+      const t = elabExpr(g, mergeJoined(c, joined), je.quals);
+      requireBoolean(je.quals, t);
+    }
+    // Handle nullification for LEFT/RIGHT/FULL joins
+    // For LEFT JOIN: right side gets nullified
+    // For RIGHT JOIN: left side gets nullified
+    // For FULL JOIN: both sides get nullified
+    if (enumEq(je.jointype, JoinType, JoinType.JOIN_LEFT) || enumEq(je.jointype, JoinType, JoinType.JOIN_FULL)) {
+      // Nullify the last-added joined (the right side)
+      if (joined.length > 0) {
+        const last = joined[joined.length - 1];
+        joined = joined.slice(0, -1).concat({ ...last, rel: nullifyRecord(last.rel) });
+      }
+    }
+    if (enumEq(je.jointype, JoinType, JoinType.JOIN_RIGHT) || enumEq(je.jointype, JoinType, JoinType.JOIN_FULL)) {
+      // Nullify all existing (the left side)
+      joined = joined.map((j, i) =>
+        i < joined.length - 1 ? { ...j, rel: nullifyRecord(j.rel) } : j
+      );
+    }
+    return joined;
+  }
+
+  function getJoined(f: Node): Joined {
+    if ("RangeSubselect" in f) {
+      const rs = f.RangeSubselect;
+      const cWithLateral = rs.lateral ? mergeJoined(c, currentJoined) : c;
+      if (!rs.subquery || !("SelectStmt" in rs.subquery)) {
+        throw new Error("RangeSubselect without SelectStmt");
+      }
+      // Extract column aliases from the alias if present
+      const columnNames = rs.alias?.colnames
+        ? rs.alias.colnames.map((n: Node): Name => {
+            if ("String" in n) return { name: n.String.sval || "" };
+            return { name: "" };
+          })
+        : null;
+      const t = elabSelect(g, cWithLateral, rs.subquery.SelectStmt, columnNames);
       if (t.kind === "void") {
         throw new KindMismatch(
-          f.statement,
+          f,
           t,
           "Can't bind a statement that returns void in a FROM statement"
         );
       }
       return {
-        name: {
-          name: f.alias,
-          _location: f._location,
-        },
+        name: { name: rs.alias?.aliasname || "" },
         rel: t,
       };
-    } else if (f.type === "call") {
+    } else if ("RangeFunction" in f) {
       return notImplementedYet(f);
-    } else if (f.type === "table") {
-      if ((f.name.columnNames || []).length > 0) {
-        notImplementedYet(f);
-      }
-      const foundRel = findRel(g, c, f, f.name);
+    } else if ("RangeVar" in f) {
+      const rv = f.RangeVar;
+      const tableName = rangeVarToQName(rv);
+      const foundRel = findRel(g, c, f, tableName);
       if (!foundRel) {
-        throw new UnknownIdentifier(f, f.name);
+        throw new UnknownIdentifier(f, tableName);
       }
       return {
         name: {
-          name: f.name.alias || f.name.name,
-          _location: f.name._location,
+          name: rangeVarAlias(rv) || tableName.name,
+          _location: rv.location,
         },
         rel: foundRel,
       };
     } else {
-      return checkAllCasesHandled(f);
+      return notImplementedYet(f);
     }
   }
 
   const newJoined = getJoined(f);
-
-  if (f.join?.on) {
-    const t = elabExpr(
-      g,
-      mergeJoined(c, currentJoined.concat(newJoined)),
-      f.join.on
-    );
-    requireBoolean(f.join.on, t);
-  }
-
-  const newJoinedNullified =
-    f.join && (f.join.type === "FULL JOIN" || f.join.type === "LEFT JOIN")
-      ? { ...newJoined, rel: nullifyRecord(newJoined.rel) }
-      : newJoined;
-
-  const existingJoinedNullified =
-    f.join && (f.join.type === "FULL JOIN" || f.join.type === "RIGHT JOIN")
-      ? currentJoined.map((fr) => ({ ...fr, rel: nullifyRecord(fr.rel) }))
-      : currentJoined;
-
-  return existingJoinedNullified.concat(newJoinedNullified);
+  return currentJoined.concat(newJoined);
 }
-function addFromsToScope(g: Global, c: Context, froms: From[]): Context {
-  const inFroms: Joined[] = froms.reduce(function (acc: Joined[], f: From) {
+
+function addFromsToScope(g: Global, c: Context, froms: Node[]): Context {
+  const inFroms: Joined[] = froms.reduce(function (acc: Joined[], f: Node) {
     return doSingleFrom(g, c, acc, f);
   }, []);
   return mergeJoined(c, inFroms);
@@ -2033,10 +2180,11 @@ function lookupInRecord(s: RecordT, name: Name): SimpleT | null {
   }
 }
 
-function elabRef(c: Context, e: ExprRef): Type {
-  if (e.name === "*") {
-    const tab = e.table;
-    if (tab !== undefined) {
+function elabRef(c: Context, e: Node, ref: ColumnRef): Type {
+  const info = getColumnRef(ref);
+  if (info.column === "*") {
+    if (info.table !== undefined) {
+      const tab: QName = { name: info.table };
       const found = c.froms.find((f) => eqQNames(f.name, tab));
       if (!found) {
         throw new UnknownIdentifier(e, tab);
@@ -2053,13 +2201,14 @@ function elabRef(c: Context, e: ExprRef): Type {
       };
     }
   } else {
-    return throwIfError(lookupRef(c, e)).type;
+    return throwIfError(lookupRef(c, e, info)).type;
   }
 }
 
 function lookupRef(
   c: Context,
-  e: ExprRef
+  e: Node,
+  info: { table?: string; column: string }
 ):
   | ErrorWithLocation
   | {
@@ -2069,9 +2218,10 @@ function lookupRef(
       };
       type: SimpleT;
     } {
-  assert(e.name !== "*");
-  const tableName = e.table;
-  if (tableName) {
+  assert(info.column !== "*");
+  const colName: Name = { name: info.column };
+  if (info.table) {
+    const tableName: QName = { name: info.table };
     const table = c.froms.find((d) => eqQNames(d.name, tableName));
     if (!table) {
       return new UnknownIdentifier(e, tableName);
@@ -2079,15 +2229,15 @@ function lookupRef(
     if (!(table.type.kind === "record")) {
       return new KindMismatch(e, table.type, "Expecting Record");
     }
-    const field = lookupInRecord(table.type, e);
+    const field = lookupInRecord(table.type, colName);
     if (!field) {
-      return new UnknownField(e, table.type, e);
+      return new UnknownField(e, table.type, colName);
     }
     return {
       type: field,
       from: {
         fromName: tableName,
-        fieldName: e.name,
+        fieldName: info.column,
       },
     };
   } else {
@@ -2096,38 +2246,37 @@ function lookupRef(
       field: Name;
       type: SimpleT;
     }[] = mapPartial(c.froms, (t) => {
-      const foundfield = lookupInRecord(t.type, e);
+      const foundfield = lookupInRecord(t.type, colName);
       return foundfield
-        ? { fromName: t.name, field: e, type: foundfield }
+        ? { fromName: t.name, field: colName, type: foundfield }
         : null;
     });
 
+    const qname: QName = { name: info.column };
     const foundIdentifiers = mapPartial(c.decls, (t) => {
       if (t.type.kind === "record" || t.type.kind === "void") {
         return null;
       } else {
-        return t.name.name === e.name
+        return t.name.name === info.column
           ? { name: t.name.name, type: t.type, decl: t }
           : null;
       }
     });
 
-    // Fields seem to have precedence over eg: function params in postgres?
-    // We still throw ambiguousidentifier
     if (foundFields.length === 0) {
       if (foundIdentifiers.length === 0) {
-        return new UnknownIdentifier(e, e);
+        return new UnknownIdentifier(e, qname);
       } else if (foundIdentifiers.length === 1) {
         if (!isNil(foundIdentifiers[0].decl.referenceCounter)) {
           foundIdentifiers[0].decl.referenceCounter += 1;
         }
         return { type: foundIdentifiers[0].type, from: null };
       } else {
-        return new AmbiguousIdentifier(e, e, []);
+        return new AmbiguousIdentifier(e, qname, []);
       }
     } else if (foundFields.length === 1) {
       if (foundIdentifiers.length > 0) {
-        return new AmbiguousIdentifier(e, e, []);
+        return new AmbiguousIdentifier(e, qname, []);
       }
       return {
         type: foundFields[0].type,
@@ -2139,7 +2288,7 @@ function lookupRef(
     } else {
       return new AmbiguousIdentifier(
         e,
-        e,
+        qname,
         foundFields.map((f) => f.fromName)
       );
     }
@@ -2167,7 +2316,7 @@ function isNotEmpty<A>(a: A | null | undefined): a is A {
 
 function elabAnyCall(
   g: Global,
-  e: Expr,
+  e: Node,
   name: QName,
   nullPolicy: "CALLED ON NULL INPUT" | "STRICT", // RETURNS NULL ON NULL INPUT = STRICT
   sourceTypes: Type[],
@@ -2218,181 +2367,248 @@ function elabAnyCall(
   };
 }
 
-function elabUnaryOp(g: Global, c: Context, e: ExprUnary): Type {
-  const t1_ = elabExpr(g, c, e.operand);
-
+function elabNullTest(g: Global, c: Context, e: Node, nt: NullTest): Type {
+  const arg = nt.arg!;
+  const t1_ = elabExpr(g, c, arg);
   const t1 = toSimpleT(t1_);
   if (t1 === null) {
     throw new CantReduceToSimpleT(e, t1_);
   }
-
-  if (e.op === "IS NULL" || e.op === "IS NOT NULL") {
-    if (!isNullable(t1)) {
-      registerWarning(e, "IS (NOT) NULL check but operand is not nullable");
-    }
-    return BuiltinTypes.Boolean;
+  if (!isNullable(t1)) {
+    registerWarning(e, "IS (NOT) NULL check but operand is not nullable");
   }
+  return BuiltinTypes.Boolean;
+}
 
-  const found = builtinUnaryOperators
-    .filter(function (op) {
-      return eqQNames(
-        {
-          name: e.op,
-          schema: e.opSchema,
-        },
-        op.name
-      );
-    })
-    .map(function (op) {
-      const res = elabAnyCall(
-        g,
-        e,
-        op.name,
-        "STRICT", // TODO?
-        [t1],
-        [op.operand]
-      );
-      if (res instanceof ErrorWithLocation) {
-        return null;
-      } else {
+function elabBoolExpr(g: Global, c: Context, e: Node, be: BoolExpr): Type {
+  if (enumEq(be.boolop, BoolExprType, BoolExprType.NOT_EXPR)) {
+    const operand = (be.args || [])[0];
+    if (!operand) throw new Error("NOT without operand");
+    const t1_ = elabExpr(g, c, operand);
+    const t1 = toSimpleT(t1_);
+    if (t1 === null) {
+      throw new CantReduceToSimpleT(e, t1_);
+    }
+    // Try as unary NOT operator
+    const found = builtinUnaryOperators
+      .filter((op) => eqQNames({ name: "NOT" }, op.name))
+      .map((op) => {
+        const res = elabAnyCall(g, e, op.name, "STRICT", [t1], [op.operand]);
+        if (res instanceof ErrorWithLocation) return null;
         return [res.score, op, res.nullifyResultType] as const;
-      }
-    })
-    .filter(isNotEmpty)
-    .sort((m1, m2) => (m1[0] > m2[0] ? -1 : 1))[0];
-
-  if (!found) {
-    throw new UnknownUnaryOp(e, { name: e.op, schema: e.opSchema }, t1);
-  } else {
+      })
+      .filter(isNotEmpty)
+      .sort((m1, m2) => (m1[0] > m2[0] ? -1 : 1))[0];
+    if (!found) {
+      throw new UnknownUnaryOp(e, { name: "NOT" }, t1);
+    }
     const op = found[1];
     return found[2] ? nullify(op.result) : op.result;
   }
+  // AND / OR
+  const args = be.args || [];
+  let resultT: Type = elabExpr(g, c, args[0]);
+  requireBoolean(args[0], resultT);
+  for (let i = 1; i < args.length; i++) {
+    const t = elabExpr(g, c, args[i]);
+    requireBoolean(args[i], t);
+  }
+  return BuiltinTypes.Boolean;
 }
-function elabBinaryOp(g: Global, c: Context, e: ExprBinary): Type {
-  const t1_ = elabExpr(g, c, e.left);
-  const t2_ = elabExpr(g, c, e.right);
+function elabAExpr(g: Global, c: Context, e: Node, ae: A_Expr): Type {
+  const opName = getOperatorName(ae.name || []);
+  const opSchema = getOperatorSchema(ae.name || []);
 
-  const t1 = toSimpleT(t1_);
-  const t2 = toSimpleT(t2_);
-
-  if (t1 === null) {
-    throw new CantReduceToSimpleT(e, t1_);
-  }
-  if (t2 === null) {
-    throw new CantReduceToSimpleT(e, t2_);
-  }
-
-  // Specific test on = NULL, because it's always False (I think?) and is a cause of a lot of bugs
-  if (e.op === "=" && (e.left.type === "null" || e.right.type === "null")) {
-    throw new ErrorWithLocation(
-      e._location,
-      `Don't use \"= NULL\", use "IS NULL" instead`
-    );
-  }
-
-  if (
-    (e.op === "=" ||
-      e.op === "!=" ||
-      e.op === "@>" ||
-      e.op === "<@" ||
-      e.op === "&&") &&
-    t1.kind === "array" &&
-    t2.kind === "array"
-  ) {
-    unifySimplesOrThrow(g, e, t1.typevar, t2.typevar);
-    return BuiltinTypes.Boolean;
-  }
-
-  if (
-    e.op === "-" &&
-    t1.kind === "scalar" &&
-    eqQNames(t1.name, BuiltinTypes.TimestampMultiRange.name) &&
-    t2.kind === "scalar" &&
-    eqQNames(t2.name, BuiltinTypes.TimestampMultiRange.name)
-  ) {
-    return BuiltinTypes.TimestampMultiRange;
-  }
-
-  if (e.op === "IN" || e.op === "NOT IN") {
-    // TODO use elabAnyCall?
-    // No generics, so special casing this operator
+  // Handle IN / NOT IN
+  if (enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_IN)) {
+    const left = ae.lexpr!;
+    const right = ae.rexpr!;
+    const t1_ = elabExpr(g, c, left);
+    const t2_ = elabExpr(g, c, right);
+    const t1 = toSimpleT(t1_);
+    const t2 = toSimpleT(t2_);
+    if (t1 === null) throw new CantReduceToSimpleT(e, t1_);
+    if (t2 === null) throw new CantReduceToSimpleT(e, t2_);
     throwIfError(
       castSimples(g, e, t2, BuiltinTypeConstructors.List(t1), "implicit")
     );
     return BuiltinTypes.Boolean;
   }
 
-  if (e.op === "||") {
+  // Handle BETWEEN
+  if (enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_BETWEEN) || enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_NOT_BETWEEN)) {
+    const value = ae.lexpr!;
+    // rexpr is a List with lo and hi
+    const rangeList = ae.rexpr!;
+    const valueT = elabExpr(g, c, value);
+    if ("List" in rangeList) {
+      const items = rangeList.List.items || [];
+      if (items.length >= 2) {
+        const loT = elabExpr(g, c, items[0]);
+        const hiT = elabExpr(g, c, items[1]);
+        castOrThrow(g, e, valueT, loT, "implicit");
+        castOrThrow(g, e, valueT, hiT, "implicit");
+      }
+    }
+    return BuiltinTypes.Boolean;
+  }
+
+  // Handle NULLIF (A_Expr_Kind.AEXPR_NULLIF)
+  if (enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_NULLIF)) {
+    const left = ae.lexpr!;
+    const right = ae.rexpr!;
+    const t1 = elabExpr(g, c, left);
+    const t2 = elabExpr(g, c, right);
+    const s1 = toSimpleT(t1);
+    const s2 = toSimpleT(t2);
+    if (s1 === null) throw new CantReduceToSimpleT(e, t1);
+    if (s2 === null) throw new CantReduceToSimpleT(e, t2);
+    unifySimplesOrThrow(g, e, s1, s2);
+    return nullify(s1);
+  }
+
+  // Handle = ANY(...) / = ALL(...)  (AEXPR_OP_ANY / AEXPR_OP_ALL)
+  if (enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_OP_ANY) || enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_OP_ALL)) {
+    const left = ae.lexpr!;
+    const right = ae.rexpr!;
+    const tLeft_ = elabExpr(g, c, left);
+    const tLeft = toSimpleT(tLeft_);
+    if (tLeft === null) throw new CantReduceToSimpleT(e, tLeft_);
+    const tRight_ = elabExpr(g, c, right);
+    const tRight = toSimpleT(tRight_);
+    if (tRight === null) throw new CantReduceToSimpleT(e, tRight_);
+    // Right side should be an array; compare left with element type
+    if (tRight.kind === "array") {
+      unifySimplesOrThrow(g, e, tLeft, tRight.typevar);
+    } else {
+      unifySimplesOrThrow(g, e, tLeft, tRight);
+    }
+    return BuiltinTypes.Boolean;
+  }
+
+  // Regular binary op (AEXPR_OP)
+  const left = ae.lexpr;
+  const right = ae.rexpr;
+
+  // Unary operator (prefix)
+  if (!left && right) {
+    const t1_ = elabExpr(g, c, right);
+    const t1 = toSimpleT(t1_);
+    if (t1 === null) throw new CantReduceToSimpleT(e, t1_);
+
+    const found = builtinUnaryOperators
+      .filter((op) => eqQNames({ name: opName, schema: opSchema }, op.name))
+      .map((op) => {
+        const res = elabAnyCall(g, e, op.name, "STRICT", [t1], [op.operand]);
+        if (res instanceof ErrorWithLocation) return null;
+        return [res.score, op, res.nullifyResultType] as const;
+      })
+      .filter(isNotEmpty)
+      .sort((m1, m2) => (m1[0] > m2[0] ? -1 : 1))[0];
+
+    if (!found) {
+      throw new UnknownUnaryOp(e, { name: opName, schema: opSchema }, t1);
+    }
+    const op = found[1];
+    return found[2] ? nullify(op.result) : op.result;
+  }
+
+  if (!left || !right) {
+    throw new Error("Binary operator missing operand");
+  }
+
+  const t1_ = elabExpr(g, c, left);
+  const t2_ = elabExpr(g, c, right);
+  const t1 = toSimpleT(t1_);
+  const t2 = toSimpleT(t2_);
+  if (t1 === null) throw new CantReduceToSimpleT(e, t1_);
+  if (t2 === null) throw new CantReduceToSimpleT(e, t2_);
+
+  // = NULL check
+  if (opName === "=" && (("A_Const" in left && left.A_Const.isnull) || ("A_Const" in right && right.A_Const.isnull))) {
+    throw new ErrorWithLocation(
+      ae.location,
+      `Don't use \"= NULL\", use "IS NULL" instead`
+    );
+  }
+
+  if (
+    (opName === "=" || opName === "!=" || opName === "<>" ||
+     opName === "@>" || opName === "<@" || opName === "&&") &&
+    t1.kind === "array" && t2.kind === "array"
+  ) {
+    unifySimplesOrThrow(g, e, t1.typevar, t2.typevar);
+    return BuiltinTypes.Boolean;
+  }
+
+  if (
+    opName === "-" &&
+    t1.kind === "scalar" && eqQNames(t1.name, BuiltinTypes.TimestampMultiRange.name) &&
+    t2.kind === "scalar" && eqQNames(t2.name, BuiltinTypes.TimestampMultiRange.name)
+  ) {
+    return BuiltinTypes.TimestampMultiRange;
+  }
+
+  if (opName === "||") {
     if (t1.kind === "array" && t2.kind !== "array") {
       unifySimplesOrThrow(g, e, t1.typevar, t2);
       return t1;
     }
   }
 
-  if (e.op === "OVERLAPS") {
+  // JSON operators -> and ->>
+  if (opName === "->" || opName === "->>") {
+    try {
+      castOrThrow(g, left, t1_, BuiltinTypeConstructors.Nullable(BuiltinTypes.Json), "implicit");
+    } catch {
+      castOrThrow(g, left, t1_, BuiltinTypeConstructors.Nullable(BuiltinTypes.Jsonb), "implicit");
+    }
+    return opName === "->>" ? BuiltinTypes.Text : AnyScalar;
+  }
+
+  if (opName === "OVERLAPS") {
     unifySimplesOrThrow(g, e, t1, BuiltinTypeConstructors.List(AnyScalar));
     unifySimplesOrThrow(g, e, t2, BuiltinTypeConstructors.List(AnyScalar));
     unifySimplesOrThrow(g, e, t1, t2);
     return BuiltinTypes.Boolean;
   }
 
-  const opKey = normalizeOperatorName(e.op).toLowerCase();
+  const opKey = normalizeOperatorName(opName).toLowerCase();
   const opsForName = getOperatorIndex(g).get(opKey) || [];
 
   const found = opsForName
-    .sort(function (op) {
-      // prefer operators on same type
-      // mostly (only?) if one of the operators is "anyscalar" (= NULL expr)
-      if (eqType(op.left, op.right)) {
-        return -1;
-      } else {
-        return 0;
-      }
-    })
-    .map(function (op) {
-      const res = elabAnyCall(
-        g,
-        e,
-        op.name,
-        "STRICT" /* TODO ? */,
-        [t1, t2],
-        [op.left, op.right]
-      );
-      if (res instanceof ErrorWithLocation) {
-        return null;
-      } else {
-        return {
-          ...res,
-          op,
-        };
-      }
+    .sort((op) => eqType(op.left, op.right) ? -1 : 0)
+    .map((op) => {
+      const res = elabAnyCall(g, e, op.name, "STRICT", [t1, t2], [op.left, op.right]);
+      if (res instanceof ErrorWithLocation) return null;
+      return { ...res, op };
     })
     .filter(isNotEmpty)
     .sort((m1, m2) => (m1.score > m2.score ? -1 : 1));
 
   if (found.length === 0) {
-    throw new UnknownBinaryOp(e, { name: e.op, schema: e.opSchema }, t1, t2);
-  } else {
-    const best = found[0];
-    return best.nullifyResultType ? nullify(best.op.result) : best.op.result;
+    throw new UnknownBinaryOp(e, { name: opName, schema: opSchema }, t1, t2);
   }
+  const best = found[0];
+  return best.nullifyResultType ? nullify(best.op.result) : best.op.result;
 }
 
-function elabCall(g: Global, c: Context, e: ExprCall): Type {
-  const argTypes = e.args.map((arg) => elabExpr(g, c, arg));
+function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
+  const funcName = getQNameFromNodes(fc.funcname || []);
+  const args = fc.args || [];
+  const argTypes = args.map((arg) => elabExpr(g, c, arg));
 
   if (
-    eqQNames(e.function, { name: "json_build_object" }) ||
-    eqQNames(e.function, { name: "jsonb_build_object" })
+    eqQNames(funcName, { name: "json_build_object" }) ||
+    eqQNames(funcName, { name: "jsonb_build_object" })
   ) {
-    // string -> any -> {[string]: any} (+-)
-    if (e.args.length % 2 === 0) {
+    if (args.length % 2 === 0) {
       const record: RecordT = { kind: "record", fields: [] };
-      for (let i = 0; i < e.args.length; i += 2) {
-        const key = e.args[i];
-        if (key.type !== "string") {
+      for (let i = 0; i < args.length; i += 2) {
+        const key = args[i];
+        if (!("A_Const" in key) || !key.A_Const.sval) {
           throw new TypeMismatch(
-            e.args[i],
+            args[i],
             { expected: BuiltinTypes.Text, actual: argTypes[i] },
             "Json keys can only be string literals (for now?)"
           );
@@ -2400,322 +2616,154 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
         const valT = argTypes[i + 1];
         const valTSimple = toSimpleT(valT);
         if (valTSimple === null) {
-          throw new CantReduceToSimpleT(e.args[i], argTypes[i]);
+          throw new CantReduceToSimpleT(args[i], argTypes[i]);
         }
         record.fields.push({
-          name: { name: key.value },
+          name: { name: key.A_Const.sval.sval || "" },
           type: valTSimple,
-          _expr: e.args[i],
+          _expr: args[i],
         });
       }
       return { kind: "jsonknown", record: record };
     } else {
-      throw new InvalidArguments(e, e.function, argTypes);
+      throw new InvalidArguments(e, funcName, argTypes);
     }
   }
 
-  if (eqQNames(e.function, { name: "array_agg" })) {
-    // any -> any[]
-    if (e.args.length === 1) {
+  if (eqQNames(funcName, { name: "array_agg" })) {
+    if (args.length === 1) {
       const subt = argTypes[0];
       if (subt.kind === "record") {
-        throw new ErrorWithLocation(
-          e.args[0]._location,
-          "Can't have record type inside array"
-        );
+        throw new ErrorWithLocation(nodeLocation(args[0]), "Can't have record type inside array");
       }
-      return BuiltinTypeConstructors.Nullable(
-        BuiltinTypeConstructors.Array(subt)
-      );
+      return BuiltinTypeConstructors.Nullable(BuiltinTypeConstructors.Array(subt));
     } else {
-      throw new InvalidArguments(e, e.function, argTypes);
+      throw new InvalidArguments(e, funcName, argTypes);
     }
   }
 
-  if (eqQNames(e.function, { name: "exists" })) {
-    if (e.args.length === 1) {
-      const subt = argTypes[0];
-      if (subt.kind === "record") {
-        return BuiltinTypes.Boolean;
-      } else {
-        throw new InvalidArguments(e, e.function, argTypes);
-      }
-    }
-    throw new InvalidArguments(e, e.function, argTypes);
-  }
-
-  if (eqQNames(e.function, { name: "trim" })) {
-    // any -> any[]
-    return unifyOverloadedCall(g, e, argTypes, [
-      {
-        expectedArgs: [BuiltinTypes.Text],
-        returnT: BuiltinTypes.Text,
-      },
+  if (eqQNames(funcName, { name: "trim" })) {
+    return unifyOverloadedCall(g, e, funcName, args, argTypes, [
+      { expectedArgs: [BuiltinTypes.Text], returnT: BuiltinTypes.Text },
     ]);
   }
 
-  if (eqQNames(e.function, { name: "row_number" })) {
-    // () -> int
+  if (eqQNames(funcName, { name: "row_number" })) {
     return BuiltinTypes.Integer;
   }
 
-  if (eqQNames(e.function, { name: "tsmultirange" })) {
-    // () -> tsmultirange
+  if (eqQNames(funcName, { name: "tsmultirange" })) {
     return BuiltinTypes.TimestampMultiRange;
   }
 
-  if (eqQNames(e.function, { name: "starts_with" })) {
-    // string -> string -> boolean
-    return unifyCallGeneralOrThrow(
-      g,
-      e,
-      argTypes,
-      [BuiltinTypes.Text, BuiltinTypes.Text],
-      BuiltinTypes.Boolean
-    );
-  }
-
-  // Parser can't handle
-  // if (
-  //   eqQNames(e.function, { name: "left" }) ||
-  //   eqQNames(e.function, { name: "right" })
-  // ) {
-  //   // string -> string -> boolean
-  //   return unifyCallGeneral(
-  //     g,
-  //     e,
-  //     argTypes,
-  //     [BuiltinTypes.Text, BuiltinTypes.Integer],
-  //     BuiltinTypes.Text
-  //   );
-  // }
-
-  if (eqQNames(e.function, { name: "length" })) {
-    // string -> string -> boolean
-    return unifyCallGeneralOrThrow(
-      g,
-      e,
-      argTypes,
-      [BuiltinTypes.Text],
-      BuiltinTypes.Integer
-    );
-  }
-
-  if (eqQNames(e.function, { name: "tsrange" })) {
-    // timestamp -> timestamp -> tsrange
-    return unifyCallGeneralOrThrow(
-      g,
-      e,
-      argTypes,
-      [BuiltinTypes.Timestamp, BuiltinTypes.Timestamp],
-      BuiltinTypes.TimestampRange
-    );
-  }
-
-  if (eqQNames(e.function, { name: "range_agg" })) {
-    // timestamp  -> tsrange
-    return unifyCallGeneralOrThrow(
-      g,
-      e,
-      argTypes,
-      [BuiltinTypes.TimestampRange],
-      BuiltinTypes.TimestampMultiRange
-    );
-  }
-
-  if (eqQNames(e.function, { name: "generate_series" })) {
-    // Generate_series doesn't return an array, but rather makes extra rows!
-    return unifyOverloadedCall(g, e, argTypes, [
-      {
-        expectedArgs: [BuiltinTypes.Integer, BuiltinTypes.Integer],
-        returnT: BuiltinTypes.Integer,
-      },
-      {
-        expectedArgs: [
-          BuiltinTypes.Integer,
-          BuiltinTypes.Integer,
-          BuiltinTypes.Integer,
-        ],
-        returnT: BuiltinTypes.Integer,
-      },
-      {
-        expectedArgs: [
-          BuiltinTypes.Timestamp,
-          BuiltinTypes.Timestamp,
-          BuiltinTypes.Interval,
-        ],
-        returnT: BuiltinTypes.Timestamp,
-      },
-      {
-        expectedArgs: [
-          BuiltinTypes.Date,
-          BuiltinTypes.Date,
-          BuiltinTypes.Interval,
-        ],
-        returnT: BuiltinTypes.Date,
-      },
-    ]);
-  }
-
-  if (eqQNames(e.function, { name: "to_char" })) {
-    // TODO dedup
-    if (isNullable(argTypes[0])) {
-      return nullify(
-        unifyOverloadedCall(
-          g,
-          e,
-          [unnullify(argTypes[0] as SimpleT)],
-          [
-            {
-              expectedArgs: [BuiltinTypes.Numeric],
-              returnT: BuiltinTypes.Text,
-            },
-            {
-              expectedArgs: [BuiltinTypes.Interval],
-              returnT: BuiltinTypes.Text,
-            },
-            {
-              expectedArgs: [BuiltinTypes.Timestamp],
-              returnT: BuiltinTypes.Text,
-            },
-            {
-              expectedArgs: [BuiltinTypes.Date],
-              returnT: BuiltinTypes.Text,
-            },
-          ]
-        )
-      );
-    } else {
-      return unifyOverloadedCall(
-        g,
-        e,
-        [argTypes[0]],
-        [
-          { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Text },
-          { expectedArgs: [BuiltinTypes.Interval], returnT: BuiltinTypes.Text },
-          {
-            expectedArgs: [BuiltinTypes.Timestamp],
-            returnT: BuiltinTypes.Text,
-          },
-          {
-            expectedArgs: [BuiltinTypes.Date],
-            returnT: BuiltinTypes.Text,
-          },
-        ]
-      );
-    }
-  }
-
-  if (eqQNames(e.function, { name: "nextval" })) {
-    return unifyCallGeneralOrThrow(
-      g,
-      e,
-      argTypes,
-      [BuiltinTypes.Text],
-      BuiltinTypes.Bigint
-    );
-  }
-
-  if (eqQNames(e.function, { name: "now" })) {
-    return unifyCallGeneralOrThrow(g, e, argTypes, [], BuiltinTypes.Timestamp);
+  if (eqQNames(funcName, { name: "starts_with" })) {
+    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
+      [BuiltinTypes.Text, BuiltinTypes.Text], BuiltinTypes.Boolean);
   }
 
   if (
-    eqQNames(e.function, { name: "any" }) ||
-    eqQNames(e.function, { name: "some" }) ||
-    eqQNames(e.function, { name: "all" })
+    eqQNames(funcName, { name: "left" }) ||
+    eqQNames(funcName, { name: "right" })
   ) {
-    // any[] -> any
-    if (e.args.length !== 1) {
-      throw new InvalidArguments(e, e.function, argTypes);
+    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
+      [BuiltinTypes.Text, BuiltinTypes.Integer], BuiltinTypes.Text);
+  }
+
+  if (eqQNames(funcName, { name: "length" })) {
+    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
+      [BuiltinTypes.Text], BuiltinTypes.Integer);
+  }
+
+  if (eqQNames(funcName, { name: "tsrange" })) {
+    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
+      [BuiltinTypes.Timestamp, BuiltinTypes.Timestamp], BuiltinTypes.TimestampRange);
+  }
+
+  if (eqQNames(funcName, { name: "range_agg" })) {
+    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
+      [BuiltinTypes.TimestampRange], BuiltinTypes.TimestampMultiRange);
+  }
+
+  if (eqQNames(funcName, { name: "generate_series" })) {
+    return unifyOverloadedCall(g, e, funcName, args, argTypes, [
+      { expectedArgs: [BuiltinTypes.Integer, BuiltinTypes.Integer], returnT: BuiltinTypes.Integer },
+      { expectedArgs: [BuiltinTypes.Integer, BuiltinTypes.Integer, BuiltinTypes.Integer], returnT: BuiltinTypes.Integer },
+      { expectedArgs: [BuiltinTypes.Timestamp, BuiltinTypes.Timestamp, BuiltinTypes.Interval], returnT: BuiltinTypes.Timestamp },
+      { expectedArgs: [BuiltinTypes.Date, BuiltinTypes.Date, BuiltinTypes.Interval], returnT: BuiltinTypes.Date },
+    ]);
+  }
+
+  if (eqQNames(funcName, { name: "to_char" })) {
+    if (isNullable(argTypes[0])) {
+      return nullify(
+        unifyOverloadedCall(g, e, funcName, args, [unnullify(argTypes[0] as SimpleT)], [
+          { expectedArgs: [BuiltinTypes.Numeric], returnT: BuiltinTypes.Text },
+          { expectedArgs: [BuiltinTypes.Interval], returnT: BuiltinTypes.Text },
+          { expectedArgs: [BuiltinTypes.Timestamp], returnT: BuiltinTypes.Text },
+          { expectedArgs: [BuiltinTypes.Date], returnT: BuiltinTypes.Text },
+        ])
+      );
+    } else {
+      return unifyOverloadedCall(g, e, funcName, args, [argTypes[0]], [
+        { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Text },
+        { expectedArgs: [BuiltinTypes.Interval], returnT: BuiltinTypes.Text },
+        { expectedArgs: [BuiltinTypes.Timestamp], returnT: BuiltinTypes.Text },
+        { expectedArgs: [BuiltinTypes.Date], returnT: BuiltinTypes.Text },
+      ]);
     }
+  }
+
+  if (eqQNames(funcName, { name: "nextval" })) {
+    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
+      [BuiltinTypes.Text], BuiltinTypes.Bigint);
+  }
+
+  if (eqQNames(funcName, { name: "now" })) {
+    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes, [], BuiltinTypes.Timestamp);
+  }
+
+  if (
+    eqQNames(funcName, { name: "any" }) ||
+    eqQNames(funcName, { name: "some" }) ||
+    eqQNames(funcName, { name: "all" })
+  ) {
+    if (args.length !== 1) throw new InvalidArguments(e, funcName, argTypes);
     const t_ = argTypes[0];
     const t = toSimpleT(t_);
-    if (t === null) {
-      throw new CantReduceToSimpleT(e.args[0], argTypes[0]);
-    }
-    const unifiedT = unifySimplesOrThrow(
-      g,
-      e,
-      t,
-      BuiltinTypeConstructors.Array(AnyScalar)
-    );
-    if (unifiedT.kind !== "array") {
-      throw new TypecheckerError(e, "Expecting array type");
-    } else {
-      return unifiedT.typevar;
-    }
+    if (t === null) throw new CantReduceToSimpleT(args[0], argTypes[0]);
+    const unifiedT = unifySimplesOrThrow(g, e, t, BuiltinTypeConstructors.Array(AnyScalar));
+    if (unifiedT.kind !== "array") throw new TypecheckerError(e, "Expecting array type");
+    return unifiedT.typevar;
   }
 
-  // (T[], int) -> int
-  // (T[] | null, int) -> int | null
-  if (eqQNames(e.function, { name: "array_length" })) {
-    if (e.args.length !== 2) {
-      throw new InvalidArguments(e, e.function, argTypes);
-    }
-
+  if (eqQNames(funcName, { name: "array_length" })) {
+    if (args.length !== 2) throw new InvalidArguments(e, funcName, argTypes);
     const t1 = toSimpleT(argTypes[0]);
-    if (t1 === null) {
-      throw new CantReduceToSimpleT(e.args[0], argTypes[0]);
-    }
-
+    if (t1 === null) throw new CantReduceToSimpleT(args[0], argTypes[0]);
     if (t1.kind === "nullable") {
-      if (t1.typevar.kind !== "array") {
-        throw new TypecheckerError(
-          e,
-          `Expecting array type instead of ${t1.kind}`
-        );
-      }
+      if (t1.typevar.kind !== "array") throw new TypecheckerError(e, `Expecting array type instead of ${t1.kind}`);
     } else if (t1.kind !== "array") {
-      throw new TypecheckerError(
-        e,
-        `Expecting array type instead of ${t1.kind}`
-      );
+      throw new TypecheckerError(e, `Expecting array type instead of ${t1.kind}`);
     }
-
     const t2 = toSimpleT(argTypes[1]);
-    if (t2 === null) {
-      throw new CantReduceToSimpleT(e.args[1], argTypes[1]);
-    }
-
+    if (t2 === null) throw new CantReduceToSimpleT(args[1], argTypes[1]);
     unifySimplesOrThrow(g, e, t2, BuiltinTypes.Integer);
-
-    return t1.kind === "nullable"
-      ? BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer)
-      : BuiltinTypes.Integer;
+    return t1.kind === "nullable" ? BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer) : BuiltinTypes.Integer;
   }
 
-  // (T[], T) -> int | null
-  if (eqQNames(e.function, { name: "array_position" })) {
-    if (e.args.length !== 2) {
-      throw new InvalidArguments(e, e.function, argTypes);
-    }
-
-    const t1_ = argTypes[0];
-    const t1 = toSimpleT(t1_);
-    if (t1 === null) {
-      throw new CantReduceToSimpleT(e.args[0], argTypes[0]);
-    }
-
-    const t2_ = argTypes[1];
-    const t2 = toSimpleT(t2_);
-    if (t2 === null) {
-      throw new CantReduceToSimpleT(e.args[1], argTypes[1]);
-    }
-
-    if (t1.kind !== "array") {
-      throw new TypecheckerError(
-        e,
-        `Expecting array type instead of ${t1.kind}`
-      );
-    } else {
-      unifySimplesOrThrow(g, e, t1.typevar, t2);
-      return BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer);
-    }
+  if (eqQNames(funcName, { name: "array_position" })) {
+    if (args.length !== 2) throw new InvalidArguments(e, funcName, argTypes);
+    const t1 = toSimpleT(argTypes[0]);
+    if (t1 === null) throw new CantReduceToSimpleT(args[0], argTypes[0]);
+    const t2 = toSimpleT(argTypes[1]);
+    if (t2 === null) throw new CantReduceToSimpleT(args[1], argTypes[1]);
+    if (t1.kind !== "array") throw new TypecheckerError(e, `Expecting array type instead of ${t1.kind}`);
+    unifySimplesOrThrow(g, e, t1.typevar, t2);
+    return BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer);
   }
 
-  if (eqQNames(e.function, { name: "sum" })) {
-    return unifyOverloadedCall(g, e, argTypes, [
+  if (eqQNames(funcName, { name: "sum" })) {
+    return unifyOverloadedCall(g, e, funcName, args, argTypes, [
       { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Bigint },
       { expectedArgs: [BuiltinTypes.Smallint], returnT: BuiltinTypes.Bigint },
       { expectedArgs: [BuiltinTypes.Bigint], returnT: BuiltinTypes.Numeric },
@@ -2726,11 +2774,8 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
       { expectedArgs: [BuiltinTypes.Float4], returnT: BuiltinTypes.Double },
       { expectedArgs: [BuiltinTypes.Float8], returnT: BuiltinTypes.Double },
       { expectedArgs: [BuiltinTypes.Money], returnT: BuiltinTypes.Money },
-      // Add all numeric domain types
       ...g.domains
-        .filter((d) =>
-          allNumericBuiltinTypes.some((t) => eqType(t, d.realtype))
-        )
+        .filter((d) => allNumericBuiltinTypes.some((t) => eqType(t, d.realtype)))
         .flatMap((d) => {
           const asSimpleT = { kind: "scalar" as const, name: d.name };
           return { expectedArgs: [asSimpleT], returnT: asSimpleT };
@@ -2738,8 +2783,8 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     ]);
   }
 
-  if (eqQNames(e.function, { name: "avg" })) {
-    return unifyOverloadedCall(g, e, argTypes, [
+  if (eqQNames(funcName, { name: "avg" })) {
+    return unifyOverloadedCall(g, e, funcName, args, argTypes, [
       { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Numeric },
       { expectedArgs: [BuiltinTypes.Smallint], returnT: BuiltinTypes.Numeric },
       { expectedArgs: [BuiltinTypes.Bigint], returnT: BuiltinTypes.Numeric },
@@ -2753,130 +2798,130 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
     ]);
   }
 
-  if (eqQNames(e.function, { name: "round" })) {
-    return unifyOverloadedCall(g, e, argTypes, [
+  if (eqQNames(funcName, { name: "round" })) {
+    return unifyOverloadedCall(g, e, funcName, args, argTypes, [
       { expectedArgs: [BuiltinTypes.Real], returnT: BuiltinTypes.Real },
       { expectedArgs: [BuiltinTypes.Numeric], returnT: BuiltinTypes.Numeric },
-      {
-        expectedArgs: [BuiltinTypes.Numeric, BuiltinTypes.Integer],
-        returnT: BuiltinTypes.Numeric,
-      },
+      { expectedArgs: [BuiltinTypes.Numeric, BuiltinTypes.Integer], returnT: BuiltinTypes.Numeric },
     ]);
   }
 
-  if (
-    eqQNames(e.function, { name: "least" }) ||
-    eqQNames(e.function, { name: "greatest" })
-  ) {
+  if (eqQNames(funcName, { name: "least" }) || eqQNames(funcName, { name: "greatest" })) {
     const { unifiedType, types } = unifyAllArgumentsVariadic();
-
-    return types.some(([_, t]) => !isNullable(t))
-      ? unnullify(unifiedType)
-      : unifiedType;
+    return types.some(([_, t]) => !isNullable(t)) ? unnullify(unifiedType) : unifiedType;
   }
 
-  if (
-    // Aggregate functions => only 1 argument
-    eqQNames(e.function, { name: "max" }) ||
-    eqQNames(e.function, { name: "min" })
-  ) {
-    return unifyOverloadedCall(
-      g,
-      e,
-      argTypes,
+  if (eqQNames(funcName, { name: "max" }) || eqQNames(funcName, { name: "min" })) {
+    return unifyOverloadedCall(g, e, funcName, args, argTypes,
       allNumericBuiltinTypes
-        .concat([
-          BuiltinTypes.Date,
-          BuiltinTypes.Time,
-          BuiltinTypes.Timestamp,
-          BuiltinTypes.TimestampTz,
-        ])
+        .concat([BuiltinTypes.Date, BuiltinTypes.Time, BuiltinTypes.Timestamp, BuiltinTypes.TimestampTz])
         .flatMap((t) => [{ expectedArgs: [t], returnT: nullify(t) }])
     );
   }
 
-  if (eqQNames(e.function, { name: "to_tsvector" })) {
-    return unifyCallGeneralOrThrow(
-      g,
-      e,
-      argTypes,
-      [BuiltinTypes.Text],
-      BuiltinTypes.Tsvector
-    );
+  if (eqQNames(funcName, { name: "to_tsvector" })) {
+    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes, [BuiltinTypes.Text], BuiltinTypes.Tsvector);
   }
-  if (eqQNames(e.function, { name: "to_tsquery" })) {
-    return unifyCallGeneralOrThrow(
-      g,
-      e,
-      argTypes,
-      [BuiltinTypes.Text],
-      BuiltinTypes.Tsquery
-    );
+  if (eqQNames(funcName, { name: "to_tsquery" })) {
+    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes, [BuiltinTypes.Text], BuiltinTypes.Tsquery);
   }
 
-  if (
-    eqQNames(e.function, { name: "upper" }) ||
-    eqQNames(e.function, { name: "lower" })
-  ) {
-    return unifyCallGeneralOrThrow(
-      g,
-      e,
-      argTypes,
-      [BuiltinTypes.Text],
-      BuiltinTypes.Text
-    );
+  if (eqQNames(funcName, { name: "upper" }) || eqQNames(funcName, { name: "lower" })) {
+    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes, [BuiltinTypes.Text], BuiltinTypes.Text);
   }
 
-  if (
-    eqQNames(e.function, { name: "bool_and" }) ||
-    eqQNames(e.function, { name: "bool_or" })
-  ) {
-    return unifyCallGeneralOrThrow(
-      g,
-      e,
-      argTypes,
-      [BuiltinTypes.Boolean],
-      BuiltinTypes.Boolean
-    );
+  if (eqQNames(funcName, { name: "bool_and" }) || eqQNames(funcName, { name: "bool_or" })) {
+    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes, [BuiltinTypes.Boolean], BuiltinTypes.Boolean);
   }
 
-  if (eqQNames(e.function, { name: "count" })) {
+  if (eqQNames(funcName, { name: "count" })) {
     return BuiltinTypes.Bigint;
   }
 
-  if (
-    eqQNames(e.function, { name: "coalesce" }) ||
-    eqQNames(e.function, { name: "nullif" })
-  ) {
-    // nullable<A> -> A -> A
-    if (e.args.length === 0) {
-      throw new InvalidArguments(e, e.function, []);
-    }
-    const { unifiedType, types } = unifyAllArgumentsVariadic();
-    if (eqQNames(e.function, { name: "coalesce" })) {
-      if (types.some(([_arg, t]) => !isNullable(t))) {
-        return unnullify(unifiedType);
-      } else {
-        return unifiedType;
+  // EXTRACT handled as a FuncCall in new parser
+  if (eqQNames(funcName, { name: "date_part" }) || eqQNames(funcName, { name: "extract" })) {
+    if (args.length >= 2) {
+      const fieldT = elabExpr(g, c, args[0]);
+      const fromT = elabExpr(g, c, args[1]);
+      // Extract the field name for validation
+      const fieldName = ("A_Const" in args[0] && args[0].A_Const.sval)
+        ? args[0].A_Const.sval.sval?.toLowerCase() : null;
+      const timeOnlyFields = ["hour", "minute", "second", "milliseconds", "microseconds", "epoch",
+        "timezone", "timezone_hour", "timezone_minute"];
+      try {
+        castOrThrow(g, args[1], fromT, BuiltinTypes.Timestamp, "implicit");
+      } catch {
+        try {
+          castOrThrow(g, args[1], fromT, BuiltinTypes.Interval, "implicit");
+        } catch {
+          // Time type only supports time-related fields
+          if (fieldName && !timeOnlyFields.includes(fieldName)) {
+            throw new TypeMismatch(
+              args[1],
+              { expected: BuiltinTypes.Timestamp, actual: fromT },
+              `Can't extract '${fieldName}' from time type`
+            );
+          }
+          castOrThrow(g, args[1], fromT, BuiltinTypes.Time, "implicit");
+        }
       }
+      return BuiltinTypes.Numeric;
+    }
+  }
+
+  // substring / overlay
+  if (eqQNames(funcName, { name: "substring" }) || eqQNames(funcName, { name: "overlay" })) {
+    const argTs = args.map((a) => elabExpr(g, c, a));
+    // Expect (text, int, int) with some args optional
+    const expectedArgs = [BuiltinTypes.Text, BuiltinTypes.Integer, BuiltinTypes.Integer].slice(0, argTs.length);
+    const res = throwIfError(
+      elabAnyCall(g, e, funcName, "STRICT", argTs, expectedArgs)
+    );
+    return res.nullifyResultType ? nullify(BuiltinTypes.Text) : BuiltinTypes.Text;
+  }
+
+  if (
+    eqQNames(funcName, { name: "coalesce" }) ||
+    eqQNames(funcName, { name: "nullif" })
+  ) {
+    if (args.length === 0) throw new InvalidArguments(e, funcName, []);
+    const { unifiedType, types } = unifyAllArgumentsVariadic();
+    if (eqQNames(funcName, { name: "coalesce" })) {
+      return types.some(([_arg, t]) => !isNullable(t)) ? unnullify(unifiedType) : unifiedType;
     } else {
-      // nullable types already "win" unification, so nullif doesn't need special logic
       return unifiedType;
     }
   }
 
-  throw new UnknownFunction(e, e.function);
+  // OVERLAPS is parsed as a FuncCall to pg_catalog.overlaps in the new parser
+  if (eqQNames(funcName, { name: "overlaps" })) {
+    // OVERLAPS takes 4 args: (start1, end1, start2, end2)
+    if (args.length !== 4) throw new InvalidArguments(e, funcName, args.map(a => elabExpr(g, c, a)));
+    const t1 = elabExpr(g, c, args[0]);
+    const t2 = elabExpr(g, c, args[1]);
+    const t3 = elabExpr(g, c, args[2]);
+    const t4 = elabExpr(g, c, args[3]);
+    const s1 = toSimpleT(t1); if (s1 === null) throw new CantReduceToSimpleT(args[0], t1);
+    const s2 = toSimpleT(t2); if (s2 === null) throw new CantReduceToSimpleT(args[1], t2);
+    const s3 = toSimpleT(t3); if (s3 === null) throw new CantReduceToSimpleT(args[2], t3);
+    const s4 = toSimpleT(t4); if (s4 === null) throw new CantReduceToSimpleT(args[3], t4);
+    // Unify left pair and right pair
+    const leftT = unifySimplesOrThrow(g, e, s1, s2);
+    const rightT = unifySimplesOrThrow(g, e, s3, s4);
+    // Both pairs must be compatible
+    unifySimplesOrThrow(g, e, leftT, rightT);
+    return BuiltinTypes.Boolean;
+  }
+
+  throw new UnknownFunction(e, funcName);
 
   function unifyAllArgumentsVariadic() {
-    const types: [Expr, SimpleT][] = e.args
+    const types: [Node, SimpleT][] = args
       .map((arg) => [arg, elabExpr(g, c, arg)] as const)
       .map(([arg, t_]) => {
         const t = toSimpleT(t_);
-        if (t === null) {
-          throw new CantReduceToSimpleT(arg, t_);
-        } else {
-          return [arg, t];
-        }
+        if (t === null) throw new CantReduceToSimpleT(arg, t_);
+        return [arg, t];
       });
     const unifiedType = types.reduce(
       (acc, [arg, t]) => unifySimplesOrThrow(g, arg, acc, t),
@@ -2886,247 +2931,37 @@ function elabCall(g: Global, c: Context, e: ExprCall): Type {
   }
 }
 
-function elabExpr(g: Global, c: Context, e: Expr): Type {
-  if (e.type === "ref") {
-    const t = elabRef(c, e);
-    return t;
-  } else if (e.type === "parameter") {
+function elabExpr(g: Global, c: Context, e: Node): Type {
+  if ("ColumnRef" in e) {
+    return elabRef(c, e, e.ColumnRef);
+  } else if ("ParamRef" in e) {
     return notImplementedYet(e);
-  } else if (e.type === "integer") {
-    return BuiltinTypes.Integer;
-  } else if (e.type === "boolean") {
-    return BuiltinTypes.Boolean;
-  } else if (e.type === "string") {
-    if (e.value.trim() === "{}") {
-      return BuiltinTypeConstructors.Array(AnyScalar);
-    } else {
+  } else if ("A_Const" in e) {
+    const ac = e.A_Const;
+    if (ac.ival) return BuiltinTypes.Integer;
+    if (ac.boolval) return BuiltinTypes.Boolean;
+    if (ac.sval) {
+      if ((ac.sval.sval || "").trim() === "{}") {
+        return BuiltinTypeConstructors.Array(AnyScalar);
+      }
       return BuiltinTypes.Text;
     }
-  } else if (e.type === "unary") {
-    return elabUnaryOp(g, c, e);
-  } else if (e.type === "binary") {
-    return elabBinaryOp(g, c, e);
-  } else if (e.type === "null") {
+    if (ac.isnull) return BuiltinTypeConstructors.Nullable(AnyScalar);
+    if (ac.fval) return BuiltinTypes.Numeric;
+    // Fallback for empty A_Const
     return BuiltinTypeConstructors.Nullable(AnyScalar);
-  } else if (e.type === "numeric") {
-    return BuiltinTypes.Numeric;
-  } else if (e.type === "list" || e.type === "array") {
-    const typevar = e.expressions.reduce((acc: SimpleT, subexpr: Expr) => {
-      const t_ = elabExpr(g, c, subexpr);
-      const t = toSimpleT(t_);
-      if (t === null) {
-        throw new CantReduceToSimpleT(e, t_);
-      } else {
-        return unifySimplesOrThrow(g, e, t, acc);
-      }
-    }, AnyScalar);
-    return e.type === "list"
-      ? BuiltinTypeConstructors.List(typevar)
-      : BuiltinTypeConstructors.Array(typevar);
-  } else if (e.type === "call") {
-    return elabCall(g, c, e);
-  } else if (e.type === "array select") {
-    const selectType = elabSelect(g, c, e.select, null);
-    if (selectType.kind === "void") {
-      throw new KindMismatch(
-        e.select,
-        selectType,
-        "Select in array select can't return void"
-      );
-    }
-    const t = unifyRecordWithSimple(g, e, selectType, AnyScalar);
-    return BuiltinTypeConstructors.Array(t);
-  } else if (e.type === "default") {
-    // ??
-    return AnyScalar;
-  } else if (e.type === "extract") {
-    function timeIsValid(s: string) {
-      return [
-        "hour",
-        "minute",
-        "second",
-        "microseconds",
-        "milliseconds",
-      ].includes(s.toLowerCase());
-    }
-    function intervalIsValid(s: string) {
-      return (
-        timeIsValid(s) ||
-        ["century", "epoch", "decade", "year", "month", "day"].includes(
-          s.toLowerCase()
-        )
-      );
-    }
-    // TODO use elabAnyCall?
-    const t = elabExpr(g, c, e.from);
-    try {
-      castOrThrow(g, e.from, t, BuiltinTypes.Timestamp, "implicit");
-    } catch (err) {
-      try {
-        if (intervalIsValid(e.field.name)) {
-          castOrThrow(g, e.from, t, BuiltinTypes.Interval, "implicit");
-        } else {
-          throw err;
-        }
-      } catch (err) {
-        if (timeIsValid(e.field.name)) {
-          castOrThrow(g, e.from, t, BuiltinTypes.Time, "implicit");
-        } else {
-          throw err;
-        }
-      }
-    }
-    return BuiltinTypes.Numeric;
-  } else if (e.type === "member") {
-    const t = elabExpr(g, c, e.operand);
-    try {
-      castOrThrow(
-        g,
-        e.operand,
-        t,
-        BuiltinTypeConstructors.Nullable(BuiltinTypes.Json),
-        "implicit"
-      );
-    } catch {
-      castOrThrow(
-        g,
-        e.operand,
-        t,
-        BuiltinTypeConstructors.Nullable(BuiltinTypes.Jsonb),
-        "implicit"
-      );
-    }
-    return AnyScalar;
-  } else if (e.type === "keyword") {
-    if (e.keyword === "current_time") {
-      return BuiltinTypes.Time;
-    } else if (e.keyword === "current_date") {
-      return BuiltinTypes.Date;
-    } else if (
-      e.keyword === "localtimestamp" ||
-      e.keyword === "localtime" ||
-      e.keyword === "current_role" // TODO
-    ) {
-      return BuiltinTypes.Timestamp;
-    } else if (e.keyword === "current_timestamp") {
-      return BuiltinTypes.TimestampTz;
-    } else if (
-      e.keyword === "current_catalog" ||
-      e.keyword === "current_schema" ||
-      e.keyword === "session_user" ||
-      e.keyword === "user" ||
-      e.keyword === "current_user"
-    ) {
-      return BuiltinTypes.Text;
-    } else if (e.keyword === "distinct") {
-      throw new Error("Don't know what to do with distinct keyword");
-    } else {
-      return checkAllCasesHandled(e.keyword);
-    }
-  } else if (e.type === "arrayIndex") {
-    const arrayT = elabExpr(g, c, e.array);
-    const indexT = elabExpr(g, c, e.index);
-    const unifiedArrayT_ = unify(
-      g,
-      e.array,
-      arrayT,
-      BuiltinTypeConstructors.Array(AnyScalar)
-    );
-    castOrThrow(g, e.array, indexT, BuiltinTypes.Integer, "implicit");
-    const unifiedArrayT = toSimpleT(unifiedArrayT_);
-
-    if (unifiedArrayT === null) {
-      throw new CantReduceToSimpleT(e.array, unifiedArrayT_);
-    } else {
-      const unnulified = unnullify(unifiedArrayT);
-      if (unnulified.kind !== "array") {
-        throw new TypeMismatch(
-          e.array,
-          {
-            expected: arrayT,
-            actual: BuiltinTypeConstructors.Array(AnyScalar),
-          },
-          "Can't get array index from non-array type"
-        );
-      } else {
-        return nullify(unnulified.typevar);
-      }
-    }
-  } else if (e.type === "case") {
-    if (e.value) {
-      const valueT = elabExpr(g, c, e.value);
-      const conditionTs: [Expr, Type][] = e.whens.map((whenExp) => [
-        whenExp.when,
-        elabExpr(g, c, whenExp.when),
-      ]);
-      conditionTs.reduce(
-        (acc, [exp, conditionT]) => unify(g, exp, acc, conditionT),
-        valueT
-      );
-    } else {
-      const conditionTs: [Expr, Type][] = e.whens.map((whenExp) => [
-        whenExp.when,
-        elabExpr(g, c, whenExp.when),
-      ]);
-      conditionTs.forEach(([exp, conditionT]) =>
-        requireBoolean(exp, conditionT)
-      );
-    }
-    if (e.whens.length === 0) {
-      throw new Error("Not expecting CASE statement without when");
-    }
-    const whensT = e.whens.reduce(
-      (acc: Type, whenExp) =>
-        unify(g, whenExp.value, acc, elabExpr(g, c, whenExp.value)),
-      elabExpr(g, c, e.whens[0].value)
-    );
-    return e.else ? unify(g, e.else, whensT, elabExpr(g, c, e.else)) : whensT;
-  } else if (
-    e.type === "select" ||
-    e.type === "union" ||
-    e.type === "union all" ||
-    e.type === "values" ||
-    e.type === "with" ||
-    e.type === "with recursive"
-  ) {
-    const t = elabSelect(g, c, e, null);
-    if (t.kind === "void") {
-      throw new KindMismatch(
-        e,
-        t,
-        "Select as an expression needs to return something"
-      );
-    }
-    return t;
-  } else if (e.type === "ternary") {
-    const valueT = elabExpr(g, c, e.value);
-    const hiT = elabExpr(g, c, e.hi);
-    const loT = elabExpr(g, c, e.lo);
-    castOrThrow(g, e, valueT, loT, "implicit");
-    castOrThrow(g, e, valueT, hiT, "implicit");
-    return BuiltinTypes.Boolean;
-  } else if (e.type === "substring" || e.type === "overlay") {
-    const valueT = elabExpr(g, c, e.value);
-    const fromT = e.from ? elabExpr(g, c, e.from) : BuiltinTypes.Integer;
-    const forT = e.for ? elabExpr(g, c, e.for) : BuiltinTypes.Integer;
-    const res = throwIfError(
-      elabAnyCall(
-        g,
-        e,
-        { name: e.type },
-        "STRICT",
-        [valueT, fromT, forT],
-        [BuiltinTypes.Text, BuiltinTypes.Integer, BuiltinTypes.Integer]
-      )
-    );
-    return res.nullifyResultType
-      ? nullify(BuiltinTypes.Text)
-      : BuiltinTypes.Text;
-  } else if (e.type === "constant") {
-    throw new Error("Haven't been able to simulate this yet");
-  } else if (e.type === "cast") {
-    const operandT = elabExpr(g, c, e.operand);
-    const toT = mkType(g, e.to, []);
+  } else if ("BoolExpr" in e) {
+    return elabBoolExpr(g, c, e, e.BoolExpr);
+  } else if ("NullTest" in e) {
+    return elabNullTest(g, c, e, e.NullTest);
+  } else if ("A_Expr" in e) {
+    return elabAExpr(g, c, e, e.A_Expr);
+  } else if ("FuncCall" in e) {
+    return elabCall(g, c, e, e.FuncCall);
+  } else if ("TypeCast" in e) {
+    const tc = e.TypeCast;
+    const operandT = elabExpr(g, c, tc.arg!);
+    const toT = mkType(g, tc.typeName!, []);
     try {
       castOrThrow(g, e, operandT, toT, "explicit");
     } catch (err) {
@@ -3137,90 +2972,309 @@ function elabExpr(g: Global, c: Context, e: Expr): Type {
     } else {
       return unnullify(toT);
     }
+  } else if ("A_ArrayExpr" in e) {
+    const elements = e.A_ArrayExpr.elements || [];
+    const typevar = elements.reduce((acc: SimpleT, subexpr: Node) => {
+      const t_ = elabExpr(g, c, subexpr);
+      const t = toSimpleT(t_);
+      if (t === null) {
+        throw new CantReduceToSimpleT(e, t_);
+      }
+      return unifySimplesOrThrow(g, e, t, acc);
+    }, AnyScalar);
+    return BuiltinTypeConstructors.Array(typevar);
+  } else if ("List" in e) {
+    // List node (used for IN expressions etc)
+    const items = e.List.items || [];
+    const typevar = items.reduce((acc: SimpleT, subexpr: Node) => {
+      const t_ = elabExpr(g, c, subexpr);
+      const t = toSimpleT(t_);
+      if (t === null) {
+        throw new CantReduceToSimpleT(e, t_);
+      }
+      return unifySimplesOrThrow(g, e, t, acc);
+    }, AnyScalar);
+    return BuiltinTypeConstructors.List(typevar);
+  } else if ("SubLink" in e) {
+    const sl = e.SubLink;
+    if (enumEq(sl.subLinkType, SubLinkType, SubLinkType.EXISTS_SUBLINK)) {
+      // EXISTS (subquery) -> boolean
+      if (sl.subselect && "SelectStmt" in sl.subselect) {
+        elabSelect(g, c, sl.subselect.SelectStmt, null);
+      }
+      return BuiltinTypes.Boolean;
+    } else if (enumEq(sl.subLinkType, SubLinkType, SubLinkType.ARRAY_SUBLINK)) {
+      // ARRAY(subquery) -> array
+      if (!sl.subselect || !("SelectStmt" in sl.subselect)) {
+        throw new Error("ARRAY sublink without select");
+      }
+      const selectType = elabSelect(g, c, sl.subselect.SelectStmt, null);
+      if (selectType.kind === "void") {
+        throw new KindMismatch(e, selectType, "Select in array select can't return void");
+      }
+      const t = unifyRecordWithSimple(g, e, selectType, AnyScalar);
+      return BuiltinTypeConstructors.Array(t);
+    } else if (enumEq(sl.subLinkType, SubLinkType, SubLinkType.EXPR_SUBLINK)) {
+      // Scalar subquery
+      if (!sl.subselect || !("SelectStmt" in sl.subselect)) {
+        throw new Error("EXPR sublink without select");
+      }
+      const t = elabSelect(g, c, sl.subselect.SelectStmt, null);
+      if (t.kind === "void") {
+        throw new KindMismatch(e, t, "Select as an expression needs to return something");
+      }
+      return t;
+    } else if (enumEq(sl.subLinkType, SubLinkType, SubLinkType.ANY_SUBLINK)) {
+      // ANY/SOME (subquery)
+      if (sl.subselect && "SelectStmt" in sl.subselect) {
+        elabSelect(g, c, sl.subselect.SelectStmt, null);
+      }
+      return BuiltinTypes.Boolean;
+    } else {
+      return notImplementedYet(e);
+    }
+  } else if ("SetToDefault" in e) {
+    return AnyScalar;
+  } else if ("SQLValueFunction" in e) {
+    const svf = e.SQLValueFunction;
+    const opNum = (SQLValueFunctionOp as any)[svf.op as any];
+    switch (opNum) {
+      case SQLValueFunctionOp.SVFOP_CURRENT_TIME:
+      case SQLValueFunctionOp.SVFOP_CURRENT_TIME_N:
+        return BuiltinTypes.Time;
+      case SQLValueFunctionOp.SVFOP_CURRENT_DATE:
+        return BuiltinTypes.Date;
+      case SQLValueFunctionOp.SVFOP_LOCALTIMESTAMP:
+      case SQLValueFunctionOp.SVFOP_LOCALTIMESTAMP_N:
+      case SQLValueFunctionOp.SVFOP_LOCALTIME:
+      case SQLValueFunctionOp.SVFOP_LOCALTIME_N:
+      case SQLValueFunctionOp.SVFOP_CURRENT_ROLE:
+        return BuiltinTypes.Timestamp;
+      case SQLValueFunctionOp.SVFOP_CURRENT_TIMESTAMP:
+      case SQLValueFunctionOp.SVFOP_CURRENT_TIMESTAMP_N:
+        return BuiltinTypes.TimestampTz;
+      case SQLValueFunctionOp.SVFOP_CURRENT_CATALOG:
+      case SQLValueFunctionOp.SVFOP_CURRENT_SCHEMA:
+      case SQLValueFunctionOp.SVFOP_SESSION_USER:
+      case SQLValueFunctionOp.SVFOP_USER:
+      case SQLValueFunctionOp.SVFOP_CURRENT_USER:
+        return BuiltinTypes.Text;
+      default:
+        return notImplementedYet(e);
+    }
+  } else if ("A_Indirection" in e) {
+    // Array index: arr[i]
+    const ai = e.A_Indirection;
+    const arrayT = elabExpr(g, c, ai.arg!);
+    // Check if indirection contains array subscripts
+    const indices = ai.indirection || [];
+    if (indices.length > 0 && "A_Indices" in indices[0]) {
+      const idx = (indices[0] as any).A_Indices;
+      const indexNode = idx.uidx || idx.lidx;
+      if (indexNode) {
+        const indexT = elabExpr(g, c, indexNode);
+        castOrThrow(g, e, indexT, BuiltinTypes.Integer, "implicit");
+      }
+      const unifiedArrayT_ = unify(g, ai.arg!, arrayT, BuiltinTypeConstructors.Array(AnyScalar));
+      const unifiedArrayT = toSimpleT(unifiedArrayT_);
+      if (unifiedArrayT === null) {
+        throw new CantReduceToSimpleT(ai.arg!, unifiedArrayT_);
+      }
+      const unnulified = unnullify(unifiedArrayT);
+      if (unnulified.kind !== "array") {
+        throw new TypeMismatch(
+          ai.arg!,
+          { expected: arrayT, actual: BuiltinTypeConstructors.Array(AnyScalar) },
+          "Can't get array index from non-array type"
+        );
+      }
+      return nullify(unnulified.typevar);
+    }
+    return notImplementedYet(e);
+  } else if ("CaseExpr" in e) {
+    const ce = e.CaseExpr;
+    const whens = (ce.args || [])
+      .filter((n): n is { CaseWhen: import("./pg-ast.ts").CaseWhen } => "CaseWhen" in n)
+      .map((n) => n.CaseWhen);
+
+    if (ce.arg) {
+      // CASE <value> WHEN ...
+      const valueT = elabExpr(g, c, ce.arg);
+      const conditionTs: [Node, Type][] = whens.map((w) => [w.expr!, elabExpr(g, c, w.expr!)]);
+      conditionTs.reduce(
+        (acc, [exp, conditionT]) => unify(g, exp, acc, conditionT),
+        valueT
+      );
+    } else {
+      // CASE WHEN <bool> ...
+      const conditionTs: [Node, Type][] = whens.map((w) => [w.expr!, elabExpr(g, c, w.expr!)]);
+      conditionTs.forEach(([exp, conditionT]) => requireBoolean(exp, conditionT));
+    }
+    if (whens.length === 0) {
+      throw new Error("Not expecting CASE statement without when");
+    }
+    const whensT = whens.reduce(
+      (acc: Type, w) => unify(g, w.result!, acc, elabExpr(g, c, w.result!)),
+      elabExpr(g, c, whens[0].result!)
+    );
+    return ce.defresult ? unify(g, ce.defresult, whensT, elabExpr(g, c, ce.defresult)) : whensT;
+  } else if ("SelectStmt" in e) {
+    const t = elabSelect(g, c, e.SelectStmt, null);
+    if (t.kind === "void") {
+      throw new KindMismatch(e, t, "Select as an expression needs to return something");
+    }
+    return t;
+  } else if ("CoalesceExpr" in e) {
+    const args = e.CoalesceExpr.args || [];
+    if (args.length === 0) {
+      throw new InvalidArguments(e, { name: "coalesce" }, []);
+    }
+    const types: [Node, SimpleT][] = args.map((arg) => {
+      const t_ = elabExpr(g, c, arg);
+      const t = toSimpleT(t_);
+      if (t === null) throw new CantReduceToSimpleT(arg, t_);
+      return [arg, t];
+    });
+    const unifiedType = types.reduce(
+      (acc, [arg, t]) => unifySimplesOrThrow(g, arg, acc, t),
+      types[0][1]
+    );
+    if (types.some(([_, t]) => !isNullable(t))) {
+      return unnullify(unifiedType);
+    }
+    return unifiedType;
+  } else if ("BooleanTest" in e) {
+    const bt = e.BooleanTest;
+    if (bt.arg) {
+      const t = elabExpr(g, c, bt.arg);
+      requireBoolean(bt.arg, t);
+    }
+    return BuiltinTypes.Boolean;
+  } else if ("NullIfExpr" in e) {
+    const args = (e.NullIfExpr as any).args || [];
+    if (args.length !== 2) throw new Error("NULLIF needs 2 args");
+    const t1_ = elabExpr(g, c, args[0]);
+    const t2_ = elabExpr(g, c, args[1]);
+    const t1 = toSimpleT(t1_);
+    const t2 = toSimpleT(t2_);
+    if (t1 === null) throw new CantReduceToSimpleT(args[0], t1_);
+    if (t2 === null) throw new CantReduceToSimpleT(args[1], t2_);
+    unifySimplesOrThrow(g, e, t1, t2);
+    return nullify(t1);
+  } else if ("MinMaxExpr" in e) {
+    const mm = e.MinMaxExpr as any;
+    const args: Node[] = mm.args || [];
+    if (args.length === 0) throw new Error("GREATEST/LEAST needs at least 1 arg");
+    const types: [Node, SimpleT][] = args.map((arg) => {
+      const t_ = elabExpr(g, c, arg);
+      const t = toSimpleT(t_);
+      if (t === null) throw new CantReduceToSimpleT(arg, t_);
+      return [arg, t];
+    });
+    const unifiedType = types.reduce(
+      (acc, [arg, t]) => unifySimplesOrThrow(g, arg, acc, t),
+      types[0][1]
+    );
+    // If any arg is NOT nullable, result is not nullable (same as COALESCE)
+    if (types.some(([_, t]) => !isNullable(t))) {
+      return unnullify(unifiedType);
+    }
+    return unifiedType;
   } else {
-    return checkAllCasesHandled(e.type);
+    return notImplementedYet(e);
   }
 }
 
 function inferNullability(
   c: Context,
-  e: Expr
+  e: Node
 ): { fromName: QName; fieldName: string; isNull: boolean }[] {
-  if (e.type === "unary") {
-    if (e.op === "NOT") {
-      return inferNullability(c, e.operand).map((judg) => ({
+  if ("BoolExpr" in e) {
+    const be = e.BoolExpr;
+    if (enumEq(be.boolop, BoolExprType, BoolExprType.NOT_EXPR)) {
+      const operand = (be.args || [])[0];
+      if (!operand) return [];
+      return inferNullability(c, operand).map((judg) => ({
         ...judg,
         isNull: !judg.isNull,
       }));
     }
-    if (e.op === "IS NULL" || e.op === "IS NOT NULL") {
-      if (e.operand.type === "ref") {
-        const found = lookupRef(c, e.operand);
-        if (found instanceof ErrorWithLocation) {
-          return [];
-        } else {
-          if (found.from === null) {
-            return [];
-          } else {
-            return [
-              { ...found.from, isNull: e.op === "IS NULL" ? true : false },
-            ];
-          }
-        }
-      }
+    if (enumEq(be.boolop, BoolExprType, BoolExprType.AND_EXPR)) {
+      const args = be.args || [];
+      return args.flatMap((arg) => inferNullability(c, arg));
     }
     return [];
-  } else if (e.type === "binary" && e.op === "AND") {
-    return inferNullability(c, e.left).concat(inferNullability(c, e.right));
-  } else {
+  }
+  if ("NullTest" in e) {
+    const nt = e.NullTest;
+    const arg = nt.arg;
+    if (arg && "ColumnRef" in arg) {
+      const info = getColumnRef(arg.ColumnRef);
+      if (info.column === "*") return [];
+      const found = lookupRef(c, arg, info);
+      if (found instanceof ErrorWithLocation) return [];
+      if (found.from === null) return [];
+      return [
+        { ...found.from, isNull: enumEq(nt.nulltesttype, NullTestType, NullTestType.IS_NULL) },
+      ];
+    }
     return [];
   }
+  return [];
 }
 
-function elabStatement(g: Global, c: Context, s: Statement): VoidT | Type {
-  if (
-    s.type === "select" ||
-    s.type === "union" ||
-    s.type === "union all" ||
-    s.type === "with" ||
-    s.type === "with recursive" ||
-    s.type === "values"
-  ) {
-    return elabExpr(g, c, s);
-  } else if (s.type === "insert") {
-    return elabInsert(g, c, s);
-  } else if (s.type === "delete" || s.type === "update") {
-    return elabDeleteOrUpdate(g, c, s);
+// Dispatch a Node (the stmt field of a RawStmt) to the right elab function
+function elabStatementNode(g: Global, c: Context, stmtNode: Node): VoidT | Type {
+  if ("SelectStmt" in stmtNode) {
+    return elabExpr(g, c, stmtNode);
+  } else if ("InsertStmt" in stmtNode) {
+    return elabInsert(g, c, stmtNode.InsertStmt);
+  } else if ("DeleteStmt" in stmtNode) {
+    return elabDelete(g, c, stmtNode.DeleteStmt);
+  } else if ("UpdateStmt" in stmtNode) {
+    return elabUpdate(g, c, stmtNode.UpdateStmt);
   } else {
-    return notImplementedYet(s);
+    return notImplementedYet(stmtNode);
   }
 }
 
-export function parseSetupScripts(g: Global, ast: Statement[]): Global {
-  return ast.reduce((acc: Global, a): Global => {
-    if (a.type === "create table" && !a.temporary) {
-      return doCreateTable(acc, a);
-    } else if (
-      a.type === "create view" ||
-      a.type === "create materialized view"
-    ) {
-      return doCreateView(acc, a);
-    } else if (a.type === "alter table") {
-      return doAlterTable(acc, a);
-    } else if (a.type === "create domain") {
+export function parseSetupScripts(g: Global, ast: import("./pg-ast.ts").RawStmt[]): Global {
+  return ast.reduce((acc: Global, rawStmt): Global => {
+    const stmtNode = rawStmt.stmt;
+    if (!stmtNode) return acc;
+
+    if ("CreateStmt" in stmtNode) {
+      const cs = stmtNode.CreateStmt;
+      // Skip temporary tables
+      if (cs.relation?.relpersistence === "t") return acc;
+      return doCreateTable(acc, cs);
+    } else if ("ViewStmt" in stmtNode) {
+      return doCreateView(acc, stmtNode.ViewStmt);
+    } else if ("CreateTableAsStmt" in stmtNode) {
+      return doCreateMaterializedView(acc, stmtNode.CreateTableAsStmt);
+    } else if ("AlterTableStmt" in stmtNode) {
+      return doAlterTable(acc, stmtNode.AlterTableStmt);
+    } else if ("CreateDomainStmt" in stmtNode) {
+      const ds = stmtNode.CreateDomainStmt;
+      const domName = getQNameFromNodes(ds.domainname || []);
       return {
         ...acc,
         domains: acc.domains.concat({
-          name: a.name,
-          realtype: mkType(acc, a.dataType, [{ type: "not null" }]),
+          name: domName,
+          realtype: mkType(acc, ds.typeName!, [{ contype: ConstrType.CONSTR_NOTNULL } as unknown as Constraint]),
         }),
       };
-    } else if (a.type === "create enum") {
+    } else if ("CreateEnumStmt" in stmtNode) {
+      const es = stmtNode.CreateEnumStmt;
+      const enumName = getQNameFromNodes(es.typeName || []);
       return {
         ...acc,
         enums: acc.enums.concat({
-          name: a.name,
-          values: a.values.map((v) => v.value),
+          name: enumName,
+          values: (es.vals || []).map((v) => {
+            if ("String" in v) return v.String.sval || "";
+            return "";
+          }),
         }),
       };
     } else {

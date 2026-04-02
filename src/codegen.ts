@@ -1,4 +1,4 @@
-import { type Name, type QName } from "trader-pgsql-ast-parser";
+import { type Name, type QName } from "./pg-ast.ts";
 import {
   checkAllCasesHandled,
   showQName,

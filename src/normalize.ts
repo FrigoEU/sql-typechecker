@@ -1,5 +1,3 @@
-import type { BinaryOperator } from "trader-pgsql-ast-parser";
-
 export function normalizeTypeName(s: string): string {
   if (s === "int8" || s === "bigserial") {
     return "bigint";
@@ -31,7 +29,7 @@ export function normalizeTypeName(s: string): string {
   return s;
 }
 
-export function normalizeOperatorName(s: BinaryOperator): string {
+export function normalizeOperatorName(s: string): string {
   if (s === "!=") {
     return "<>";
   }

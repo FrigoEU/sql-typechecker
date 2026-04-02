@@ -3,12 +3,15 @@ import { min, repeat } from "lodash-es";
 import * as path from "path";
 import * as prettier from "prettier";
 import {
-  parse,
-  type CreateFunctionStatement,
-  type NodeLocation,
+  parseStatements,
+  loadModule,
+  type RawStmt,
+  type Node,
+  type CreateFunctionStmt,
   type QName,
-  type Statement,
-} from "trader-pgsql-ast-parser";
+  extractFunctionOptions,
+  getQNameFromNodes,
+} from "./pg-ast.ts";
 import {
   functionToTypescript,
   genCrudOperations,
@@ -45,13 +48,18 @@ async function findSqlFilesInDir(dir: string): Promise<string[]> {
   return res;
 }
 
+type CreateFunctionRawStmt = RawStmt & {
+  stmt: { CreateFunctionStmt: CreateFunctionStmt };
+};
+
 function isCreateFunctionStatement(
-  st: Statement
-): st is CreateFunctionStatement {
-  return st.type === "create function";
+  st: RawStmt
+): st is CreateFunctionRawStmt {
+  return st.stmt !== undefined && "CreateFunctionStmt" in st.stmt;
 }
 
 async function go() {
+  await loadModule();
   const outArgs = findInArgs({ argv: process.argv, flags: ["-o", "--out"] });
   const outArg = outArgs[0];
   if (!outArg) {
@@ -80,15 +88,13 @@ async function go() {
   const allStatements: {
     fileName: string;
     fileContents: string;
-    statements: Statement[];
+    statements: RawStmt[];
   }[] = [];
   let g: Global = { tables: [], views: [], domains: [], enums: [] };
   for (let sqlFile of allSqlFiles) {
     // console.log(`Processing file ${sqlFile}`);
     const fileContents = await fs.readFile(sqlFile, "utf-8");
-    const statements: Statement[] = parse(fileContents, {
-      locationTracking: true,
-    });
+    const statements = parseStatements(fileContents);
     allStatements.push({ fileName: sqlFile, fileContents, statements });
 
     try {
@@ -185,11 +191,14 @@ async function go() {
     // console.log(`Writing functions to ${outFileName}`);
 
     for (let st of createFunctionStatements) {
-      if (st.language?.name.toLowerCase() !== "sql") {
+      const cfStmt = st.stmt.CreateFunctionStmt;
+      const funcOpts = extractFunctionOptions(cfStmt);
+      if (funcOpts.language?.toLowerCase() !== "sql") {
         continue;
       }
+      const funcName = getQNameFromNodes(cfStmt.funcname || []);
       try {
-        const res = doCreateFunction(g, { decls: [], froms: [] }, st);
+        const res = doCreateFunction(g, { decls: [], froms: [] }, cfStmt);
         const writing = prettier.format(functionToTypescript(res), {
           parser: "typescript",
         });
@@ -197,11 +206,9 @@ async function go() {
         await fs.appendFile(functionsOutFile, writing, "utf-8");
       } catch (err) {
         const functionLineNumber = (function () {
-          const indexOfCode = f.fileContents.indexOf(st.code || "");
-          const foundCode = findCode(f.fileContents, {
-            start: indexOfCode,
-            end: indexOfCode + 1,
-          });
+          const code = funcOpts.code || "";
+          const indexOfCode = f.fileContents.indexOf(code);
+          const foundCode = findCode(f.fileContents, indexOfCode);
           if (!foundCode) {
             return null;
           }
@@ -212,12 +219,12 @@ async function go() {
         })();
         console.error("---------------------------------------------");
         if (err instanceof ErrorWithLocation && err.l !== undefined) {
-          const found = findCode(st.code || "", err.l);
+          const found = findCode(funcOpts.code || "", err.l);
           if (found) {
             const fullLineNumber = (functionLineNumber || 0) + found.lineNumber;
             const prefix = fullLineNumber.toString() + "  ";
             console.error(
-              `${f.fileName}:${fullLineNumber}:${found.range[0]}: ${st.name.name}`
+              `${f.fileName}:${fullLineNumber}:${found.range[0]}: ${funcName.name}`
             );
             console.error("");
             console.error(prefix + found.line);
@@ -227,12 +234,12 @@ async function go() {
             );
           } else {
             console.error(
-              `${f.fileName}:${functionLineNumber || 0}: ${st.name.name}`
+              `${f.fileName}:${functionLineNumber || 0}: ${funcName.name}`
             );
           }
         } else {
           console.error(
-            `${f.fileName}:${functionLineNumber || 0}: ${st.name.name}`
+            `${f.fileName}:${functionLineNumber || 0}: ${funcName.name}`
           );
         }
         console.error(err instanceof Error ? err.message : JSON.stringify(err));
@@ -250,20 +257,20 @@ async function go() {
 
 function findCode(
   s: string,
-  l: NodeLocation
+  offset: number
 ): { line: string; lineNumber: number; range: [number, number] } | null {
   let counted = 0;
   let lineNumber = 0;
   const lines = s.split("\n");
   for (let line of lines) {
     const lineLength = line.length;
-    if (counted <= l.start && l.start <= counted + lineLength) {
+    if (counted <= offset && offset <= counted + lineLength) {
       return {
         line,
         lineNumber,
         range: [
-          l.start - counted,
-          min([lineLength, l.end - counted]) || lineLength,
+          offset - counted,
+          min([lineLength, offset - counted + 1]) || lineLength,
         ],
       };
     }

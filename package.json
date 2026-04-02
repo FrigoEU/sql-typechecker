@@ -8,7 +8,9 @@
     "lodash-es": "^4.17.21",
     "pg": "^8.7.3",
     "postgres-range": "^1.1.2",
-    "trader-pgsql-ast-parser": "10.5.10"
+    "libpg-query": "17.7.3",
+    "@pgsql/enums": "17.9.2",
+    "pgsql-deparser": "17.18.2"
   },
   "peerDependencies": {
     "@js-joda/core": "5.5.2"

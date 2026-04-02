@@ -21,6 +21,7 @@
     "prepare": "npm run build",
     "build:types": "tsc --emitDeclarationOnly --declaration --outDir ./out --module commonjs --target ES2019 --esModuleInterop src/typeparsers.ts",
     "start": "npm run build && node --enable-source-maps ./out/cli.js -d ./sample -o ./sample/out",
+    "test_school": "node ./out/cli.js --dir ~/projects/school/typescript/sql/classy --out ./school-test",
     "extendedexample": "npm run build && node --enable-source-maps ./out/cli.js -d ./extendedexample -o ./extendedexample/out",
     "test": "tsx --test-reporter=spec --test 'test/test.ts'",
     "test_only": "tsx --test-reporter=spec --test --test-only 'test/test.ts'",

@@ -2,7 +2,12 @@ import { isPlainObject, mapValues, omit } from "lodash-es";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { type Either, Left, nullable, Right } from "purify-ts";
-import { parseStatements, loadModule, type Name, type QName } from "../src/pg-ast.ts";
+import {
+  parseStatements,
+  loadModule,
+  type Name,
+  type QName,
+} from "../src/pg-ast.ts";
 import {
   doCreateFunction,
   parseSetupScripts,
@@ -45,7 +50,11 @@ function testCreateFunction(
   const stmt = query[0]?.stmt;
   if (stmt && "CreateFunctionStmt" in stmt) {
     try {
-      const res = doCreateFunction(g, { decls: [], froms: [] }, stmt.CreateFunctionStmt);
+      const res = doCreateFunction(
+        g,
+        { decls: [], froms: [] },
+        stmt.CreateFunctionStmt
+      );
       cont(Right(res));
     } catch (err) {
       cont(Left(err as Error));
@@ -2383,6 +2392,48 @@ $$ LANGUAGE sql;
         {
           name: { name: "l" },
           type: BuiltinTypes.Boolean,
+        },
+      ],
+    }
+  );
+});
+
+test("regexp_replace", () => {
+  expectReturnType(
+    "create table testje ( id int not null, name text not null );",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+    SELECT regexp_replace(name, 'a', 'b') AS replaced
+    FROM testje
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "replaced" },
+          type: BuiltinTypes.Text,
+        },
+      ],
+    }
+  );
+});
+
+test("regexp_replace with flags", () => {
+  expectReturnType(
+    "create table testje ( id int not null, name text not null );",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+    SELECT regexp_replace(name, 'a', 'b', 'gi') AS replaced
+    FROM testje
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "replaced" },
+          type: BuiltinTypes.Text,
         },
       ],
     }

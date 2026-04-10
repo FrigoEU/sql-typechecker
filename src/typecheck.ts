@@ -2797,6 +2797,24 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
     return BuiltinTypes.TimestampMultiRange;
   }
 
+  if (eqQNames(funcName, { name: "regexp_replace" })) {
+    return unifyOverloadedCall(g, e, funcName, args, argTypes, [
+      {
+        expectedArgs: [BuiltinTypes.Text, BuiltinTypes.Text, BuiltinTypes.Text],
+        returnT: BuiltinTypes.Text,
+      },
+      {
+        expectedArgs: [
+          BuiltinTypes.Text,
+          BuiltinTypes.Text,
+          BuiltinTypes.Text,
+          BuiltinTypes.Text,
+        ],
+        returnT: BuiltinTypes.Text,
+      },
+    ]);
+  }
+
   if (eqQNames(funcName, { name: "starts_with" })) {
     return unifyCallGeneralOrThrow(
       g,

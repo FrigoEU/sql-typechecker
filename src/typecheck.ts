@@ -927,16 +927,14 @@ function mkType(g: Global, tn: TypeName, constraints: Constraint[]): SimpleT {
     t_ = checkType(g, tn.location, typeName);
   }
   const notnullable = constraints.some(
-    (c) => enumEq(c.contype, ConstrType, ConstrType.CONSTR_NOTNULL) || enumEq(c.contype, ConstrType, ConstrType.CONSTR_PRIMARY)
+    (c) =>
+      enumEq(c.contype, ConstrType, ConstrType.CONSTR_NOTNULL) ||
+      enumEq(c.contype, ConstrType, ConstrType.CONSTR_PRIMARY)
   );
   return notnullable ? t_ : nullify(t_);
 }
 
-function checkType(
-  g: Global,
-  l: number | undefined,
-  name: string
-): ScalarT {
+function checkType(g: Global, l: number | undefined, name: string): ScalarT {
   const foundDom = g.domains.find((d) => d.name.name === name);
   if (foundDom) {
     return {
@@ -995,12 +993,12 @@ function doCreateTable(g: Global, s: CreateStmt): Global {
   }, []);
 
   const primaryKey = (function () {
-    // Check table-level constraints
-    const tableConstraints = (s.constraints || [])
+    // Check table-level constraints (in libpg-query these appear in tableElts, not s.constraints)
+    const tableConstraints = [...(s.constraints || []), ...tableElts]
       .filter((n): n is { Constraint: Constraint } => "Constraint" in n)
       .map((n) => n.Constraint);
-    const pkConstraint = tableConstraints.find(
-      (c) => enumEq(c.contype, ConstrType, ConstrType.CONSTR_PRIMARY)
+    const pkConstraint = tableConstraints.find((c) =>
+      enumEq(c.contype, ConstrType, ConstrType.CONSTR_PRIMARY)
     );
     if (pkConstraint) {
       return (pkConstraint.keys || []).map((k): Name => {
@@ -1014,8 +1012,8 @@ function doCreateTable(g: Global, s: CreateStmt): Global {
     const columnsWithPK = tableElts.filter((elt) => {
       if (!("ColumnDef" in elt)) return false;
       const col = elt.ColumnDef;
-      return extractConstraints(col.constraints || []).some(
-        (c) => enumEq(c.contype, ConstrType, ConstrType.CONSTR_PRIMARY)
+      return extractConstraints(col.constraints || []).some((c) =>
+        enumEq(c.contype, ConstrType, ConstrType.CONSTR_PRIMARY)
       );
     });
     if (columnsWithPK.length > 0) {
@@ -1035,7 +1033,11 @@ function doCreateTable(g: Global, s: CreateStmt): Global {
     if (t.kind === "scalar" && t.name.name.toLowerCase() === "serial") {
       return col;
     }
-    if (constraints.some((c) => enumEq(c.contype, ConstrType, ConstrType.CONSTR_DEFAULT))) {
+    if (
+      constraints.some((c) =>
+        enumEq(c.contype, ConstrType, ConstrType.CONSTR_DEFAULT)
+      )
+    ) {
       return col;
     }
     return null;
@@ -1198,7 +1200,10 @@ export function elabSelect(
   }
 
   // UNION / INTERSECT / EXCEPT
-  if (s.op !== undefined && !enumEq(s.op, SetOperation, SetOperation.SETOP_NONE)) {
+  if (
+    s.op !== undefined &&
+    !enumEq(s.op, SetOperation, SetOperation.SETOP_NONE)
+  ) {
     if (!s.larg || !s.rarg) {
       throw new Error("Set operation without left/right args");
     }
@@ -1206,10 +1211,18 @@ export function elabSelect(
     const typeR = elabSelect(g, c, s.rarg, null);
     const dummyNode: Node = { SelectStmt: s };
     if (typeL.kind === "void") {
-      throw new KindMismatch(dummyNode, typeL, "Can't union a statement that returns nothing");
+      throw new KindMismatch(
+        dummyNode,
+        typeL,
+        "Can't union a statement that returns nothing"
+      );
     }
     if (typeR.kind === "void") {
-      throw new KindMismatch(dummyNode, typeR, "Can't union a statement that returns nothing");
+      throw new KindMismatch(
+        dummyNode,
+        typeR,
+        "Can't union a statement that returns nothing"
+      );
     }
     return unifyRecords(g, dummyNode, typeL, typeR);
   }
@@ -1219,7 +1232,7 @@ export function elabSelect(
     const dummyNode: Node = { SelectStmt: s };
     const typesPerRow: RecordT[] = s.valuesLists.map((rowNode) => {
       // Each row is a List node
-      const exprs: Node[] = "List" in rowNode ? (rowNode.List.items || []) : [];
+      const exprs: Node[] = "List" in rowNode ? rowNode.List.items || [] : [];
       const fields = exprs.map((exp, i) => {
         const t_ = elabExpr(g, c, exp);
         const t = toSimpleT(t_);
@@ -1339,11 +1352,7 @@ function elabSelectOrStatement(
   return elabSelect(g, c, s, null);
 }
 
-function elabInsert(
-  g: Global,
-  c: Context,
-  s: InsertStmt
-): VoidT | RecordT {
+function elabInsert(g: Global, c: Context, s: InsertStmt): VoidT | RecordT {
   const intoRV = s.relation!;
   const intoName = rangeVarToQName(intoRV);
   const insertingInto: null | {
@@ -1367,11 +1376,13 @@ function elabInsert(
 
   const columns: Field[] = s.cols
     ? s.cols.map((colNode) => {
-        if (!("ResTarget" in colNode)) throw new Error("Expected ResTarget in INSERT cols");
+        if (!("ResTarget" in colNode))
+          throw new Error("Expected ResTarget in INSERT cols");
         const rt = colNode.ResTarget;
         const colName: QName = { name: rt.name || "" };
         const foundField = insertingInto.rel.fields.find((f) => {
-          if (!f.name) throw new Error("Assertion error: Table field without name");
+          if (!f.name)
+            throw new Error("Assertion error: Table field without name");
           return eqQNames(colName, f.name);
         });
         if (!foundField) {
@@ -1383,13 +1394,19 @@ function elabInsert(
 
   // The selectStmt contains the VALUES or SELECT
   if (!s.selectStmt || !("SelectStmt" in s.selectStmt)) {
-    throw new ColumnsMismatch(dummyNode, { expected: columns.length, actual: 0 });
+    throw new ColumnsMismatch(dummyNode, {
+      expected: columns.length,
+      actual: 0,
+    });
   }
   const insertSelect = s.selectStmt.SelectStmt;
   const insertT = elabSelect(g, c, insertSelect, null);
 
   if (insertT.kind === "void") {
-    throw new ColumnsMismatch(dummyNode, { expected: columns.length, actual: 0 });
+    throw new ColumnsMismatch(dummyNode, {
+      expected: columns.length,
+      actual: 0,
+    });
   }
 
   if (insertT.fields.length !== columns.length) {
@@ -1414,13 +1431,18 @@ function elabInsert(
     return {
       kind: "record",
       fields: s.returningList.map((rtNode) => {
-        if (!("ResTarget" in rtNode)) throw new Error("Expected ResTarget in RETURNING");
+        if (!("ResTarget" in rtNode))
+          throw new Error("Expected ResTarget in RETURNING");
         const rt = rtNode.ResTarget;
         const val = rt.val!;
         const t_ = elabExpr(g, newContext, val);
         const t = toSimpleT(t_);
         if (!t) {
-          throw new KindMismatch(val, t_, "Need simple type here, not a record");
+          throw new KindMismatch(
+            val,
+            t_,
+            "Need simple type here, not a record"
+          );
         }
         return {
           name: (rt.name ? { name: rt.name } : null) || deriveNameFromExpr(val),
@@ -1434,11 +1456,7 @@ function elabInsert(
   }
 }
 
-function elabDelete(
-  g: Global,
-  c: Context,
-  s: DeleteStmt
-): VoidT | RecordT {
+function elabDelete(g: Global, c: Context, s: DeleteStmt): VoidT | RecordT {
   const rv = s.relation!;
   const tableName = rangeVarToQName(rv);
   const tableDef = g.tables.find((t) => eqQNames(t.name, tableName)) || null;
@@ -1462,11 +1480,7 @@ function elabDelete(
   return elabReturningList(g, newContext, s.returningList);
 }
 
-function elabUpdate(
-  g: Global,
-  c: Context,
-  s: UpdateStmt
-): VoidT | RecordT {
+function elabUpdate(g: Global, c: Context, s: UpdateStmt): VoidT | RecordT {
   const rv = s.relation!;
   const tableName = rangeVarToQName(rv);
   const tableDef = g.tables.find((t) => eqQNames(t.name, tableName)) || null;
@@ -1530,7 +1544,11 @@ function elabReturningList(
         const t_ = elabExpr(g, c, val);
         const t = toSimpleT(t_);
         if (!t) {
-          throw new KindMismatch(val, t_, "Need simple type here, not a record");
+          throw new KindMismatch(
+            val,
+            t_,
+            "Need simple type here, not a record"
+          );
         }
         return {
           name: (rt.name ? { name: rt.name } : null) || deriveNameFromExpr(val),
@@ -1582,17 +1600,36 @@ export function doCreateFunction(
   }
   if (language.toLowerCase() === "sql") {
     const params = (s.parameters || [])
-      .filter((n): n is { FunctionParameter: FunctionParameter } => "FunctionParameter" in n)
+      .filter(
+        (n): n is { FunctionParameter: FunctionParameter } =>
+          "FunctionParameter" in n
+      )
       .map((n) => n.FunctionParameter)
-      .filter((p) => !p.mode || enumEq(p.mode, FunctionParameterMode, FunctionParameterMode.FUNC_PARAM_IN) || enumEq(p.mode, FunctionParameterMode, FunctionParameterMode.FUNC_PARAM_DEFAULT));
+      .filter(
+        (p) =>
+          !p.mode ||
+          enumEq(
+            p.mode,
+            FunctionParameterMode,
+            FunctionParameterMode.FUNC_PARAM_IN
+          ) ||
+          enumEq(
+            p.mode,
+            FunctionParameterMode,
+            FunctionParameterMode.FUNC_PARAM_DEFAULT
+          )
+      );
 
     const inputs = params.map((arg) => {
       if (!arg.name) {
         throw new Error(
-          "Please provide name for all function arguments for " + showQName(name)
+          "Please provide name for all function arguments for " +
+            showQName(name)
         );
       }
-      const paramT = mkType(g, arg.argType!, [{ contype: ConstrType.CONSTR_NOTNULL } as unknown as Constraint]);
+      const paramT = mkType(g, arg.argType!, [
+        { contype: ConstrType.CONSTR_NOTNULL } as unknown as Constraint,
+      ]);
       // Default rule: params are NOT NULL unless default is null
       if (arg.defexpr) {
         const defNode = arg.defexpr;
@@ -1620,7 +1657,11 @@ export function doCreateFunction(
         // Check for DEFAULT ARRAY[NULL] for nullable arrays
         if ("A_ArrayExpr" in defNode && paramT.kind === "array") {
           const elts = defNode.A_ArrayExpr.elements || [];
-          if (elts.length > 0 && "A_Const" in elts[0] && elts[0].A_Const.isnull) {
+          if (
+            elts.length > 0 &&
+            "A_Const" in elts[0] &&
+            elts[0].A_Const.isnull
+          ) {
             return {
               name: { name: arg.name },
               type: nullifyArray(paramT),
@@ -1653,15 +1694,21 @@ export function doCreateFunction(
       };
     } else {
       const lastStatement = bodyStatements[bodyStatements.length - 1];
-      const returnType = elabStatementNode(g, contextForBody, lastStatement.stmt!);
+      const returnType = elabStatementNode(
+        g,
+        contextForBody,
+        lastStatement.stmt!
+      );
 
       const returnTypeName = s.returnType;
-      const isSetof = s.returnType ? (function () {
-        // Check if returnType has setof by checking if it has arrayBounds or the setof field
-        // In the new AST, setof is indicated in the CreateFunctionStmt itself
-        // Actually, the returnType in CreateFunctionStmt is a TypeName which has setof field
-        return (s.returnType as any)?.setof === true;
-      })() : false;
+      const isSetof = s.returnType
+        ? (function () {
+            // Check if returnType has setof by checking if it has arrayBounds or the setof field
+            // In the new AST, setof is indicated in the CreateFunctionStmt itself
+            // Actually, the returnType in CreateFunctionStmt is a TypeName which has setof field
+            return (s.returnType as any)?.setof === true;
+          })()
+        : false;
 
       const unifiedReturnType = (function (): Type | VoidT {
         const location = returnTypeName?.location || name._location;
@@ -1676,10 +1723,18 @@ export function doCreateFunction(
             return { kind: "void" };
           }
           const annotatedType = mkType(g, returnTypeName, []);
-          throw new KindMismatch(dummyExpr, annotatedType, "Function returns void");
+          throw new KindMismatch(
+            dummyExpr,
+            annotatedType,
+            "Function returns void"
+          );
         }
         if (!returnTypeName) {
-          throw new KindMismatch(dummyExpr, { kind: "void" }, "Function needs return type");
+          throw new KindMismatch(
+            dummyExpr,
+            { kind: "void" },
+            "Function needs return type"
+          );
         }
         const retTypeInfo = getTypeName(returnTypeName);
         if (retTypeInfo.name === "record") {
@@ -1721,7 +1776,9 @@ export function doCreateFunction(
           if (unifiedReturnType.kind !== "record") {
             throw new ErrorWithLocation(
               undefined,
-              `Function should return record, but returns ${JSON.stringify(unifiedReturnType)}`
+              `Function should return record, but returns ${JSON.stringify(
+                unifiedReturnType
+              )}`
             );
           }
         }
@@ -1749,13 +1806,22 @@ export function doCreateFunction(
 type Joined = { name: QName; rel: RecordT };
 type Nullable<T> = T | null;
 
-function findRel(g: Global, c: Context, fromNode: Node, n: QName): Nullable<RecordT> {
+function findRel(
+  g: Global,
+  c: Context,
+  fromNode: Node,
+  n: QName
+): Nullable<RecordT> {
   const d = c.decls.find((d) => eqQNames(d.name, n));
   if (d) {
     if (d.type.kind === "record") {
       return d.type;
     } else {
-      throw new KindMismatch_From(fromNode, d.type, "Expecting a record or table");
+      throw new KindMismatch_From(
+        fromNode,
+        d.type,
+        "Expecting a record or table"
+      );
     }
   } else {
     const t = g.tables.find((t) => eqQNames(t.name, n));
@@ -1791,9 +1857,7 @@ export class ErrorWithLocation {
 
 class NotImplementedYet extends ErrorWithLocation {
   constructor(node: any) {
-    const m = node
-      ? `: \n${JSON.stringify(node).slice(0, 500)}`
-      : "";
+    const m = node ? `: \n${JSON.stringify(node).slice(0, 500)}` : "";
     super(nodeLocation(node), `NotImplementedYet: ${m}`);
   }
 }
@@ -1898,7 +1962,9 @@ export class UnknownBinaryOp extends ErrorWithLocation {
   constructor(e: Node, n: QName, t1: Type, t2: Type) {
     super(
       nodeLocation(e),
-      `Can't apply operator "${showQName(n)}" to ${showType(t1)} and ${showType(t2)}`
+      `Can't apply operator "${showQName(n)}" to ${showType(t1)} and ${showType(
+        t2
+      )}`
     );
   }
 }
@@ -1912,7 +1978,9 @@ export class InvalidArguments extends ErrorWithLocation {
     const argsString = argTs.map((t) => showType(t)).join(", ");
     super(
       nodeLocation(e),
-      `Can't apply function "${showQName(n)}" to arguments: ${argsString}. ${reason || ""}`
+      `Can't apply function "${showQName(n)}" to arguments: ${argsString}. ${
+        reason || ""
+      }`
     );
   }
 }
@@ -1925,7 +1993,9 @@ class AmbiguousIdentifier extends ErrorWithLocation {
   constructor(e: Node, m: QName, records: QName[]) {
     super(
       nodeLocation(e),
-      `AmbiguousIdentifier ${showQName(m)} @ ${showLocation(m._location)} present in ${JSON.stringify(records)}`
+      `AmbiguousIdentifier ${showQName(m)} @ ${showLocation(
+        m._location
+      )} present in ${JSON.stringify(records)}`
     );
   }
 }
@@ -2097,14 +2167,22 @@ function doSingleFrom(
     // For LEFT JOIN: right side gets nullified
     // For RIGHT JOIN: left side gets nullified
     // For FULL JOIN: both sides get nullified
-    if (enumEq(je.jointype, JoinType, JoinType.JOIN_LEFT) || enumEq(je.jointype, JoinType, JoinType.JOIN_FULL)) {
+    if (
+      enumEq(je.jointype, JoinType, JoinType.JOIN_LEFT) ||
+      enumEq(je.jointype, JoinType, JoinType.JOIN_FULL)
+    ) {
       // Nullify the last-added joined (the right side)
       if (joined.length > 0) {
         const last = joined[joined.length - 1];
-        joined = joined.slice(0, -1).concat({ ...last, rel: nullifyRecord(last.rel) });
+        joined = joined
+          .slice(0, -1)
+          .concat({ ...last, rel: nullifyRecord(last.rel) });
       }
     }
-    if (enumEq(je.jointype, JoinType, JoinType.JOIN_RIGHT) || enumEq(je.jointype, JoinType, JoinType.JOIN_FULL)) {
+    if (
+      enumEq(je.jointype, JoinType, JoinType.JOIN_RIGHT) ||
+      enumEq(je.jointype, JoinType, JoinType.JOIN_FULL)
+    ) {
       // Nullify all existing (the left side)
       joined = joined.map((j, i) =>
         i < joined.length - 1 ? { ...j, rel: nullifyRecord(j.rel) } : j
@@ -2127,7 +2205,12 @@ function doSingleFrom(
             return { name: "" };
           })
         : null;
-      const t = elabSelect(g, cWithLateral, rs.subquery.SelectStmt, columnNames);
+      const t = elabSelect(
+        g,
+        cWithLateral,
+        rs.subquery.SelectStmt,
+        columnNames
+      );
       if (t.kind === "void") {
         throw new KindMismatch(
           f,
@@ -2436,7 +2519,10 @@ function elabAExpr(g: Global, c: Context, e: Node, ae: A_Expr): Type {
   }
 
   // Handle BETWEEN
-  if (enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_BETWEEN) || enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_NOT_BETWEEN)) {
+  if (
+    enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_BETWEEN) ||
+    enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_NOT_BETWEEN)
+  ) {
     const value = ae.lexpr!;
     // rexpr is a List with lo and hi
     const rangeList = ae.rexpr!;
@@ -2468,7 +2554,10 @@ function elabAExpr(g: Global, c: Context, e: Node, ae: A_Expr): Type {
   }
 
   // Handle = ANY(...) / = ALL(...)  (AEXPR_OP_ANY / AEXPR_OP_ALL)
-  if (enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_OP_ANY) || enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_OP_ALL)) {
+  if (
+    enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_OP_ANY) ||
+    enumEq(ae.kind, A_Expr_Kind, A_Expr_Kind.AEXPR_OP_ALL)
+  ) {
     const left = ae.lexpr!;
     const right = ae.rexpr!;
     const tLeft_ = elabExpr(g, c, left);
@@ -2525,7 +2614,11 @@ function elabAExpr(g: Global, c: Context, e: Node, ae: A_Expr): Type {
   if (t2 === null) throw new CantReduceToSimpleT(e, t2_);
 
   // = NULL check
-  if (opName === "=" && (("A_Const" in left && left.A_Const.isnull) || ("A_Const" in right && right.A_Const.isnull))) {
+  if (
+    opName === "=" &&
+    (("A_Const" in left && left.A_Const.isnull) ||
+      ("A_Const" in right && right.A_Const.isnull))
+  ) {
     throw new ErrorWithLocation(
       ae.location,
       `Don't use \"= NULL\", use "IS NULL" instead`
@@ -2533,9 +2626,14 @@ function elabAExpr(g: Global, c: Context, e: Node, ae: A_Expr): Type {
   }
 
   if (
-    (opName === "=" || opName === "!=" || opName === "<>" ||
-     opName === "@>" || opName === "<@" || opName === "&&") &&
-    t1.kind === "array" && t2.kind === "array"
+    (opName === "=" ||
+      opName === "!=" ||
+      opName === "<>" ||
+      opName === "@>" ||
+      opName === "<@" ||
+      opName === "&&") &&
+    t1.kind === "array" &&
+    t2.kind === "array"
   ) {
     unifySimplesOrThrow(g, e, t1.typevar, t2.typevar);
     return BuiltinTypes.Boolean;
@@ -2543,8 +2641,10 @@ function elabAExpr(g: Global, c: Context, e: Node, ae: A_Expr): Type {
 
   if (
     opName === "-" &&
-    t1.kind === "scalar" && eqQNames(t1.name, BuiltinTypes.TimestampMultiRange.name) &&
-    t2.kind === "scalar" && eqQNames(t2.name, BuiltinTypes.TimestampMultiRange.name)
+    t1.kind === "scalar" &&
+    eqQNames(t1.name, BuiltinTypes.TimestampMultiRange.name) &&
+    t2.kind === "scalar" &&
+    eqQNames(t2.name, BuiltinTypes.TimestampMultiRange.name)
   ) {
     return BuiltinTypes.TimestampMultiRange;
   }
@@ -2559,9 +2659,21 @@ function elabAExpr(g: Global, c: Context, e: Node, ae: A_Expr): Type {
   // JSON operators -> and ->>
   if (opName === "->" || opName === "->>") {
     try {
-      castOrThrow(g, left, t1_, BuiltinTypeConstructors.Nullable(BuiltinTypes.Json), "implicit");
+      castOrThrow(
+        g,
+        left,
+        t1_,
+        BuiltinTypeConstructors.Nullable(BuiltinTypes.Json),
+        "implicit"
+      );
     } catch {
-      castOrThrow(g, left, t1_, BuiltinTypeConstructors.Nullable(BuiltinTypes.Jsonb), "implicit");
+      castOrThrow(
+        g,
+        left,
+        t1_,
+        BuiltinTypeConstructors.Nullable(BuiltinTypes.Jsonb),
+        "implicit"
+      );
     }
     return opName === "->>" ? BuiltinTypes.Text : AnyScalar;
   }
@@ -2577,9 +2689,16 @@ function elabAExpr(g: Global, c: Context, e: Node, ae: A_Expr): Type {
   const opsForName = getOperatorIndex(g).get(opKey) || [];
 
   const found = opsForName
-    .sort((op) => eqType(op.left, op.right) ? -1 : 0)
+    .sort((op) => (eqType(op.left, op.right) ? -1 : 0))
     .map((op) => {
-      const res = elabAnyCall(g, e, op.name, "STRICT", [t1, t2], [op.left, op.right]);
+      const res = elabAnyCall(
+        g,
+        e,
+        op.name,
+        "STRICT",
+        [t1, t2],
+        [op.left, op.right]
+      );
       if (res instanceof ErrorWithLocation) return null;
       return { ...res, op };
     })
@@ -2651,9 +2770,14 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
     if (args.length === 1) {
       const subt = argTypes[0];
       if (subt.kind === "record") {
-        throw new ErrorWithLocation(nodeLocation(args[0]), "Can't have record type inside array");
+        throw new ErrorWithLocation(
+          nodeLocation(args[0]),
+          "Can't have record type inside array"
+        );
       }
-      return BuiltinTypeConstructors.Nullable(BuiltinTypeConstructors.Array(subt));
+      return BuiltinTypeConstructors.Nullable(
+        BuiltinTypeConstructors.Array(subt)
+      );
     } else {
       throw new InvalidArguments(e, funcName, argTypes);
     }
@@ -2674,69 +2798,169 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
   }
 
   if (eqQNames(funcName, { name: "starts_with" })) {
-    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
-      [BuiltinTypes.Text, BuiltinTypes.Text], BuiltinTypes.Boolean);
+    return unifyCallGeneralOrThrow(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
+      [BuiltinTypes.Text, BuiltinTypes.Text],
+      BuiltinTypes.Boolean
+    );
   }
 
   if (
     eqQNames(funcName, { name: "left" }) ||
     eqQNames(funcName, { name: "right" })
   ) {
-    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
-      [BuiltinTypes.Text, BuiltinTypes.Integer], BuiltinTypes.Text);
+    return unifyCallGeneralOrThrow(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
+      [BuiltinTypes.Text, BuiltinTypes.Integer],
+      BuiltinTypes.Text
+    );
   }
 
   if (eqQNames(funcName, { name: "length" })) {
-    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
-      [BuiltinTypes.Text], BuiltinTypes.Integer);
+    return unifyCallGeneralOrThrow(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
+      [BuiltinTypes.Text],
+      BuiltinTypes.Integer
+    );
   }
 
   if (eqQNames(funcName, { name: "tsrange" })) {
-    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
-      [BuiltinTypes.Timestamp, BuiltinTypes.Timestamp], BuiltinTypes.TimestampRange);
+    return unifyCallGeneralOrThrow(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
+      [BuiltinTypes.Timestamp, BuiltinTypes.Timestamp],
+      BuiltinTypes.TimestampRange
+    );
   }
 
   if (eqQNames(funcName, { name: "range_agg" })) {
-    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
-      [BuiltinTypes.TimestampRange], BuiltinTypes.TimestampMultiRange);
+    return unifyCallGeneralOrThrow(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
+      [BuiltinTypes.TimestampRange],
+      BuiltinTypes.TimestampMultiRange
+    );
   }
 
   if (eqQNames(funcName, { name: "generate_series" })) {
     return unifyOverloadedCall(g, e, funcName, args, argTypes, [
-      { expectedArgs: [BuiltinTypes.Integer, BuiltinTypes.Integer], returnT: BuiltinTypes.Integer },
-      { expectedArgs: [BuiltinTypes.Integer, BuiltinTypes.Integer, BuiltinTypes.Integer], returnT: BuiltinTypes.Integer },
-      { expectedArgs: [BuiltinTypes.Timestamp, BuiltinTypes.Timestamp, BuiltinTypes.Interval], returnT: BuiltinTypes.Timestamp },
-      { expectedArgs: [BuiltinTypes.Date, BuiltinTypes.Date, BuiltinTypes.Interval], returnT: BuiltinTypes.Date },
+      {
+        expectedArgs: [BuiltinTypes.Integer, BuiltinTypes.Integer],
+        returnT: BuiltinTypes.Integer,
+      },
+      {
+        expectedArgs: [
+          BuiltinTypes.Integer,
+          BuiltinTypes.Integer,
+          BuiltinTypes.Integer,
+        ],
+        returnT: BuiltinTypes.Integer,
+      },
+      {
+        expectedArgs: [
+          BuiltinTypes.Timestamp,
+          BuiltinTypes.Timestamp,
+          BuiltinTypes.Interval,
+        ],
+        returnT: BuiltinTypes.Timestamp,
+      },
+      {
+        expectedArgs: [
+          BuiltinTypes.Date,
+          BuiltinTypes.Date,
+          BuiltinTypes.Interval,
+        ],
+        returnT: BuiltinTypes.Date,
+      },
     ]);
   }
 
   if (eqQNames(funcName, { name: "to_char" })) {
     if (isNullable(argTypes[0])) {
       return nullify(
-        unifyOverloadedCall(g, e, funcName, args, [unnullify(argTypes[0] as SimpleT)], [
-          { expectedArgs: [BuiltinTypes.Numeric], returnT: BuiltinTypes.Text },
-          { expectedArgs: [BuiltinTypes.Interval], returnT: BuiltinTypes.Text },
-          { expectedArgs: [BuiltinTypes.Timestamp], returnT: BuiltinTypes.Text },
-          { expectedArgs: [BuiltinTypes.Date], returnT: BuiltinTypes.Text },
-        ])
+        unifyOverloadedCall(
+          g,
+          e,
+          funcName,
+          args,
+          [unnullify(argTypes[0] as SimpleT)],
+          [
+            {
+              expectedArgs: [BuiltinTypes.Numeric],
+              returnT: BuiltinTypes.Text,
+            },
+            {
+              expectedArgs: [BuiltinTypes.Interval],
+              returnT: BuiltinTypes.Text,
+            },
+            {
+              expectedArgs: [BuiltinTypes.Timestamp],
+              returnT: BuiltinTypes.Text,
+            },
+            { expectedArgs: [BuiltinTypes.Date], returnT: BuiltinTypes.Text },
+          ]
+        )
       );
     } else {
-      return unifyOverloadedCall(g, e, funcName, args, [argTypes[0]], [
-        { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Text },
-        { expectedArgs: [BuiltinTypes.Interval], returnT: BuiltinTypes.Text },
-        { expectedArgs: [BuiltinTypes.Timestamp], returnT: BuiltinTypes.Text },
-        { expectedArgs: [BuiltinTypes.Date], returnT: BuiltinTypes.Text },
-      ]);
+      return unifyOverloadedCall(
+        g,
+        e,
+        funcName,
+        args,
+        [argTypes[0]],
+        [
+          { expectedArgs: [BuiltinTypes.Integer], returnT: BuiltinTypes.Text },
+          { expectedArgs: [BuiltinTypes.Interval], returnT: BuiltinTypes.Text },
+          {
+            expectedArgs: [BuiltinTypes.Timestamp],
+            returnT: BuiltinTypes.Text,
+          },
+          { expectedArgs: [BuiltinTypes.Date], returnT: BuiltinTypes.Text },
+        ]
+      );
     }
   }
 
   if (eqQNames(funcName, { name: "nextval" })) {
-    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes,
-      [BuiltinTypes.Text], BuiltinTypes.Bigint);
+    return unifyCallGeneralOrThrow(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
+      [BuiltinTypes.Text],
+      BuiltinTypes.Bigint
+    );
   }
 
   if (eqQNames(funcName, { name: "now" })) {
-    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes, [], BuiltinTypes.Timestamp);
+    return unifyCallGeneralOrThrow(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
+      [],
+      BuiltinTypes.Timestamp
+    );
   }
 
   if (
@@ -2748,8 +2972,14 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
     const t_ = argTypes[0];
     const t = toSimpleT(t_);
     if (t === null) throw new CantReduceToSimpleT(args[0], argTypes[0]);
-    const unifiedT = unifySimplesOrThrow(g, e, t, BuiltinTypeConstructors.Array(AnyScalar));
-    if (unifiedT.kind !== "array") throw new TypecheckerError(e, "Expecting array type");
+    const unifiedT = unifySimplesOrThrow(
+      g,
+      e,
+      t,
+      BuiltinTypeConstructors.Array(AnyScalar)
+    );
+    if (unifiedT.kind !== "array")
+      throw new TypecheckerError(e, "Expecting array type");
     return unifiedT.typevar;
   }
 
@@ -2758,14 +2988,23 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
     const t1 = toSimpleT(argTypes[0]);
     if (t1 === null) throw new CantReduceToSimpleT(args[0], argTypes[0]);
     if (t1.kind === "nullable") {
-      if (t1.typevar.kind !== "array") throw new TypecheckerError(e, `Expecting array type instead of ${t1.kind}`);
+      if (t1.typevar.kind !== "array")
+        throw new TypecheckerError(
+          e,
+          `Expecting array type instead of ${t1.kind}`
+        );
     } else if (t1.kind !== "array") {
-      throw new TypecheckerError(e, `Expecting array type instead of ${t1.kind}`);
+      throw new TypecheckerError(
+        e,
+        `Expecting array type instead of ${t1.kind}`
+      );
     }
     const t2 = toSimpleT(argTypes[1]);
     if (t2 === null) throw new CantReduceToSimpleT(args[1], argTypes[1]);
     unifySimplesOrThrow(g, e, t2, BuiltinTypes.Integer);
-    return t1.kind === "nullable" ? BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer) : BuiltinTypes.Integer;
+    return t1.kind === "nullable"
+      ? BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer)
+      : BuiltinTypes.Integer;
   }
 
   if (eqQNames(funcName, { name: "array_position" })) {
@@ -2774,7 +3013,11 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
     if (t1 === null) throw new CantReduceToSimpleT(args[0], argTypes[0]);
     const t2 = toSimpleT(argTypes[1]);
     if (t2 === null) throw new CantReduceToSimpleT(args[1], argTypes[1]);
-    if (t1.kind !== "array") throw new TypecheckerError(e, `Expecting array type instead of ${t1.kind}`);
+    if (t1.kind !== "array")
+      throw new TypecheckerError(
+        e,
+        `Expecting array type instead of ${t1.kind}`
+      );
     unifySimplesOrThrow(g, e, t1.typevar, t2);
     return BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer);
   }
@@ -2792,7 +3035,9 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
       { expectedArgs: [BuiltinTypes.Float8], returnT: BuiltinTypes.Double },
       { expectedArgs: [BuiltinTypes.Money], returnT: BuiltinTypes.Money },
       ...g.domains
-        .filter((d) => allNumericBuiltinTypes.some((t) => eqType(t, d.realtype)))
+        .filter((d) =>
+          allNumericBuiltinTypes.some((t) => eqType(t, d.realtype))
+        )
         .flatMap((d) => {
           const asSimpleT = { kind: "scalar" as const, name: d.name };
           return { expectedArgs: [asSimpleT], returnT: asSimpleT };
@@ -2819,36 +3064,95 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
     return unifyOverloadedCall(g, e, funcName, args, argTypes, [
       { expectedArgs: [BuiltinTypes.Real], returnT: BuiltinTypes.Real },
       { expectedArgs: [BuiltinTypes.Numeric], returnT: BuiltinTypes.Numeric },
-      { expectedArgs: [BuiltinTypes.Numeric, BuiltinTypes.Integer], returnT: BuiltinTypes.Numeric },
+      {
+        expectedArgs: [BuiltinTypes.Numeric, BuiltinTypes.Integer],
+        returnT: BuiltinTypes.Numeric,
+      },
     ]);
   }
 
-  if (eqQNames(funcName, { name: "least" }) || eqQNames(funcName, { name: "greatest" })) {
+  if (
+    eqQNames(funcName, { name: "least" }) ||
+    eqQNames(funcName, { name: "greatest" })
+  ) {
     const { unifiedType, types } = unifyAllArgumentsVariadic();
-    return types.some(([_, t]) => !isNullable(t)) ? unnullify(unifiedType) : unifiedType;
+    return types.some(([_, t]) => !isNullable(t))
+      ? unnullify(unifiedType)
+      : unifiedType;
   }
 
-  if (eqQNames(funcName, { name: "max" }) || eqQNames(funcName, { name: "min" })) {
-    return unifyOverloadedCall(g, e, funcName, args, argTypes,
+  if (
+    eqQNames(funcName, { name: "max" }) ||
+    eqQNames(funcName, { name: "min" })
+  ) {
+    return unifyOverloadedCall(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
       allNumericBuiltinTypes
-        .concat([BuiltinTypes.Date, BuiltinTypes.Time, BuiltinTypes.Timestamp, BuiltinTypes.TimestampTz])
+        .concat([
+          BuiltinTypes.Date,
+          BuiltinTypes.Time,
+          BuiltinTypes.Timestamp,
+          BuiltinTypes.TimestampTz,
+        ])
         .flatMap((t) => [{ expectedArgs: [t], returnT: nullify(t) }])
     );
   }
 
   if (eqQNames(funcName, { name: "to_tsvector" })) {
-    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes, [BuiltinTypes.Text], BuiltinTypes.Tsvector);
+    return unifyCallGeneralOrThrow(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
+      [BuiltinTypes.Text],
+      BuiltinTypes.Tsvector
+    );
   }
   if (eqQNames(funcName, { name: "to_tsquery" })) {
-    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes, [BuiltinTypes.Text], BuiltinTypes.Tsquery);
+    return unifyCallGeneralOrThrow(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
+      [BuiltinTypes.Text],
+      BuiltinTypes.Tsquery
+    );
   }
 
-  if (eqQNames(funcName, { name: "upper" }) || eqQNames(funcName, { name: "lower" })) {
-    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes, [BuiltinTypes.Text], BuiltinTypes.Text);
+  if (
+    eqQNames(funcName, { name: "upper" }) ||
+    eqQNames(funcName, { name: "lower" })
+  ) {
+    return unifyCallGeneralOrThrow(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
+      [BuiltinTypes.Text],
+      BuiltinTypes.Text
+    );
   }
 
-  if (eqQNames(funcName, { name: "bool_and" }) || eqQNames(funcName, { name: "bool_or" })) {
-    return unifyCallGeneralOrThrow(g, e, funcName, args, argTypes, [BuiltinTypes.Boolean], BuiltinTypes.Boolean);
+  if (
+    eqQNames(funcName, { name: "bool_and" }) ||
+    eqQNames(funcName, { name: "bool_or" })
+  ) {
+    return unifyCallGeneralOrThrow(
+      g,
+      e,
+      funcName,
+      args,
+      argTypes,
+      [BuiltinTypes.Boolean],
+      BuiltinTypes.Boolean
+    );
   }
 
   if (eqQNames(funcName, { name: "count" })) {
@@ -2856,15 +3160,29 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
   }
 
   // EXTRACT handled as a FuncCall in new parser
-  if (eqQNames(funcName, { name: "date_part" }) || eqQNames(funcName, { name: "extract" })) {
+  if (
+    eqQNames(funcName, { name: "date_part" }) ||
+    eqQNames(funcName, { name: "extract" })
+  ) {
     if (args.length >= 2) {
       const fieldT = elabExpr(g, c, args[0]);
       const fromT = elabExpr(g, c, args[1]);
       // Extract the field name for validation
-      const fieldName = ("A_Const" in args[0] && args[0].A_Const.sval)
-        ? args[0].A_Const.sval.sval?.toLowerCase() : null;
-      const timeOnlyFields = ["hour", "minute", "second", "milliseconds", "microseconds", "epoch",
-        "timezone", "timezone_hour", "timezone_minute"];
+      const fieldName =
+        "A_Const" in args[0] && args[0].A_Const.sval
+          ? args[0].A_Const.sval.sval?.toLowerCase()
+          : null;
+      const timeOnlyFields = [
+        "hour",
+        "minute",
+        "second",
+        "milliseconds",
+        "microseconds",
+        "epoch",
+        "timezone",
+        "timezone_hour",
+        "timezone_minute",
+      ];
       try {
         castOrThrow(g, args[1], fromT, BuiltinTypes.Timestamp, "implicit");
       } catch {
@@ -2887,14 +3205,23 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
   }
 
   // substring / overlay
-  if (eqQNames(funcName, { name: "substring" }) || eqQNames(funcName, { name: "overlay" })) {
+  if (
+    eqQNames(funcName, { name: "substring" }) ||
+    eqQNames(funcName, { name: "overlay" })
+  ) {
     const argTs = args.map((a) => elabExpr(g, c, a));
     // Expect (text, int, int) with some args optional
-    const expectedArgs = [BuiltinTypes.Text, BuiltinTypes.Integer, BuiltinTypes.Integer].slice(0, argTs.length);
+    const expectedArgs = [
+      BuiltinTypes.Text,
+      BuiltinTypes.Integer,
+      BuiltinTypes.Integer,
+    ].slice(0, argTs.length);
     const res = throwIfError(
       elabAnyCall(g, e, funcName, "STRICT", argTs, expectedArgs)
     );
-    return res.nullifyResultType ? nullify(BuiltinTypes.Text) : BuiltinTypes.Text;
+    return res.nullifyResultType
+      ? nullify(BuiltinTypes.Text)
+      : BuiltinTypes.Text;
   }
 
   if (
@@ -2904,7 +3231,9 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
     if (args.length === 0) throw new InvalidArguments(e, funcName, []);
     const { unifiedType, types } = unifyAllArgumentsVariadic();
     if (eqQNames(funcName, { name: "coalesce" })) {
-      return types.some(([_arg, t]) => !isNullable(t)) ? unnullify(unifiedType) : unifiedType;
+      return types.some(([_arg, t]) => !isNullable(t))
+        ? unnullify(unifiedType)
+        : unifiedType;
     } else {
       return unifiedType;
     }
@@ -2913,15 +3242,24 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
   // OVERLAPS is parsed as a FuncCall to pg_catalog.overlaps in the new parser
   if (eqQNames(funcName, { name: "overlaps" })) {
     // OVERLAPS takes 4 args: (start1, end1, start2, end2)
-    if (args.length !== 4) throw new InvalidArguments(e, funcName, args.map(a => elabExpr(g, c, a)));
+    if (args.length !== 4)
+      throw new InvalidArguments(
+        e,
+        funcName,
+        args.map((a) => elabExpr(g, c, a))
+      );
     const t1 = elabExpr(g, c, args[0]);
     const t2 = elabExpr(g, c, args[1]);
     const t3 = elabExpr(g, c, args[2]);
     const t4 = elabExpr(g, c, args[3]);
-    const s1 = toSimpleT(t1); if (s1 === null) throw new CantReduceToSimpleT(args[0], t1);
-    const s2 = toSimpleT(t2); if (s2 === null) throw new CantReduceToSimpleT(args[1], t2);
-    const s3 = toSimpleT(t3); if (s3 === null) throw new CantReduceToSimpleT(args[2], t3);
-    const s4 = toSimpleT(t4); if (s4 === null) throw new CantReduceToSimpleT(args[3], t4);
+    const s1 = toSimpleT(t1);
+    if (s1 === null) throw new CantReduceToSimpleT(args[0], t1);
+    const s2 = toSimpleT(t2);
+    if (s2 === null) throw new CantReduceToSimpleT(args[1], t2);
+    const s3 = toSimpleT(t3);
+    if (s3 === null) throw new CantReduceToSimpleT(args[2], t3);
+    const s4 = toSimpleT(t4);
+    if (s4 === null) throw new CantReduceToSimpleT(args[3], t4);
     // Unify left pair and right pair
     const leftT = unifySimplesOrThrow(g, e, s1, s2);
     const rightT = unifySimplesOrThrow(g, e, s3, s4);
@@ -3027,7 +3365,11 @@ function elabExpr(g: Global, c: Context, e: Node): Type {
       }
       const selectType = elabSelect(g, c, sl.subselect.SelectStmt, null);
       if (selectType.kind === "void") {
-        throw new KindMismatch(e, selectType, "Select in array select can't return void");
+        throw new KindMismatch(
+          e,
+          selectType,
+          "Select in array select can't return void"
+        );
       }
       const t = unifyRecordWithSimple(g, e, selectType, AnyScalar);
       return BuiltinTypeConstructors.Array(t);
@@ -3038,7 +3380,11 @@ function elabExpr(g: Global, c: Context, e: Node): Type {
       }
       const t = elabSelect(g, c, sl.subselect.SelectStmt, null);
       if (t.kind === "void") {
-        throw new KindMismatch(e, t, "Select as an expression needs to return something");
+        throw new KindMismatch(
+          e,
+          t,
+          "Select as an expression needs to return something"
+        );
       }
       return t;
     } else if (enumEq(sl.subLinkType, SubLinkType, SubLinkType.ANY_SUBLINK)) {
@@ -3092,7 +3438,12 @@ function elabExpr(g: Global, c: Context, e: Node): Type {
         const indexT = elabExpr(g, c, indexNode);
         castOrThrow(g, e, indexT, BuiltinTypes.Integer, "implicit");
       }
-      const unifiedArrayT_ = unify(g, ai.arg!, arrayT, BuiltinTypeConstructors.Array(AnyScalar));
+      const unifiedArrayT_ = unify(
+        g,
+        ai.arg!,
+        arrayT,
+        BuiltinTypeConstructors.Array(AnyScalar)
+      );
       const unifiedArrayT = toSimpleT(unifiedArrayT_);
       if (unifiedArrayT === null) {
         throw new CantReduceToSimpleT(ai.arg!, unifiedArrayT_);
@@ -3101,7 +3452,10 @@ function elabExpr(g: Global, c: Context, e: Node): Type {
       if (unnulified.kind !== "array") {
         throw new TypeMismatch(
           ai.arg!,
-          { expected: arrayT, actual: BuiltinTypeConstructors.Array(AnyScalar) },
+          {
+            expected: arrayT,
+            actual: BuiltinTypeConstructors.Array(AnyScalar),
+          },
           "Can't get array index from non-array type"
         );
       }
@@ -3111,21 +3465,32 @@ function elabExpr(g: Global, c: Context, e: Node): Type {
   } else if ("CaseExpr" in e) {
     const ce = e.CaseExpr;
     const whens = (ce.args || [])
-      .filter((n): n is { CaseWhen: import("./pg-ast.ts").CaseWhen } => "CaseWhen" in n)
+      .filter(
+        (n): n is { CaseWhen: import("./pg-ast.ts").CaseWhen } =>
+          "CaseWhen" in n
+      )
       .map((n) => n.CaseWhen);
 
     if (ce.arg) {
       // CASE <value> WHEN ...
       const valueT = elabExpr(g, c, ce.arg);
-      const conditionTs: [Node, Type][] = whens.map((w) => [w.expr!, elabExpr(g, c, w.expr!)]);
+      const conditionTs: [Node, Type][] = whens.map((w) => [
+        w.expr!,
+        elabExpr(g, c, w.expr!),
+      ]);
       conditionTs.reduce(
         (acc, [exp, conditionT]) => unify(g, exp, acc, conditionT),
         valueT
       );
     } else {
       // CASE WHEN <bool> ...
-      const conditionTs: [Node, Type][] = whens.map((w) => [w.expr!, elabExpr(g, c, w.expr!)]);
-      conditionTs.forEach(([exp, conditionT]) => requireBoolean(exp, conditionT));
+      const conditionTs: [Node, Type][] = whens.map((w) => [
+        w.expr!,
+        elabExpr(g, c, w.expr!),
+      ]);
+      conditionTs.forEach(([exp, conditionT]) =>
+        requireBoolean(exp, conditionT)
+      );
     }
     if (whens.length === 0) {
       throw new Error("Not expecting CASE statement without when");
@@ -3134,11 +3499,17 @@ function elabExpr(g: Global, c: Context, e: Node): Type {
       (acc: Type, w) => unify(g, w.result!, acc, elabExpr(g, c, w.result!)),
       elabExpr(g, c, whens[0].result!)
     );
-    return ce.defresult ? unify(g, ce.defresult, whensT, elabExpr(g, c, ce.defresult)) : whensT;
+    return ce.defresult
+      ? unify(g, ce.defresult, whensT, elabExpr(g, c, ce.defresult))
+      : whensT;
   } else if ("SelectStmt" in e) {
     const t = elabSelect(g, c, e.SelectStmt, null);
     if (t.kind === "void") {
-      throw new KindMismatch(e, t, "Select as an expression needs to return something");
+      throw new KindMismatch(
+        e,
+        t,
+        "Select as an expression needs to return something"
+      );
     }
     return t;
   } else if ("CoalesceExpr" in e) {
@@ -3181,7 +3552,8 @@ function elabExpr(g: Global, c: Context, e: Node): Type {
   } else if ("MinMaxExpr" in e) {
     const mm = e.MinMaxExpr as any;
     const args: Node[] = mm.args || [];
-    if (args.length === 0) throw new Error("GREATEST/LEAST needs at least 1 arg");
+    if (args.length === 0)
+      throw new Error("GREATEST/LEAST needs at least 1 arg");
     const types: [Node, SimpleT][] = args.map((arg) => {
       const t_ = elabExpr(g, c, arg);
       const t = toSimpleT(t_);
@@ -3232,7 +3604,10 @@ function inferNullability(
       if (found instanceof ErrorWithLocation) return [];
       if (found.from === null) return [];
       return [
-        { ...found.from, isNull: enumEq(nt.nulltesttype, NullTestType, NullTestType.IS_NULL) },
+        {
+          ...found.from,
+          isNull: enumEq(nt.nulltesttype, NullTestType, NullTestType.IS_NULL),
+        },
       ];
     }
     return [];
@@ -3241,7 +3616,11 @@ function inferNullability(
 }
 
 // Dispatch a Node (the stmt field of a RawStmt) to the right elab function
-function elabStatementNode(g: Global, c: Context, stmtNode: Node): VoidT | Type {
+function elabStatementNode(
+  g: Global,
+  c: Context,
+  stmtNode: Node
+): VoidT | Type {
   if ("SelectStmt" in stmtNode) {
     return elabExpr(g, c, stmtNode);
   } else if ("InsertStmt" in stmtNode) {
@@ -3255,7 +3634,10 @@ function elabStatementNode(g: Global, c: Context, stmtNode: Node): VoidT | Type 
   }
 }
 
-export function parseSetupScripts(g: Global, ast: import("./pg-ast.ts").RawStmt[]): Global {
+export function parseSetupScripts(
+  g: Global,
+  ast: import("./pg-ast.ts").RawStmt[]
+): Global {
   return ast.reduce((acc: Global, rawStmt): Global => {
     const stmtNode = rawStmt.stmt;
     if (!stmtNode) return acc;
@@ -3278,7 +3660,9 @@ export function parseSetupScripts(g: Global, ast: import("./pg-ast.ts").RawStmt[
         ...acc,
         domains: acc.domains.concat({
           name: domName,
-          realtype: mkType(acc, ds.typeName!, [{ contype: ConstrType.CONSTR_NOTNULL } as unknown as Constraint]),
+          realtype: mkType(acc, ds.typeName!, [
+            { contype: ConstrType.CONSTR_NOTNULL } as unknown as Constraint,
+          ]),
         }),
       };
     } else if ("CreateEnumStmt" in stmtNode) {

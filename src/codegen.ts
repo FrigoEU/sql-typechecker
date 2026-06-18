@@ -128,7 +128,10 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
       )} as types.${t.name.name}`;
     }
     if (t.name.name === "date") {
-      return `LocalDate.parse(${literalVar})`;
+      // Postgres dates can be the special values '-infinity'/'infinity', which
+      // js-joda's LocalDate.parse cannot handle. Map them to LocalDate.MIN/MAX
+      // so reading such a column never throws.
+      return `(${literalVar} === "-infinity" ? LocalDate.MIN : ${literalVar} === "infinity" ? LocalDate.MAX : LocalDate.parse(${literalVar}))`;
     } else if (t.name.name === "time") {
       return `LocalTime.parse(${literalVar})`;
     } else if (t.name.name === "timestamp with time zone") {

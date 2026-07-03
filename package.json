@@ -9,6 +9,7 @@
     "pg": "^8.7.3",
     "postgres-range": "^1.1.2",
     "libpg-query": "17.7.3",
+    "@libpg-query/parser": "17.6.10",
     "@pgsql/enums": "17.9.2",
     "pgsql-deparser": "17.18.2"
   },

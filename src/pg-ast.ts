@@ -1,4 +1,5 @@
-import { parseSync, loadModule, type ParseResult } from "libpg-query";
+import { parseSync, loadModule as loadSqlModule, type ParseResult } from "libpg-query";
+import { loadPlPgSqlModule } from "./plpgsql-ast.ts";
 import type {
   Node,
   RawStmt,
@@ -107,7 +108,9 @@ export {
   FunctionParameterMode,
 } from "@pgsql/enums";
 
-export { loadModule };
+export async function loadModule(): Promise<void> {
+  await Promise.all([loadSqlModule(), loadPlPgSqlModule()]);
+}
 
 // Internal Name and QName types (replacing trader-pgsql-ast-parser's types)
 export type Name = { name: string; _location?: number };
@@ -130,6 +133,9 @@ export function enumEq<E extends Record<string | number, string | number>>(
 
 // Parse SQL string and return array of RawStmt
 export function parseStatements(sql: string): RawStmt[] {
+  if (sql.trim().length === 0) {
+    return [];
+  }
   const result = parseSync(sql) as ParseResult;
   return result.stmts || [];
 }

@@ -59,6 +59,7 @@ import {
   FunctionParameterMode,
   enumEq,
 } from "./pg-ast.ts";
+import { parsePlPgSqlFunction, type PLpgSQLStmt } from "./plpgsql-ast.ts";
 import { builtincasts } from "./builtincasts.ts";
 import { builtinoperators } from "./builtinoperators.ts";
 import { builtinUnaryOperators } from "./builtinunaryoperators.ts";
@@ -1583,6 +1584,263 @@ export type functionType = {
   language: string;
 };
 
+function buildFunctionInputs(
+  g: Global,
+  name: QName,
+  s: CreateFunctionStmt
+): { name: Name; type: SimpleT; referenceCounter: number }[] {
+  const params = (s.parameters || [])
+    .filter(
+      (n): n is { FunctionParameter: FunctionParameter } =>
+        "FunctionParameter" in n
+    )
+    .map((n) => n.FunctionParameter)
+    .filter(
+      (p) =>
+        !p.mode ||
+        enumEq(
+          p.mode,
+          FunctionParameterMode,
+          FunctionParameterMode.FUNC_PARAM_IN
+        ) ||
+        enumEq(
+          p.mode,
+          FunctionParameterMode,
+          FunctionParameterMode.FUNC_PARAM_DEFAULT
+        )
+    );
+
+  return params.map((arg) => {
+    if (!arg.name) {
+      throw new Error(
+        "Please provide name for all function arguments for " + showQName(name)
+      );
+    }
+    const paramT = mkType(g, arg.argType!, [
+      { contype: ConstrType.CONSTR_NOTNULL } as unknown as Constraint,
+    ]);
+    // Default rule: params are NOT NULL unless default is null
+    if (arg.defexpr) {
+      const defNode = arg.defexpr;
+      // Check for DEFAULT NULL
+      if ("A_Const" in defNode && defNode.A_Const.isnull) {
+        return {
+          name: { name: arg.name },
+          type: nullify(paramT),
+          referenceCounter: 0,
+        };
+      }
+      // Check for DEFAULT '{NULL}' (string) for nullable arrays
+      if (
+        "A_Const" in defNode &&
+        defNode.A_Const.sval &&
+        defNode.A_Const.sval.sval?.toLowerCase() === "{null}" &&
+        paramT.kind === "array"
+      ) {
+        return {
+          name: { name: arg.name },
+          type: nullifyArray(paramT),
+          referenceCounter: 0,
+        };
+      }
+      // Check for DEFAULT ARRAY[NULL] for nullable arrays
+      if ("A_ArrayExpr" in defNode && paramT.kind === "array") {
+        const elts = defNode.A_ArrayExpr.elements || [];
+        if (elts.length > 0 && "A_Const" in elts[0] && elts[0].A_Const.isnull) {
+          return {
+            name: { name: arg.name },
+            type: nullifyArray(paramT),
+            referenceCounter: 0,
+          };
+        }
+      }
+    }
+    return {
+      name: { name: arg.name },
+      type: paramT,
+      referenceCounter: 0,
+    };
+  });
+}
+
+// Reconcile the type inferred from a function's body with its declared RETURNS
+// clause, and assemble the final functionType. Shared by every supported language.
+function finalizeFunctionReturn(
+  g: Global,
+  name: QName,
+  s: CreateFunctionStmt,
+  code: string,
+  language: string,
+  inputs: { name: Name; type: SimpleT; referenceCounter: number }[],
+  returnType: Type | VoidT
+): functionType {
+  const returnTypeName = s.returnType;
+  const isSetof = s.returnType
+    ? (function () {
+        // Check if returnType has setof by checking if it has arrayBounds or the setof field
+        // In the new AST, setof is indicated in the CreateFunctionStmt itself
+        // Actually, the returnType in CreateFunctionStmt is a TypeName which has setof field
+        return (s.returnType as any)?.setof === true;
+      })()
+    : false;
+
+  const unifiedReturnType = (function (): Type | VoidT {
+    const location = returnTypeName?.location || name._location;
+    const dummyExpr: Node = { A_Const: { isnull: true, location } };
+
+    if (returnType.kind === "void") {
+      if (!returnTypeName) {
+        return { kind: "void" };
+      }
+      const retTypeInfo = getTypeName(returnTypeName);
+      if (retTypeInfo.name === "void") {
+        return { kind: "void" };
+      }
+      const annotatedType = mkType(g, returnTypeName, []);
+      throw new KindMismatch(dummyExpr, annotatedType, "Function returns void");
+    }
+    if (!returnTypeName) {
+      throw new KindMismatch(
+        dummyExpr,
+        { kind: "void" },
+        "Function needs return type"
+      );
+    }
+    const retTypeInfo = getTypeName(returnTypeName);
+    if (retTypeInfo.name === "record") {
+      if (returnType.kind === "record") {
+        return returnType;
+      } else {
+        throw new KindMismatch(
+          dummyExpr,
+          returnType,
+          "Function returns record type but type annotation disagrees"
+        );
+      }
+    }
+    const annotatedType = mkType(g, returnTypeName, [
+      { contype: ConstrType.CONSTR_NOTNULL } as unknown as Constraint,
+    ]);
+    try {
+      return unify(g, dummyExpr, returnType, annotatedType);
+    } catch (err) {
+      const mess = err instanceof ErrorWithLocation ? err.message : "";
+      if (err instanceof TypeMismatch) {
+        throw new TypeMismatch(
+          dummyExpr,
+          { expected: err.expected, actual: err.actual },
+          "Function return type mismatch"
+        );
+      } else {
+        throw new ErrorWithLocation(
+          location,
+          "Function return type mismatch: \n" + mess
+        );
+      }
+    }
+  })();
+
+  if (returnTypeName) {
+    const retTypeInfo = getTypeName(returnTypeName);
+    if (retTypeInfo.name === "record") {
+      if (unifiedReturnType.kind !== "record") {
+        throw new ErrorWithLocation(
+          undefined,
+          `Function should return record, but returns ${JSON.stringify(
+            unifiedReturnType
+          )}`
+        );
+      }
+    }
+  }
+
+  const unusedArgument = inputs.find((inp) => inp.referenceCounter === 0);
+  if (unusedArgument) {
+    throw new Error(`Unused argument ${showQName(unusedArgument.name)}`);
+  }
+
+  return {
+    name,
+    inputs: inputs.map((inp) => ({ name: inp.name, type: inp.type })),
+    returns: unifiedReturnType,
+    multipleRows: isSetof,
+    code,
+    language,
+  };
+}
+
+// Find the first RETURN QUERY statement in a PL/pgSQL function body, searching
+// into nested blocks. Other PL/pgSQL statement kinds aren't supported yet.
+function findPlPgSqlReturnQuery(body: PLpgSQLStmt[]): string | undefined {
+  for (const stmt of body) {
+    if ("PLpgSQL_stmt_return_query" in stmt) {
+      return (stmt as any).PLpgSQL_stmt_return_query.query?.PLpgSQL_expr?.query;
+    }
+    if ("PLpgSQL_stmt_block" in stmt) {
+      const nested = findPlPgSqlReturnQuery(
+        (stmt as any).PLpgSQL_stmt_block.body || []
+      );
+      if (nested) return nested;
+    }
+  }
+  return undefined;
+}
+
+function doPlpgsqlBlock(
+  g: Global,
+  c: Context,
+  block: { body?: PLpgSQLStmt[] }
+): { tag: "return"; type: Type | VoidT } {
+  const statements = block.body ?? [];
+
+  let currContext = c;
+  for (const stmt of statements) {
+    const res = doPLpgSQLStmt(g, c, stmt);
+    if (res.tag === "nothing") {
+    } else if (res.tag === "bind") {
+      currContext = {
+        ...currContext,
+        decls: currContext.decls.concat([
+          {
+            name: res.name,
+            type: res.type,
+          },
+        ]),
+      };
+    } else if (res.tag === "return") {
+      // not correct ofc, but good enough for now
+      return res;
+    } else {
+      return checkAllCasesHandled(res);
+    }
+  }
+
+  return { tag: "return", type: { kind: "void" } };
+}
+
+function doPLpgSQLStmt(
+  g: Global,
+  c: Context,
+  stmt: PLpgSQLStmt
+):
+  | { tag: "nothing" }
+  | { tag: "bind"; name: Name; type: Type }
+  | { tag: "return"; type: Type | VoidT } {
+  if ("PLpgSQL_stmt_return_query" in stmt) {
+    const queryStatements = parseStatements(
+      stmt.PLpgSQL_stmt_return_query.query.PLpgSQL_expr.query
+    );
+    const lastStatement = queryStatements[queryStatements.length - 1];
+    const returnType = elabStatementNode(g, c, lastStatement.stmt!);
+
+    return { tag: "return", type: returnType };
+  } else if ("PLpgSQL_stmt_block" in stmt) {
+    return doPlpgsqlBlock(g, c, stmt.PLpgSQL_stmt_block);
+  } else {
+    return notImplementedYet(stmt);
+  }
+}
+
 export function doCreateFunction(
   g: Global,
   c: Context,
@@ -1598,89 +1856,14 @@ export function doCreateFunction(
   if (code === undefined) {
     throw new ErrorWithLocation(undefined, "Function definition without body");
   }
+
+  const inputs = buildFunctionInputs(g, name, s);
+  const contextForBody: Context = {
+    froms: c.froms,
+    decls: c.decls.concat(inputs),
+  };
+
   if (language.toLowerCase() === "sql") {
-    const params = (s.parameters || [])
-      .filter(
-        (n): n is { FunctionParameter: FunctionParameter } =>
-          "FunctionParameter" in n
-      )
-      .map((n) => n.FunctionParameter)
-      .filter(
-        (p) =>
-          !p.mode ||
-          enumEq(
-            p.mode,
-            FunctionParameterMode,
-            FunctionParameterMode.FUNC_PARAM_IN
-          ) ||
-          enumEq(
-            p.mode,
-            FunctionParameterMode,
-            FunctionParameterMode.FUNC_PARAM_DEFAULT
-          )
-      );
-
-    const inputs = params.map((arg) => {
-      if (!arg.name) {
-        throw new Error(
-          "Please provide name for all function arguments for " +
-            showQName(name)
-        );
-      }
-      const paramT = mkType(g, arg.argType!, [
-        { contype: ConstrType.CONSTR_NOTNULL } as unknown as Constraint,
-      ]);
-      // Default rule: params are NOT NULL unless default is null
-      if (arg.defexpr) {
-        const defNode = arg.defexpr;
-        // Check for DEFAULT NULL
-        if ("A_Const" in defNode && defNode.A_Const.isnull) {
-          return {
-            name: { name: arg.name },
-            type: nullify(paramT),
-            referenceCounter: 0,
-          };
-        }
-        // Check for DEFAULT '{NULL}' (string) for nullable arrays
-        if (
-          "A_Const" in defNode &&
-          defNode.A_Const.sval &&
-          defNode.A_Const.sval.sval?.toLowerCase() === "{null}" &&
-          paramT.kind === "array"
-        ) {
-          return {
-            name: { name: arg.name },
-            type: nullifyArray(paramT),
-            referenceCounter: 0,
-          };
-        }
-        // Check for DEFAULT ARRAY[NULL] for nullable arrays
-        if ("A_ArrayExpr" in defNode && paramT.kind === "array") {
-          const elts = defNode.A_ArrayExpr.elements || [];
-          if (
-            elts.length > 0 &&
-            "A_Const" in elts[0] &&
-            elts[0].A_Const.isnull
-          ) {
-            return {
-              name: { name: arg.name },
-              type: nullifyArray(paramT),
-              referenceCounter: 0,
-            };
-          }
-        }
-      }
-      return {
-        name: { name: arg.name },
-        type: paramT,
-        referenceCounter: 0,
-      };
-    });
-    const contextForBody: Context = {
-      froms: c.froms,
-      decls: c.decls.concat(inputs),
-    };
-
     const bodyStatements = parseStatements(code);
 
     if (bodyStatements.length === 0) {
@@ -1692,112 +1875,28 @@ export function doCreateFunction(
         code,
         language,
       };
-    } else {
-      const lastStatement = bodyStatements[bodyStatements.length - 1];
-      const returnType = elabStatementNode(
-        g,
-        contextForBody,
-        lastStatement.stmt!
-      );
-
-      const returnTypeName = s.returnType;
-      const isSetof = s.returnType
-        ? (function () {
-            // Check if returnType has setof by checking if it has arrayBounds or the setof field
-            // In the new AST, setof is indicated in the CreateFunctionStmt itself
-            // Actually, the returnType in CreateFunctionStmt is a TypeName which has setof field
-            return (s.returnType as any)?.setof === true;
-          })()
-        : false;
-
-      const unifiedReturnType = (function (): Type | VoidT {
-        const location = returnTypeName?.location || name._location;
-        const dummyExpr: Node = { A_Const: { isnull: true, location } };
-
-        if (returnType.kind === "void") {
-          if (!returnTypeName) {
-            return { kind: "void" };
-          }
-          const retTypeInfo = getTypeName(returnTypeName);
-          if (retTypeInfo.name === "void") {
-            return { kind: "void" };
-          }
-          const annotatedType = mkType(g, returnTypeName, []);
-          throw new KindMismatch(
-            dummyExpr,
-            annotatedType,
-            "Function returns void"
-          );
-        }
-        if (!returnTypeName) {
-          throw new KindMismatch(
-            dummyExpr,
-            { kind: "void" },
-            "Function needs return type"
-          );
-        }
-        const retTypeInfo = getTypeName(returnTypeName);
-        if (retTypeInfo.name === "record") {
-          if (returnType.kind === "record") {
-            return returnType;
-          } else {
-            throw new KindMismatch(
-              dummyExpr,
-              returnType,
-              "Function returns record type but type annotation disagrees"
-            );
-          }
-        }
-        const annotatedType = mkType(g, returnTypeName, [
-          { contype: ConstrType.CONSTR_NOTNULL } as unknown as Constraint,
-        ]);
-        try {
-          return unify(g, dummyExpr, returnType, annotatedType);
-        } catch (err) {
-          const mess = err instanceof ErrorWithLocation ? err.message : "";
-          if (err instanceof TypeMismatch) {
-            throw new TypeMismatch(
-              dummyExpr,
-              { expected: err.expected, actual: err.actual },
-              "Function return type mismatch"
-            );
-          } else {
-            throw new ErrorWithLocation(
-              location,
-              "Function return type mismatch: \n" + mess
-            );
-          }
-        }
-      })();
-
-      if (returnTypeName) {
-        const retTypeInfo = getTypeName(returnTypeName);
-        if (retTypeInfo.name === "record") {
-          if (unifiedReturnType.kind !== "record") {
-            throw new ErrorWithLocation(
-              undefined,
-              `Function should return record, but returns ${JSON.stringify(
-                unifiedReturnType
-              )}`
-            );
-          }
-        }
-      }
-
-      const unusedArgument = inputs.find((inp) => inp.referenceCounter === 0);
-      if (unusedArgument) {
-        throw new Error(`Unused argument ${showQName(unusedArgument.name)}`);
-      }
-
-      return {
-        name,
-        inputs: inputs.map((inp) => ({ name: inp.name, type: inp.type })),
-        returns: unifiedReturnType,
-        multipleRows: isSetof,
-        code,
-        language,
-      };
     }
+    const lastStatement = bodyStatements[bodyStatements.length - 1];
+    const returnType = elabStatementNode(
+      g,
+      contextForBody,
+      lastStatement.stmt!
+    );
+    return finalizeFunctionReturn(
+      g,
+      name,
+      s,
+      code,
+      language,
+      inputs,
+      returnType
+    );
+  } else if (language.toLowerCase() === "plpgsql") {
+    const plFunc = parsePlPgSqlFunction(s);
+    const res = doPlpgsqlBlock(g, contextForBody, {
+      body: plFunc.action?.PLpgSQL_stmt_block.body,
+    });
+    return finalizeFunctionReturn(g, name, s, code, language, inputs, res.type);
   } else {
     return notImplementedYet(s);
   }

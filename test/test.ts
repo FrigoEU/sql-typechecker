@@ -1,20 +1,20 @@
 import { isPlainObject, mapValues, omit } from "lodash-es";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { type Either, Left, nullable, Right } from "purify-ts";
+import { type Either, Left, Right } from "purify-ts";
 import {
-  parseStatements,
   loadModule,
   type Name,
+  parseStatements,
   type QName,
 } from "../src/pg-ast.ts";
 import {
-  doCreateFunction,
-  parseSetupScripts,
   AnyScalar,
   type ArrayT,
   BuiltinTypeConstructors,
   BuiltinTypes,
+  doCreateFunction,
+  parseSetupScripts,
   type RecordT,
   type ScalarT,
   type SimpleT,
@@ -2765,5 +2765,28 @@ CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 $$ LANGUAGE sql;
 `,
     "Can't cast value 'incorrect' to enum my_enum"
+  );
+});
+
+test("plpgsql: RETURN QUERY", () => {
+  expectReturnType(
+    ``,
+    `
+CREATE FUNCTION get_favorite_number()
+RETURNS SETOF RECORD AS $$
+BEGIN
+    RETURN QUERY SELECT 42 AS my_num;
+END;
+$$ LANGUAGE plpgsql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "my_num" },
+          type: BuiltinTypes.Integer,
+        },
+      ],
+    }
   );
 });

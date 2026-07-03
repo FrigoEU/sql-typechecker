@@ -2790,3 +2790,28 @@ $$ LANGUAGE plpgsql;
     }
   );
 });
+
+test("plpgsql: RETURN QUERY with declare", () => {
+  expectReturnType(
+    ``,
+    `
+CREATE FUNCTION get_favorite_number()
+RETURNS SETOF RECORD AS $$
+DECLARE
+    fav_num INTEGER := 42;
+BEGIN
+    RETURN QUERY SELECT fav_num AS my_num;
+END;
+$$ LANGUAGE plpgsql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "my_num" },
+          type: BuiltinTypes.Integer,
+        },
+      ],
+    }
+  );
+});

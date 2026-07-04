@@ -1,4 +1,5 @@
-export function normalizeTypeName(s: string): string {
+export function normalizeTypeName(s_: string): string {
+  const s = s_.trim().toLowerCase();
   if (s === "int8" || s === "bigserial") {
     return "bigint";
   }

@@ -11,6 +11,7 @@ Fix obvious performance problems in `src/typecheck.ts`. The typechecker rebuilds
 **Where**: `elabBinaryOp` (~line 2262)
 
 **Problem**: Every binary expression evaluation does this:
+
 ```typescript
 builtinoperators                          // 5145-line array
   .concat(g.domains.flatMap(...))         // rebuild domain operators
@@ -39,7 +40,7 @@ function buildOperatorIndex(g: Global): OperatorIndex {
     .concat(/* enum operators */);
   const index = new Map<string, binaryOp[]>();
   for (const op of allOps) {
-    const key = normalizeOperatorName(op.name.name);  // or however the key should work
+    const key = normalizeOperatorName(op.name.name); // or however the key should work
     const existing = index.get(key);
     if (existing) existing.push(op);
     else index.set(key, [op]);
@@ -53,6 +54,7 @@ function buildOperatorIndex(g: Global): OperatorIndex {
 **Where**: `findMatchingCast` (~line 382)
 
 **Problem**: Every cast check calls:
+
 ```typescript
 const casts = builtincasts.concat(
   g.domains.map(d => ({
@@ -88,10 +90,11 @@ function buildCastIndex(g: Global): CastIndex {
 **Where**: `checkType` (~line 436)
 
 **Problem**:
+
 ```typescript
 const builtintype = Object.values(BuiltinTypes)
-  .map(v => v.name.name)
-  .find(b => b.toLowerCase() === name);
+  .map((v) => v.name.name)
+  .find((b) => b.toLowerCase() === name);
 ```
 
 This creates a new array, maps it, and does a linear scan with `.toLowerCase()` on every type lookup. `checkType` is called for every column in every table definition, every function parameter, every cast target, etc.
@@ -111,7 +114,7 @@ if (builtinTypeNames.has(name.toLowerCase())) { ... }
 
 **Where**: `unifyOverloadedCall` (~line 315), `elabBinaryOp` (~line 2310), `elabUnaryOp` (~line 2211)
 
-**Problem**: Overload resolution works by trying each candidate and catching the exception if it doesn't match. The code even has a comment acknowledging this: *"This is probably bad, among others for performance, as we use error handling for control flow here"*. JS exception creation captures stack traces, which is expensive — and this happens for every overload of every operator of every expression.
+**Problem**: Overload resolution works by trying each candidate and catching the exception if it doesn't match. The code even has a comment acknowledging this: _"This is probably bad, among others for performance, as we use error handling for control flow here"_. JS exception creation captures stack traces, which is expensive — and this happens for every overload of every operator of every expression.
 
 **Fix**: Add non-throwing variants of the cast/unify functions that return `null` (or a result-type union) on failure instead of throwing:
 
@@ -120,7 +123,7 @@ function tryCastSimples(
   g: Global,
   source: SimpleT,
   target: SimpleT,
-  type: CastType
+  type: CastType,
 ): boolean {
   // Same logic as castSimples, but returns false instead of throwing
 }
@@ -129,7 +132,7 @@ function tryElabAnyCall(
   g: Global,
   sourceTypes: Type[],
   targetTypes: Type[],
-  nullPolicy: "CALLED ON NULL INPUT" | "STRICT"
+  nullPolicy: "CALLED ON NULL INPUT" | "STRICT",
 ): { nullifyResultType: boolean; score: number } | null {
   // Same logic as elabAnyCall, but returns null instead of throwing
 }
@@ -142,12 +145,15 @@ Then `unifyOverloadedCall` and the operator resolution in `elabBinaryOp`/`elabUn
 **Where**: `eqQNames` (~line 3209), called everywhere
 
 **Problem**: `eqQNames` is the most-called utility function in the typechecker. Every call does:
+
 ```typescript
-u.name.toLowerCase() === v.name.toLowerCase()
+u.name.toLowerCase() === v.name.toLowerCase();
 ```
+
 plus conditional `.toLowerCase()` on schemas. When scanning arrays of tables, operators, or casts via `.find()` or `.filter()`, this runs many times per element.
 
 **Fix**: Two options (pick one or both):
+
 - **Normalize names eagerly**: Ensure all names stored in `Global`, `builtinoperators`, `builtincasts`, etc. are already lowercased. Then `eqQNames` can use direct `===` comparison.
 - **Use Map lookups instead of linear scans**: Most uses of `eqQNames` are inside `.find()` or `.filter()` on arrays — replace these with Map lookups (which is mostly achieved by fixes 1-3 above).
 
@@ -186,12 +192,12 @@ All `elab*` functions change their `g: Global` parameter to `g: ResolvedGlobal`.
 
 ## Files to modify
 
-| File | Changes |
-|---|---|
-| `src/typecheck.ts` | Add `ResolvedGlobal`, `buildOperatorIndex`, `buildCastIndex`, `resolveGlobal`. Add non-throwing cast/unify variants. Update `elabBinaryOp`, `elabUnaryOp`, `findMatchingCast`, `checkType`, `unifyOverloadedCall`. |
-| `src/builtincasts.ts` | No changes (data stays the same) |
-| `src/builtinoperators.ts` | No changes (data stays the same) |
-| `src/cli.ts` | Call `resolveGlobal` after `parseSetupScripts` |
+| File                      | Changes                                                                                                                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/typecheck.ts`        | Add `ResolvedGlobal`, `buildOperatorIndex`, `buildCastIndex`, `resolveGlobal`. Add non-throwing cast/unify variants. Update `elabBinaryOp`, `elabUnaryOp`, `findMatchingCast`, `checkType`, `unifyOverloadedCall`. |
+| `src/builtincasts.ts`     | No changes (data stays the same)                                                                                                                                                                                   |
+| `src/builtinoperators.ts` | No changes (data stays the same)                                                                                                                                                                                   |
+| `src/cli.ts`              | Call `resolveGlobal` after `parseSetupScripts`                                                                                                                                                                     |
 
 ## What stays the same
 

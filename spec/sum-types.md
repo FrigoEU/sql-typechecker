@@ -3,8 +3,9 @@ I've been thinking a lot about modelling "sum types" in Postgres database tables
 The theoretically best way is to use a "tag" or "type" column and matching CHECK constraints that say "if you're this type then that field should be filled out", eg:
 
 ```typescript
-type client = { tag: "person", name: string }
-            | { tag: "company", vatnumber: number }
+type client =
+  | { tag: "person"; name: string }
+  | { tag: "company"; vatnumber: number };
 ```
 
 ```sql
@@ -26,6 +27,7 @@ SELECT id, tag, name
   FROM clients
  WHERE tag = 'person';
 ```
+
 as {id: number, tag: 'person', name: string}, so having the name be not null and the tag be a constant string.
 
 As well as:
@@ -40,6 +42,7 @@ SELECT id,
        END AS client
   FROM clients;
 ```
+
 and have as result type:
 {id: number, client: {tag: 'person', name: string} | {tag: 'company', vatnumber: number} }
 

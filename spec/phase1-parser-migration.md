@@ -20,6 +20,7 @@ Replace `trader-pgsql-ast-parser` with `libpg-query` (WASM-based, wraps the actu
 ## Architecture: AST adapter module
 
 Create `src/pg-ast.ts` that:
+
 1. Re-exports `parseSync`/`deparseSync` from the parser package
 2. Defines internal `Name` and `QName` types (currently imported from `trader-pgsql-ast-parser`)
 3. Provides utility functions for navigating the protobuf AST:
@@ -34,64 +35,64 @@ The `elab*` functions in `typecheck.ts` are rewritten to pattern-match on the ne
 
 ### Statement types
 
-| Current (trader-pgsql-ast-parser) | New (libpg_query protobuf) |
-|---|---|
-| `s.type === "select"` | `SelectStmt` node |
-| `s.type === "union"` / `"union all"` | `SelectStmt` with `op: SETOP_UNION`, `all: true/false` |
-| `s.type === "values"` | `SelectStmt` with `valuesLists` populated |
-| `s.type === "with"` | `SelectStmt` with `withClause` |
-| `s.type === "with recursive"` | `SelectStmt` with `withClause.recursive = true` |
-| `s.type === "insert"` | `InsertStmt` node |
-| `s.type === "update"` | `UpdateStmt` node |
-| `s.type === "delete"` | `DeleteStmt` node |
-| `s.type === "create table"` | `CreateStmt` node |
-| `s.type === "create view"` | `ViewStmt` node |
-| `s.type === "create materialized view"` | `CreateTableAsStmt` with `objtype: OBJECT_MATVIEW` |
-| `s.type === "create function"` | `CreateFunctionStmt` node |
-| `s.type === "alter table"` | `AlterTableStmt` node |
-| `s.type === "create domain"` | `CreateDomainStmt` node |
-| `s.type === "create enum"` | `CreateEnumStmt` node |
+| Current (trader-pgsql-ast-parser)       | New (libpg_query protobuf)                             |
+| --------------------------------------- | ------------------------------------------------------ |
+| `s.type === "select"`                   | `SelectStmt` node                                      |
+| `s.type === "union"` / `"union all"`    | `SelectStmt` with `op: SETOP_UNION`, `all: true/false` |
+| `s.type === "values"`                   | `SelectStmt` with `valuesLists` populated              |
+| `s.type === "with"`                     | `SelectStmt` with `withClause`                         |
+| `s.type === "with recursive"`           | `SelectStmt` with `withClause.recursive = true`        |
+| `s.type === "insert"`                   | `InsertStmt` node                                      |
+| `s.type === "update"`                   | `UpdateStmt` node                                      |
+| `s.type === "delete"`                   | `DeleteStmt` node                                      |
+| `s.type === "create table"`             | `CreateStmt` node                                      |
+| `s.type === "create view"`              | `ViewStmt` node                                        |
+| `s.type === "create materialized view"` | `CreateTableAsStmt` with `objtype: OBJECT_MATVIEW`     |
+| `s.type === "create function"`          | `CreateFunctionStmt` node                              |
+| `s.type === "alter table"`              | `AlterTableStmt` node                                  |
+| `s.type === "create domain"`            | `CreateDomainStmt` node                                |
+| `s.type === "create enum"`              | `CreateEnumStmt` node                                  |
 
 ### Expression types
 
-| Current | New |
-|---|---|
-| `e.type === "ref"` with `e.name`, `e.table` | `ColumnRef` with `fields` (list of `String`/`A_Star` nodes) |
-| `e.type === "binary"` with `e.op`, `e.left`, `e.right` | `A_Expr` with `kind`, `name`, `lexpr`, `rexpr` |
-| `e.type === "unary"` with `e.op === "NOT"` | `BoolExpr` with `boolop: NOT_EXPR` |
-| `e.type === "unary"` with `e.op === "IS NULL"` | `NullTest` with `nulltesttype: IS_NULL` |
-| `e.type === "unary"` with `e.op === "IS NOT NULL"` | `NullTest` with `nulltesttype: IS_NOT_NULL` |
-| `e.type === "unary"` (other ops like `-`, `@`, `~`) | `A_Expr` with `kind: AEXPR_OP` and single operand |
-| `e.type === "call"` with `e.function`, `e.args` | `FuncCall` with `funcname`, `args` |
-| `e.type === "cast"` with `e.operand`, `e.to` | `TypeCast` with `arg`, `typeName` |
-| `e.type === "integer"` | `A_Const` with `ival` |
-| `e.type === "string"` | `A_Const` with `sval` |
-| `e.type === "numeric"` | `A_Const` with `fval` (string representation) |
-| `e.type === "boolean"` | `A_Const` with `boolval` |
-| `e.type === "null"` | `A_Const` with `isnull: true` |
-| `e.type === "parameter"` | `ParamRef` with `number` |
-| `e.type === "list"` / `"array"` | `A_ArrayExpr` / row constructor |
-| `e.type === "case"` | `CaseExpr` with `args` (list of `CaseWhen`), `defresult` |
-| `e.type === "member"` (JSON access) | Operator expression (`->`, `->>`) |
-| `e.type === "arrayIndex"` | `A_Indirection` with `A_Indices` |
-| `e.type === "extract"` | `FuncCall` to `extract` or dedicated node |
-| `e.type === "ternary"` (BETWEEN) | `A_Expr` with `kind: AEXPR_BETWEEN` |
-| `e.type === "substring"` / `"overlay"` | `FuncCall` or dedicated nodes |
-| `e.type === "keyword"` (current_date etc.) | `SQLValueFunction` with `op` enum |
-| `e.type === "array select"` | `SubLink` with `subLinkType: ARRAY_SUBLINK` |
-| `e.type === "default"` | `SetToDefault` node |
-| AND/OR (currently binary ops) | `BoolExpr` with `boolop: AND_EXPR` / `OR_EXPR` |
-| `IN` / `NOT IN` (currently binary ops) | `A_Expr` with `kind: AEXPR_IN` |
+| Current                                                | New                                                         |
+| ------------------------------------------------------ | ----------------------------------------------------------- |
+| `e.type === "ref"` with `e.name`, `e.table`            | `ColumnRef` with `fields` (list of `String`/`A_Star` nodes) |
+| `e.type === "binary"` with `e.op`, `e.left`, `e.right` | `A_Expr` with `kind`, `name`, `lexpr`, `rexpr`              |
+| `e.type === "unary"` with `e.op === "NOT"`             | `BoolExpr` with `boolop: NOT_EXPR`                          |
+| `e.type === "unary"` with `e.op === "IS NULL"`         | `NullTest` with `nulltesttype: IS_NULL`                     |
+| `e.type === "unary"` with `e.op === "IS NOT NULL"`     | `NullTest` with `nulltesttype: IS_NOT_NULL`                 |
+| `e.type === "unary"` (other ops like `-`, `@`, `~`)    | `A_Expr` with `kind: AEXPR_OP` and single operand           |
+| `e.type === "call"` with `e.function`, `e.args`        | `FuncCall` with `funcname`, `args`                          |
+| `e.type === "cast"` with `e.operand`, `e.to`           | `TypeCast` with `arg`, `typeName`                           |
+| `e.type === "integer"`                                 | `A_Const` with `ival`                                       |
+| `e.type === "string"`                                  | `A_Const` with `sval`                                       |
+| `e.type === "numeric"`                                 | `A_Const` with `fval` (string representation)               |
+| `e.type === "boolean"`                                 | `A_Const` with `boolval`                                    |
+| `e.type === "null"`                                    | `A_Const` with `isnull: true`                               |
+| `e.type === "parameter"`                               | `ParamRef` with `number`                                    |
+| `e.type === "list"` / `"array"`                        | `A_ArrayExpr` / row constructor                             |
+| `e.type === "case"`                                    | `CaseExpr` with `args` (list of `CaseWhen`), `defresult`    |
+| `e.type === "member"` (JSON access)                    | Operator expression (`->`, `->>`)                           |
+| `e.type === "arrayIndex"`                              | `A_Indirection` with `A_Indices`                            |
+| `e.type === "extract"`                                 | `FuncCall` to `extract` or dedicated node                   |
+| `e.type === "ternary"` (BETWEEN)                       | `A_Expr` with `kind: AEXPR_BETWEEN`                         |
+| `e.type === "substring"` / `"overlay"`                 | `FuncCall` or dedicated nodes                               |
+| `e.type === "keyword"` (current_date etc.)             | `SQLValueFunction` with `op` enum                           |
+| `e.type === "array select"`                            | `SubLink` with `subLinkType: ARRAY_SUBLINK`                 |
+| `e.type === "default"`                                 | `SetToDefault` node                                         |
+| AND/OR (currently binary ops)                          | `BoolExpr` with `boolop: AND_EXPR` / `OR_EXPR`              |
+| `IN` / `NOT IN` (currently binary ops)                 | `A_Expr` with `kind: AEXPR_IN`                              |
 
 ### FROM clause types
 
-| Current | New |
-|---|---|
-| `f.type === "table"` with `f.name` | `RangeVar` with `relname`, `schemaname`, `alias` |
-| `f.type === "statement"` with `f.statement`, `f.alias` | `RangeSubselect` with `subquery`, `alias` |
-| `f.type === "call"` | `RangeFunction` |
-| JOIN handling via `f.join.type`, `f.join.on` | `JoinExpr` with `jointype` enum, `quals` |
-| `f.lateral` flag | `RangeSubselect.lateral` or `RangeFunction.lateral` |
+| Current                                                | New                                                 |
+| ------------------------------------------------------ | --------------------------------------------------- |
+| `f.type === "table"` with `f.name`                     | `RangeVar` with `relname`, `schemaname`, `alias`    |
+| `f.type === "statement"` with `f.statement`, `f.alias` | `RangeSubselect` with `subquery`, `alias`           |
+| `f.type === "call"`                                    | `RangeFunction`                                     |
+| JOIN handling via `f.join.type`, `f.join.on`           | `JoinExpr` with `jointype` enum, `quals`            |
+| `f.lateral` flag                                       | `RangeSubselect.lateral` or `RangeFunction.lateral` |
 
 ### Other structural differences
 
@@ -105,15 +106,15 @@ The `elab*` functions in `typecheck.ts` are rewritten to pattern-match on the ne
 
 ## Files to modify
 
-| File | Changes |
-|---|---|
-| `package.json` | Replace `trader-pgsql-ast-parser` with `libpg-query`, `@pgsql/types`, `@pgsql/enums` |
-| `src/pg-ast.ts` (new) | AST helpers, internal `Name`/`QName` types, re-export parse/deparse |
-| `src/typecheck.ts` | Rewrite all `elab*` functions against new AST. Type system unchanged. |
-| `src/normalize.ts` | Remove `BinaryOperator` import. Operator normalization logic stays. |
-| `src/codegen.ts` | Replace `Name`/`QName` imports with internal types |
-| `src/cli.ts` | Replace `parse` import, update statement type checks |
-| `test/test.ts` | Replace `parse`/`Name`/`QName` imports, update `testCreateFunction` |
+| File                  | Changes                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| `package.json`        | Replace `trader-pgsql-ast-parser` with `libpg-query`, `@pgsql/types`, `@pgsql/enums` |
+| `src/pg-ast.ts` (new) | AST helpers, internal `Name`/`QName` types, re-export parse/deparse                  |
+| `src/typecheck.ts`    | Rewrite all `elab*` functions against new AST. Type system unchanged.                |
+| `src/normalize.ts`    | Remove `BinaryOperator` import. Operator normalization logic stays.                  |
+| `src/codegen.ts`      | Replace `Name`/`QName` imports with internal types                                   |
+| `src/cli.ts`          | Replace `parse` import, update statement type checks                                 |
+| `test/test.ts`        | Replace `parse`/`Name`/`QName` imports, update `testCreateFunction`                  |
 
 ## What stays the same
 

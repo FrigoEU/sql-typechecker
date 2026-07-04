@@ -1,4 +1,8 @@
-import { parseSync, loadModule as loadSqlModule, type ParseResult } from "libpg-query";
+import {
+  parseSync,
+  loadModule as loadSqlModule,
+  type ParseResult,
+} from "libpg-query";
 import { loadPlPgSqlModule } from "./plpgsql-ast.ts";
 import type {
   Node,
@@ -187,7 +191,9 @@ export function getColumnRef(node: ColumnRef): {
       return { table, column: "*" };
     }
   }
-  throw new Error(`Cannot extract column ref from fields: ${JSON.stringify(fields)}`);
+  throw new Error(
+    `Cannot extract column ref from fields: ${JSON.stringify(fields)}`,
+  );
 }
 
 // Extract type name from TypeName node
@@ -233,7 +239,10 @@ export function getQNameFromNodes(nodes: Node[]): QName {
   if (stringNames.length === 1) {
     return { name: stringNames[0] };
   } else if (stringNames.length >= 2) {
-    return { schema: stringNames[0], name: stringNames[stringNames.length - 1] };
+    return {
+      schema: stringNames[0],
+      name: stringNames[stringNames.length - 1],
+    };
   }
   throw new Error(`Cannot extract QName from nodes: ${JSON.stringify(nodes)}`);
 }
@@ -300,7 +309,7 @@ export function mkLocation(offset: number | undefined): number | undefined {
 // Check if a node is a specific type
 export function isNodeType<K extends string>(
   node: Node,
-  key: K
+  key: K,
 ): node is Node & Record<K, any> {
   return key in node;
 }

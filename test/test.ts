@@ -1311,7 +1311,10 @@ SELECT CURRENT_TIMESTAMP
 from testje
 $$ LANGUAGE sql;
 `,
-    { kind: "record", fields: [{ name: null, type: BuiltinTypes.TimestampTz }] }
+    {
+      kind: "record",
+      fields: [{ name: null, type: BuiltinTypes.TimestampTz }],
+    }
   );
 });
 
@@ -2791,7 +2794,7 @@ $$ LANGUAGE plpgsql;
   );
 });
 
-test("plpgsql: RETURN QUERY with declare", () => {
+test.only("plpgsql: RETURN QUERY with declare", () => {
   expectReturnType(
     ``,
     `

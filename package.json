@@ -1,21 +1,11 @@
 {
   "name": "sql-typechecker",
   "version": "0.1.2",
-  "main": "out/typeparsers.ts",
-  "files": ["out/**"],
   "bin": "out/cli.js",
-  "dependencies": {
-    "lodash-es": "^4.17.21",
-    "pg": "^8.7.3",
-    "postgres-range": "^1.1.2",
-    "libpg-query": "17.7.3",
-    "@libpg-query/parser": "17.6.10",
-    "@pgsql/enums": "17.9.2",
-    "pgsql-deparser": "17.18.2"
-  },
-  "peerDependencies": {
-    "@js-joda/core": "5.5.2"
-  },
+  "files": [
+    "out/**"
+  ],
+  "main": "out/typeparsers.ts",
   "scripts": {
     "check": "tsc -p . --noEmit",
     "build": "tsx --trace-warnings esbuild.ts && npm run build:types",
@@ -28,12 +18,24 @@
     "test_only": "tsx --test-reporter=spec --test --test-only 'test/test.ts'",
     "test_debug": "tsx --test-reporter=spec --test --test-only --inspect-brk 'test/test.ts'"
   },
+  "dependencies": {
+    "@libpg-query/parser": "17.6.10",
+    "@pgsql/enums": "17.9.2",
+    "libpg-query": "17.7.3",
+    "lodash-es": "^4.17.21",
+    "pg": "^8.7.3",
+    "pgsql-deparser": "17.18.2",
+    "postgres-range": "^1.1.2"
+  },
   "devDependencies": {
+    "@oxfmt/binding-linux-x64-gnu": "^0.42.0",
     "@types/lodash-es": "^4.14.182",
     "@types/node": "^20.11.26",
     "@types/pg": "^8.6.5",
     "@types/prettier": "^2.4.2",
+    "@typescript/native-preview": "^7.0.0-dev.20260703.1",
     "esbuild": "0.25.1",
+    "oxfmt": "^0.42.0",
     "postgres": "^3.2.4",
     "prettier": "^2.7.1",
     "purify-ts": "^1.0.0",
@@ -41,5 +43,8 @@
     "tsx": "^4.7.1",
     "typescript": "5.8.2",
     "typescript-language-server": "^4.3.3"
+  },
+  "peerDependencies": {
+    "@js-joda/core": "5.5.2"
   }
 }

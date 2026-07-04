@@ -19,7 +19,7 @@ export function showTypeAsTypescriptType(t: Type): string {
         .map(
           (f) =>
             (f.name === null ? `"?": ` : `"${f.name.name}": `) +
-            showTypeAsTypescriptType(f.type)
+            showTypeAsTypescriptType(f.type),
         )
         .join(", ") +
       "}"
@@ -48,7 +48,7 @@ export function showTypeAsTypescriptType(t: Type): string {
         return "number";
       } else if (
         ["text", "name", "char", "character", "varchar", "nvarchar"].includes(
-          t.name.name
+          t.name.name,
         )
       ) {
         return "string";
@@ -95,7 +95,7 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
   if (t.kind === "array") {
     return `(Array.isArray(${literalVar}) ? ${literalVar} : parseArray(${literalVar})).map((el: any) => ${genDeserializeSimpleT(
       t.typevar as SimpleT,
-      "el"
+      "el",
     )})`;
   } else if (t.kind === "nullable") {
     const inner = genDeserializeSimpleT(t.typevar as SimpleT, literalVar);
@@ -114,18 +114,15 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
           (f) =>
             `${f.name?.name || "?"}: ${genDeserializeSimpleT(
               f.type,
-              literalVar + '["' + f.name?.name + '"]'
-            )}`
+              literalVar + '["' + f.name?.name + '"]',
+            )}`,
         )
         .join(",\n") +
       "})"
     );
   } else if (t.kind === "scalar") {
     if (t.domain) {
-      return `${genDeserializeSimpleT(
-        t.domain.realtype,
-        literalVar
-      )} as types.${t.name.name}`;
+      return `${genDeserializeSimpleT(t.domain.realtype, literalVar)} as types.${t.name.name}`;
     }
     if (t.name.name === "date") {
       return `LocalDate.parse(${literalVar})`;
@@ -159,7 +156,7 @@ function genDeserializeSimpleT(t: SimpleT, literalVar: string): string {
 
 function genFunctionResDeserialization(
   returnType: SimpleT | RecordT | VoidT,
-  literalVar: string
+  literalVar: string,
 ) {
   if (returnType.kind === "void") {
     return literalVar;
@@ -171,8 +168,8 @@ function genFunctionResDeserialization(
           (f, i) =>
             `"${f.name?.name || "?"}": ${genDeserializeSimpleT(
               f.type,
-              literalVar + "[" + i + "]"
-            )}`
+              literalVar + "[" + i + "]",
+            )}`,
         )
         .join(",\n") +
       "})"
@@ -230,37 +227,32 @@ export function functionToTypescript(f: functionType): string {
             (f, i) =>
               (f.name?.name || "field" + i) +
               " " +
-              showTypeDroppingNullable(f.type)
+              showTypeDroppingNullable(f.type),
           )
           .join(", ")})`
       : "";
 
   const recreatedSqlFunctionStatement = `
-CREATE FUNCTION ${f.name.name}(${argsForCreateFunction}) RETURNS ${
-    f.multipleRows ? "SETOF " : ""
-  }${
+CREATE FUNCTION ${f.name.name}(${argsForCreateFunction}) RETURNS ${f.multipleRows ? "SETOF " : ""}${
     f.returns.kind === "record"
       ? "RECORD"
       : f.returns.kind === "void"
-      ? "void"
-      : showTypeDroppingNullable(f.returns)
+        ? "void"
+        : showTypeDroppingNullable(f.returns)
   } AS
 $$${f.code}$$ LANGUAGE ${f.language};
 `;
 
   const funcInvocation = `${f.name.name}(${f.inputs.map(
-    (inp, i) => "$" + (i + 1) + "::" + showTypeDroppingNullable(inp.type)
+    (inp, i) => "$" + (i + 1) + "::" + showTypeDroppingNullable(inp.type),
   )})${asExpression}`;
 
   const deserializationAndReturn =
     f.returns.kind === "void"
       ? ""
       : f.multipleRows === true
-      ? `return res.rows.map(row => ${genFunctionResDeserialization(
-          f.returns,
-          "row"
-        )});`
-      : `
+        ? `return res.rows.map(row => ${genFunctionResDeserialization(f.returns, "row")});`
+        : `
 const row = res.rows[0];
 if (row && row.some(f => f !== null)){
   return ${genFunctionResDeserialization(f.returns, "row")}
@@ -296,7 +288,7 @@ export function genDomain(dom: {
   readonly realtype: SimpleT;
 }): string {
   return `export type ${dom.name.name} = ${showTypeAsTypescriptType(
-    dom.realtype
+    dom.realtype,
   )} & { readonly __tag: "${dom.name.name}" };`;
 }
 
@@ -330,21 +322,14 @@ export function genCrudOperations(table: {
   readonly defaults: Name[];
 }): string {
   const selectAll = `
-export async function getAll(pool: Pool): Promise<${showTypeAsTypescriptType(
-    table.rel
-  )}[]>{
+export async function getAll(pool: Pool): Promise<${showTypeAsTypescriptType(table.rel)}[]>{
 
 const res = await pool.query({
-text: "SELECT ${genSelectColumnsFromTable(table.rel)} FROM ${showQName(
-    table.name
-  )}",
+text: "SELECT ${genSelectColumnsFromTable(table.rel)} FROM ${showQName(table.name)}",
 values: [],
 rowMode: "array",
 });
-const rows = res.rows.map(row => ${genFunctionResDeserialization(
-    table.rel,
-    "row"
-  )});
+const rows = res.rows.map(row => ${genFunctionResDeserialization(table.rel, "row")});
 return rows;
 }`;
 
@@ -356,7 +341,7 @@ return rows;
       return {
         name: table.primaryKey[0],
         type: table.rel.fields.find(
-          (f) => f.name?.name === table.primaryKey[0].name
+          (f) => f.name?.name === table.primaryKey[0].name,
         )?.type!,
       };
     } else {
@@ -368,25 +353,25 @@ return rows;
     return selectAll;
   } else {
     const relWithoutPrim = table.rel.fields.filter(
-      (f) => f.name?.name !== primaryKeySingleCol.name.name
+      (f) => f.name?.name !== primaryKeySingleCol.name.name,
     );
     const mandatoryFields = table.rel.fields.filter(
-      (c) => !table.defaults.some((def) => def.name === c.name?.name)
+      (c) => !table.defaults.some((def) => def.name === c.name?.name),
     );
     const optionalFields = table.rel.fields.filter((c) =>
-      table.defaults.some((def) => def.name === c.name?.name)
+      table.defaults.some((def) => def.name === c.name?.name),
     );
     const inputRow =
       mandatoryFields
         .map(
           (f) => `
-${f.name?.name}: ${showTypeAsTypescriptType(f.type)}`
+${f.name?.name}: ${showTypeAsTypescriptType(f.type)}`,
         )
         .join(",") +
       optionalFields
         .map(
           (f) => `
-${f.name?.name}?: ${showTypeAsTypescriptType(f.type)}`
+${f.name?.name}?: ${showTypeAsTypescriptType(f.type)}`,
         )
         .join(",");
 
@@ -404,10 +389,10 @@ export async function insert(pool: Pool, row: {${inputRow}}): Promise<{${
 
   const res = await pool.query({
   text: "INSERT INTO ${showQName(
-    table.name
+    table.name,
   )} (" + (providedFields.join(", ")) + ") VALUES (" + providedFields.map((_, i) => "$" + (i + 1)).join(", ") +") RETURNING ${
-      primaryKeySingleCol.name.name
-    }",
+    primaryKeySingleCol.name.name
+  }",
   values: providedFields.map(f => row[f]),
   rowMode: "array",
   });
@@ -422,12 +407,12 @@ export async function insert(pool: Pool, row: {${inputRow}}): Promise<{${
 export async function getOne(pool: Pool, pk: {${
       primaryKeySingleCol.name.name
     }: ${showTypeAsTypescriptType(
-      primaryKeySingleCol.type
+      primaryKeySingleCol.type,
     )}}): Promise<${showTypeAsTypescriptType(table.rel)} | null>{
 
 const res = await pool.query({
 text: "SELECT ${genSelectColumnsFromTable(table.rel)} FROM ${showQName(
-      table.name
+      table.name,
     )} WHERE ${primaryKeySingleCol.name.name} = $1",
 values: [pk.${primaryKeySingleCol.name.name}] as any[],
 rowMode: "array",
@@ -442,14 +427,14 @@ return null;
     const inputRowForUpdate = relWithoutPrim
       .map(
         (f) => `
-${f.name?.name}?: ${showTypeAsTypescriptType(f.type)}`
+${f.name?.name}?: ${showTypeAsTypescriptType(f.type)}`,
       )
       .join(",");
     const update = `
 export async function update(pool: Pool, pk: {${
       primaryKeySingleCol.name.name
     }: ${showTypeAsTypescriptType(
-      primaryKeySingleCol.type
+      primaryKeySingleCol.type,
     )}}, row: {${inputRowForUpdate}}): Promise<null>{
 
   const providedFields = (Object.keys(row) as (keyof typeof row)[]).filter(key => row[key] !== undefined && allowedFieldNames.includes(key)) ;
@@ -457,13 +442,11 @@ export async function update(pool: Pool, pk: {${
 
   await pool.query({
   text: "UPDATE ${showQName(
-    table.name
+    table.name,
   )} SET " + providedFields.map((f, i) => f + " = $" + (i + 2)).join(", ") + " WHERE ${
-      primaryKeySingleCol.name.name
-    } = $1",
-values: ([pk.${
-      primaryKeySingleCol.name.name
-    }] as any[]).concat(providedFields.map(f => row[f])),
+    primaryKeySingleCol.name.name
+  } = $1",
+values: ([pk.${primaryKeySingleCol.name.name}] as any[]).concat(providedFields.map(f => row[f])),
   rowMode: "array",
   });
   return null;
@@ -475,9 +458,7 @@ export async function del(pool: Pool, pk: {${
     }: ${showTypeAsTypescriptType(primaryKeySingleCol.type)}}): Promise<null>{
 
 await pool.query({
-text: "DELETE FROM ${showQName(table.name)} WHERE ${
-      primaryKeySingleCol.name.name
-    } = $1",
+text: "DELETE FROM ${showQName(table.name)} WHERE ${primaryKeySingleCol.name.name} = $1",
 values: [pk.${primaryKeySingleCol.name.name}],
 rowMode: "array",
 });

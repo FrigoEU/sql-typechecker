@@ -287,5 +287,5 @@ const builtinunaryoperatorsFromSchema: unaryOp[] = [
 ];
 
 export const builtinUnaryOperators = builtinunaryoperatorsFromSyntax.concat(
-  builtinunaryoperatorsFromSchema
+  builtinunaryoperatorsFromSchema,
 );

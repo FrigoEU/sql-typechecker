@@ -52,9 +52,7 @@ type CreateFunctionRawStmt = RawStmt & {
   stmt: { CreateFunctionStmt: CreateFunctionStmt };
 };
 
-function isCreateFunctionStatement(
-  st: RawStmt
-): st is CreateFunctionRawStmt {
+function isCreateFunctionStatement(st: RawStmt): st is CreateFunctionRawStmt {
   return st.stmt !== undefined && "CreateFunctionStmt" in st.stmt;
 }
 
@@ -64,7 +62,7 @@ async function go() {
   const outArg = outArgs[0];
   if (!outArg) {
     throw new Error(
-      "Please provide -o/--out parameter for the domain and crud files"
+      "Please provide -o/--out parameter for the domain and crud files",
     );
   }
 
@@ -73,7 +71,7 @@ async function go() {
 
   const allSqlFiles = (
     await Promise.all(
-      dirs.map((dir) => findSqlFilesInDir(path.resolve(process.cwd(), dir)))
+      dirs.map((dir) => findSqlFilesInDir(path.resolve(process.cwd(), dir))),
     )
   )
     .flat()
@@ -81,7 +79,7 @@ async function go() {
 
   if (allSqlFiles.length === 0) {
     throw new Error(
-      "Please provide at least one SQL file with flags -f/--file or -d/--dir"
+      "Please provide at least one SQL file with flags -f/--file or -d/--dir",
     );
   }
 
@@ -157,24 +155,24 @@ async function go() {
     await fs.appendFile(
       tableOutFile,
       mkImportDomainsStatement(g.domains, tableOutFile, typesFile),
-      "utf8"
+      "utf8",
     );
     await fs.appendFile(
       tableOutFile,
       // text,
       prettier.format(text, { parser: "typescript" }),
-      "utf-8"
+      "utf-8",
     );
     await fs.appendFile(
       tablesIndexFile,
-      `export * as ${table.name.name} from "./tables/${table.name.name}";\n`
+      `export * as ${table.name.name} from "./tables/${table.name.name}";\n`,
     );
   }
 
   // Generating a file for each SQL file that contains at least one CREATE FUNCTION statement
   for (let f of allStatements) {
     const createFunctionStatements = f.statements.filter(
-      isCreateFunctionStatement
+      isCreateFunctionStatement,
     );
     const fParsed = path.parse(f.fileName);
     const outFileName = path.format({
@@ -186,7 +184,7 @@ async function go() {
     await fs.appendFile(
       outFileName,
       mkImportDomainsStatement(g.domains, outFileName, typesFile),
-      "utf8"
+      "utf8",
     );
     // console.log(`Writing functions to ${outFileName}`);
 
@@ -224,22 +222,22 @@ async function go() {
             const fullLineNumber = (functionLineNumber || 0) + found.lineNumber;
             const prefix = fullLineNumber.toString() + "  ";
             console.error(
-              `${f.fileName}:${fullLineNumber}:${found.range[0]}: ${funcName.name}`
+              `${f.fileName}:${fullLineNumber}:${found.range[0]}: ${funcName.name}`,
             );
             console.error("");
             console.error(prefix + found.line);
             console.error(
               repeat(" ", found.range[0] + prefix.length) +
-                repeat("^", found.range[1] - found.range[0])
+                repeat("^", found.range[1] - found.range[0]),
             );
           } else {
             console.error(
-              `${f.fileName}:${functionLineNumber || 0}: ${funcName.name}`
+              `${f.fileName}:${functionLineNumber || 0}: ${funcName.name}`,
             );
           }
         } else {
           console.error(
-            `${f.fileName}:${functionLineNumber || 0}: ${funcName.name}`
+            `${f.fileName}:${functionLineNumber || 0}: ${funcName.name}`,
           );
         }
         console.error(err instanceof Error ? err.message : JSON.stringify(err));
@@ -257,7 +255,7 @@ async function go() {
 
 function findCode(
   s: string,
-  offset: number
+  offset: number,
 ): { line: string; lineNumber: number; range: [number, number] } | null {
   let counted = 0;
   let lineNumber = 0;
@@ -305,7 +303,7 @@ function mkImportDomainsStatement(
     readonly name: QName;
   }>,
   thisFile: string,
-  domainFile: string
+  domainFile: string,
 ): string {
   const p = path.relative(path.dirname(thisFile), path.dirname(domainFile));
   const formatted = path.format({

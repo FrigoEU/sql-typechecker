@@ -15,7 +15,7 @@ Currently, `ParamRef` nodes hit `notImplementedYet` in `elabExpr`.
 
 ```typescript
 type ParamInfo = {
-  index: number;     // 1-based ($1, $2, ...)
+  index: number; // 1-based ($1, $2, ...)
   type: SimpleT;
   locations: number[]; // byte offsets where this param appears
 };
@@ -50,6 +50,7 @@ Rather than modifying the unification engine to support first-class type variabl
 ### Step 1: Typecheck with parameters as AnyScalar
 
 When `elabExpr` encounters a `ParamRef`:
+
 1. Look up the param index in a `Map<number, ParamSlot>`
 2. If not yet seen, create a new slot and return `AnyScalar`
 3. If already seen, return the currently inferred type (or `AnyScalar` if unconstrained)
@@ -83,6 +84,7 @@ Constraints are collected during the normal typechecking pass. The key integrati
 ### Step 3: Resolve constraints
 
 After typechecking completes:
+
 1. For each param, unify all constraints
 2. If constraints conflict -> diagnostic error
 3. If no constraints -> diagnostic warning ("unconstrained parameter")
@@ -134,15 +136,16 @@ For Phase 3, we only need error accumulation at the top level (catch the first e
 
 ## Files to modify
 
-| File | Changes |
-|---|---|
-| `src/typecheck.ts` | Handle `ParamRef` in `elabExpr`. Add `ParamSlot` type. Add constraint recording at key points (binary ops, function calls, insert, update, cast). Add `infer()` export. Optionally add `params` to `Context`. |
-| `src/pg-ast.ts` | Ensure `ParamRef` helpers exist (should already from Phase 1) |
-| `test/test.ts` or `test/test-infer.ts` (new) | Parameter inference tests |
+| File                                         | Changes                                                                                                                                                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/typecheck.ts`                           | Handle `ParamRef` in `elabExpr`. Add `ParamSlot` type. Add constraint recording at key points (binary ops, function calls, insert, update, cast). Add `infer()` export. Optionally add `params` to `Context`. |
+| `src/pg-ast.ts`                              | Ensure `ParamRef` helpers exist (should already from Phase 1)                                                                                                                                                 |
+| `test/test.ts` or `test/test-infer.ts` (new) | Parameter inference tests                                                                                                                                                                                     |
 
 ## Testing strategy
 
 ### Simple inference
+
 ```sql
 SELECT * FROM users WHERE id = $1
 -- $1: integer (from users.id)
@@ -155,6 +158,7 @@ INSERT INTO users (name, age) VALUES ($1, $2)
 ```
 
 ### Operators and expressions
+
 ```sql
 SELECT * FROM users WHERE age > $1 + 5
 -- $1: numeric-compatible
@@ -164,30 +168,35 @@ SELECT * FROM users WHERE created_at > $1
 ```
 
 ### Multiple consistent uses
+
 ```sql
 SELECT * FROM users WHERE id = $1 OR id = $1
 -- $1: integer (consistent)
 ```
 
 ### Conflicting constraints
+
 ```sql
 SELECT * FROM users WHERE id = $1 AND name = $1
 -- Error: $1 constrained to both integer and text
 ```
 
 ### Unconstrained parameters
+
 ```sql
 SELECT $1
 -- Warning: cannot infer type of $1
 ```
 
 ### Nullable context
+
 ```sql
 SELECT * FROM users WHERE name = $1
 -- $1: text (or text | null depending on column nullability)
 ```
 
 ### Subqueries
+
 ```sql
 SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE total > $1)
 -- $1: numeric (from orders.total)

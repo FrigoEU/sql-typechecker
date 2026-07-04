@@ -50,7 +50,7 @@ export function registerSqlTypecheckerTypeParsers() {
 }
 
 export function parseTsmultirange(
-  multirangeStr: string
+  multirangeStr: string,
 ): { start: LocalDateTime; end: LocalDateTime; bounds: string }[] {
   if (multirangeStr === "{}") {
     return []; // Return an empty array for an empty multirange.
@@ -72,7 +72,7 @@ export function parseTsmultirange(
       throw new Error("Invalid tsmultirange");
     }
     const start = LocalDateTime.parse(
-      startStr.replace(/"/g, "").replace(" ", "T")
+      startStr.replace(/"/g, "").replace(" ", "T"),
     );
     const end = LocalDateTime.parse(endStr.replace(/"/g, "").replace(" ", "T"));
     const bounds = `${startBracket}${endBracket}`;

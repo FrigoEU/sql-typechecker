@@ -41,4 +41,4 @@ The typechecker is ~3200 lines (`src/typecheck.ts`) with supporting modules:
 
 ## Key architectural principle
 
-The core typechecker should be **policy-free**: it infers types and reports errors, with no opinions about nullability conventions, unused parameter checks, etc. The current `doCreateFunction` pipeline (with its `DEFAULT NULL` convention, return type checking, unused arg detection) becomes one *consumer* of the core. Other consumers (query inference, migration validation, LSP) use the same core with different policy.
+The core typechecker should be **policy-free**: it infers types and reports errors, with no opinions about nullability conventions, unused parameter checks, etc. The current `doCreateFunction` pipeline (with its `DEFAULT NULL` convention, return type checking, unused arg detection) becomes one _consumer_ of the core. Other consumers (query inference, migration validation, LSP) use the same core with different policy.

@@ -5141,5 +5141,5 @@ const builtinoperatorsFromSchema: binaryOp[] = [
 ];
 
 export const builtinoperators = builtinoperatorsFromSyntax.concat(
-  builtinoperatorsFromSchema
+  builtinoperatorsFromSchema,
 );

@@ -39,12 +39,12 @@ function testCreateFunction(
         returns: Type | VoidT;
         multipleRows: boolean;
       }
-    >
-  ) => void
+    >,
+  ) => void,
 ) {
   const g = parseSetupScripts(
     { tables: [], views: [], domains: [], enums: [] },
-    parseStatements(setupStr)
+    parseStatements(setupStr),
   );
   const query = parseStatements(queryStr);
   const stmt = query[0]?.stmt;
@@ -53,7 +53,7 @@ function testCreateFunction(
       const res = doCreateFunction(
         g,
         { decls: [], froms: [] },
-        stmt.CreateFunctionStmt
+        stmt.CreateFunctionStmt,
       );
       cont(Right(res));
     } catch (err) {
@@ -74,7 +74,7 @@ function expectInputs(
   expectedInputTypes: {
     name: Name;
     type: SimpleT;
-  }[]
+  }[],
 ) {
   testCreateFunction(setupStr, queryStr, (res) => {
     res.caseOf({
@@ -95,7 +95,7 @@ function expectReturnType<T extends SimpleT>(
   setupStr: string,
   queryStr: string,
   expectedReturnType: RecordT | ScalarT | ArrayT<T> | VoidT,
-  opts?: { multipleRows: boolean }
+  opts?: { multipleRows: boolean },
 ) {
   testCreateFunction(setupStr, queryStr, (res) => {
     res.caseOf({
@@ -127,7 +127,7 @@ function removeLocation(obj: Object): any {
 function expectThrowLike(
   setupStr: string,
   queryStr: string,
-  expectedError: string
+  expectedError: string,
 ) {
   testCreateFunction(setupStr, queryStr, (res) => {
     res.caseOf({
@@ -165,7 +165,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ],
-    }
+    },
   );
 });
 
@@ -186,7 +186,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -213,10 +213,10 @@ $$ LANGUAGE sql;
       {
         name: { name: "array_with_nulls" },
         type: BuiltinTypeConstructors.Array(
-          BuiltinTypeConstructors.Nullable(BuiltinTypes.Text)
+          BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         ),
       },
-    ]
+    ],
   );
 });
 
@@ -242,7 +242,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.TimestampTz),
         },
       ],
-    }
+    },
   );
 });
 
@@ -268,7 +268,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
         },
       ],
-    }
+    },
   );
 });
 
@@ -294,7 +294,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -313,7 +313,7 @@ $$ LANGUAGE sql;
 `,
     {
       kind: "void",
-    }
+    },
   );
 });
 
@@ -329,7 +329,7 @@ $$ LANGUAGE sql;
 `,
     {
       kind: "void",
-    }
+    },
   );
 });
 
@@ -343,7 +343,7 @@ CREATE FUNCTION myselect(myname text) RETURNS SETOF RECORD AS $$
   WHERE id = myname;
 $$ LANGUAGE sql;
 `,
-    'Can\'t apply operator "=" to integer and text'
+    'Can\'t apply operator "=" to integer and text',
   );
 });
 
@@ -373,7 +373,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ],
-    }
+    },
   );
 });
 
@@ -399,7 +399,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
         },
       ],
-    }
+    },
   );
 });
 
@@ -425,7 +425,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -455,7 +455,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
         },
       ],
-    }
+    },
   );
 });
 
@@ -469,7 +469,7 @@ FROM testje
 JOIN testje AS testje2 ON testje.name = testje2.name
 $$ LANGUAGE sql;
 `,
-    `AmbiguousIdentifier name`
+    `AmbiguousIdentifier name`,
   );
 });
 
@@ -506,7 +506,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ],
-    }
+    },
   );
 });
 
@@ -535,7 +535,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ],
-    }
+    },
   );
 });
 
@@ -549,7 +549,7 @@ FROM testje
 WHERE id = NULL
 $$ LANGUAGE sql;
 `,
-    `Don't use "= NULL"`
+    `Don't use "= NULL"`,
   );
 });
 
@@ -571,7 +571,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -594,7 +594,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Null,
         },
       ],
-    }
+    },
   );
 });
 
@@ -616,7 +616,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Text,
         },
       ],
-    }
+    },
   );
 });
 
@@ -638,7 +638,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -660,7 +660,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -685,7 +685,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Numeric,
         },
       ],
-    }
+    },
   );
 });
 
@@ -707,7 +707,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -729,7 +729,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -743,7 +743,7 @@ CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
   WHERE (d1, d2) OVERLAPS (1, 2)
 $$ LANGUAGE sql;
 `,
-    `Couldn't find matching cast`
+    `Couldn't find matching cast`,
   );
 });
 
@@ -765,7 +765,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -779,7 +779,7 @@ FROM testje
 WHERE id IN ('hello')
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -793,7 +793,7 @@ FROM testje
 WHERE id = ANY(mylist)
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -816,7 +816,7 @@ $$ LANGUAGE sql;
         name: { name: "mylist2" },
         type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
       },
-    ]
+    ],
   );
 });
 
@@ -835,7 +835,7 @@ $$ LANGUAGE sql;
         name: { name: "mylist" },
         type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
       },
-    ]
+    ],
   );
 });
 
@@ -849,7 +849,7 @@ FROM testje
 WHERE id = ANY(mylist)
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -876,12 +876,12 @@ $$ LANGUAGE sql;
         {
           name: { name: "myarray" },
           type: BuiltinTypeConstructors.Nullable(
-            BuiltinTypeConstructors.Array(BuiltinTypes.Integer)
+            BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
           ),
         },
       ],
     },
-    { multipleRows: true }
+    { multipleRows: true },
   );
 });
 
@@ -902,7 +902,7 @@ $$ LANGUAGE sql;
         },
       ],
     },
-    { multipleRows: true }
+    { multipleRows: true },
   );
 });
 
@@ -923,7 +923,7 @@ $$ LANGUAGE sql;
         },
       ],
     },
-    { multipleRows: true }
+    { multipleRows: true },
   );
 });
 
@@ -943,7 +943,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Array(BuiltinTypes.Integer),
         },
       ],
-    }
+    },
   );
 });
 
@@ -955,7 +955,7 @@ CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
 SELECT ARRAY(SELECT id, name from testje)
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -976,7 +976,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Bigint,
         },
       ],
-    }
+    },
   );
 });
 
@@ -997,7 +997,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Bigint,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1018,7 +1018,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Bigint,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1039,7 +1039,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Numeric,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1052,7 +1052,7 @@ SELECT EXTRACT(DAY FROM name)
 from testje
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1065,7 +1065,7 @@ SELECT EXTRACT(DAY FROM mytime)
 from testje
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1086,7 +1086,7 @@ $$ LANGUAGE sql;
           type: AnyScalar,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1099,7 +1099,7 @@ SELECT name->'bleb'
 from testje
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1126,7 +1126,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1151,7 +1151,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Text,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1176,7 +1176,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Text,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1201,7 +1201,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Boolean,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1222,7 +1222,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1243,7 +1243,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Date),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1264,7 +1264,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Text,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1285,7 +1285,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1298,7 +1298,7 @@ SELECT COALESCE(name, 2)
 from testje
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1314,7 +1314,7 @@ $$ LANGUAGE sql;
     {
       kind: "record",
       fields: [{ name: null, type: BuiltinTypes.TimestampTz }],
-    }
+    },
   );
 });
 
@@ -1335,7 +1335,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1348,7 +1348,7 @@ SELECT name[1]
 from testje
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1369,7 +1369,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1382,7 +1382,7 @@ SELECT CASE name WHEN 7 THEN 2 ELSE 5 END
 from testje
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1395,7 +1395,7 @@ SELECT CASE name WHEN '' THEN 2 ELSE 'bleb' END
 from testje
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1416,7 +1416,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1429,7 +1429,7 @@ SELECT CASE WHEN name THEN 2 ELSE 5 END
 from testje
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1442,7 +1442,7 @@ SELECT CASE WHEN name = '' THEN 2 ELSE 'bleb' END
 from testje
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1463,7 +1463,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1491,7 +1491,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1519,7 +1519,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1541,7 +1541,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1557,7 +1557,7 @@ SELECT name
 FROM testje
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1581,7 +1581,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Text,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1593,7 +1593,7 @@ test("selectValuesMismatchLengths", () => {
   SELECT * FROM (VALUES (1, 'one'), (2)) AS vals
   $$ LANGUAGE sql;
   `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1605,7 +1605,7 @@ test("selectValuesMismatchTypes", () => {
   SELECT * FROM (VALUES (1, 'one'), (2, 5)) AS vals
   $$ LANGUAGE sql;
   `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1622,7 +1622,7 @@ $$ LANGUAGE sql;
     {
       kind: "record",
       fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
-    }
+    },
   );
 });
 
@@ -1636,7 +1636,7 @@ FROM testje
 WHERE id BETWEEN 2 AND '5'
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1658,7 +1658,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1679,7 +1679,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Text,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1701,7 +1701,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Text,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1714,7 +1714,7 @@ SELECT SUBSTRING(name from 5 for 'b') as name
 FROM testje
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -1739,7 +1739,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1764,7 +1764,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Numeric,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1785,7 +1785,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1806,7 +1806,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1827,7 +1827,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1848,7 +1848,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
         },
       ],
-    }
+    },
   );
 });
 
@@ -1875,7 +1875,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Text,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1902,7 +1902,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Date,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1923,7 +1923,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Numeric,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1935,7 +1935,7 @@ CREATE FUNCTION myselect() AS $$
 INSERT INTO testje (id, name) VALUES (1, 'hello');
 $$ LANGUAGE sql;
 `,
-    { kind: "void" }
+    { kind: "void" },
   );
 });
 
@@ -1968,7 +1968,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -1980,7 +1980,7 @@ CREATE FUNCTION myselect() AS $$
 INSERT INTO testje (id, name) VALUES (1, 2);
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -2000,7 +2000,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2020,7 +2020,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2038,7 +2038,7 @@ $$ LANGUAGE sql;
     {
       kind: "record",
       fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
-    }
+    },
   );
 });
 
@@ -2056,7 +2056,7 @@ $$ LANGUAGE sql;
       kind: "record",
       fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
     },
-    { multipleRows: true }
+    { multipleRows: true },
   );
 });
 
@@ -2074,7 +2074,7 @@ $$ LANGUAGE sql;
       kind: "record",
       fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
     },
-    { multipleRows: true }
+    { multipleRows: true },
   );
 });
 
@@ -2087,7 +2087,7 @@ DELETE FROM testje
 WHERE id = ''
 $$ LANGUAGE sql;
 `,
-    "Can't apply operator"
+    "Can't apply operator",
   );
 });
 
@@ -2100,7 +2100,7 @@ DELETE FROM testje
 $$ LANGUAGE sql;
 `,
     { kind: "void" },
-    { multipleRows: false }
+    { multipleRows: false },
   );
 });
 
@@ -2161,7 +2161,7 @@ $$ LANGUAGE sql;
                   },
                 ],
               },
-            })
+            }),
           ),
         },
         {
@@ -2185,11 +2185,11 @@ $$ LANGUAGE sql;
                   },
                 ],
               },
-            })
+            }),
           ),
         },
       ],
-    }
+    },
   );
 });
 
@@ -2217,7 +2217,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Text),
         },
       ],
-    }
+    },
   );
 });
 
@@ -2239,7 +2239,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2264,7 +2264,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2289,7 +2289,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
         },
       ],
-    }
+    },
   );
 });
 
@@ -2302,7 +2302,7 @@ CREATE FUNCTION myselect( my_id int ) RETURNS SETOF RECORD AS $$
   FROM testje
 $$ LANGUAGE sql;
 `,
-    "Unused argument my_id"
+    "Unused argument my_id",
   );
 });
 
@@ -2315,7 +2315,7 @@ CREATE FUNCTION myupdate( my_name text ) RETURNS void AS $$
       SET id = my_name;
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -2328,7 +2328,7 @@ CREATE FUNCTION myupdate( my_name text ) RETURNS void AS $$
       SET bloob = my_name;
 $$ LANGUAGE sql;
 `,
-    "UnknownField bloob"
+    "UnknownField bloob",
   );
 });
 
@@ -2342,7 +2342,7 @@ CREATE FUNCTION myupdate( my_name text ) RETURNS SETOF RECORD AS $$
        LIMIT my_name
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -2355,7 +2355,7 @@ CREATE FUNCTION myselect(mynum int) RETURNS void AS $$
          SET numbers = numbers || mynum
 $$ LANGUAGE sql;
 `,
-    { kind: "void" }
+    { kind: "void" },
   );
 });
 
@@ -2376,7 +2376,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2397,7 +2397,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Boolean,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2418,7 +2418,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Text,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2439,7 +2439,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Text,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2461,7 +2461,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2475,7 +2475,7 @@ CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
      WHERE '{}'::text[] && '{}'::int[]
 $$ LANGUAGE sql;
 `,
-    "TypeMismatch"
+    "TypeMismatch",
   );
 });
 
@@ -2493,7 +2493,7 @@ CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
      WHERE id = other_id
 $$ LANGUAGE sql;
 `,
-    'Can\'t apply operator "=" to my_id and my_other_id'
+    'Can\'t apply operator "=" to my_id and my_other_id',
   );
 });
 
@@ -2520,7 +2520,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2547,7 +2547,7 @@ $$ LANGUAGE sql;
           },
         },
       ],
-    }
+    },
   );
 });
 
@@ -2571,7 +2571,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Text,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2611,7 +2611,7 @@ $$ LANGUAGE sql;
           },
         },
       ],
-    }
+    },
   );
 });
 
@@ -2646,7 +2646,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Interval,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2681,7 +2681,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.Interval,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2722,7 +2722,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.TimestampMultiRange,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2750,7 +2750,7 @@ $$ LANGUAGE sql;
           type: BuiltinTypes.TimestampMultiRange,
         },
       ],
-    }
+    },
   );
 });
 
@@ -2767,7 +2767,7 @@ CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
     where the_enum = 'incorrect'::my_enum
 $$ LANGUAGE sql;
 `,
-    "Can't cast value 'incorrect' to enum my_enum"
+    "Can't cast value 'incorrect' to enum my_enum",
   );
 });
 
@@ -2790,11 +2790,11 @@ $$ LANGUAGE plpgsql;
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });
 
-test.only("plpgsql: RETURN QUERY with declare", () => {
+test("plpgsql: RETURN QUERY with declare", () => {
   expectReturnType(
     ``,
     `
@@ -2812,9 +2812,35 @@ $$ LANGUAGE plpgsql;
       fields: [
         {
           name: { name: "my_num" },
+          type: BuiltinTypeConstructors.Nullable(BuiltinTypes.Integer),
+        },
+      ],
+    },
+  );
+});
+
+test.only("plpgsql: RETURN QUERY with SELECT INTO", () => {
+  expectReturnType(
+    "create table testje ( id int not null, name text );",
+    `
+CREATE FUNCTION get_favorite_number()
+RETURNS SETOF RECORD AS $$
+DECLARE
+    fav_num INTEGER := 42;
+BEGIN
+    SELECT id INTO fav_num FROM testje WHERE name = 'bleb';
+    RETURN QUERY SELECT fav_num AS my_num;
+END;
+$$ LANGUAGE plpgsql;
+`,
+    {
+      kind: "record",
+      fields: [
+        {
+          name: { name: "my_num" },
           type: BuiltinTypes.Integer,
         },
       ],
-    }
+    },
   );
 });

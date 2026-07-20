@@ -403,6 +403,38 @@ export async function insert(pool: Pool, row: {${inputRow}}): Promise<{${
   }
 }`;
 
+    const insertMany = `
+export async function insertMany(pool: Pool, rows: {${inputRow}}[]): Promise<{${
+      primaryKeySingleCol.name.name
+    }: ${showTypeAsTypescriptType(primaryKeySingleCol.type)}}[]>{
+
+  if (rows.length === 0) { return []; }
+
+  const providedFields = allowedFieldNames.filter(field => rows.some(row => (row as any)[field] !== undefined)) as (keyof (typeof rows)[number])[];
+
+  const values: any[] = [];
+  let paramIndex = 1;
+  const tuples = rows.map(row =>
+    "(" + providedFields.map(field => {
+      const value = row[field];
+      if (value === undefined) { return "DEFAULT"; }
+      values.push(value);
+      return "$" + (paramIndex++);
+    }).join(", ") + ")"
+  ).join(", ");
+
+  const res = await pool.query({
+  text: "INSERT INTO ${showQName(
+    table.name,
+  )} (" + (providedFields.join(", ")) + ") VALUES " + tuples + " RETURNING ${
+    primaryKeySingleCol.name.name
+  }",
+  values: values,
+  rowMode: "array",
+  });
+  return res.rows.map(row => ({${primaryKeySingleCol.name.name}: row[0]}));
+}`;
+
     const selectOne = `
 export async function getOne(pool: Pool, pk: {${
       primaryKeySingleCol.name.name
@@ -470,6 +502,7 @@ ${allowedFieldNames}
 ${selectAll}
 ${selectOne}
 ${insert}
+${insertMany}
 ${update}
 ${del}
 `;

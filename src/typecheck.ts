@@ -1802,7 +1802,7 @@ function doPlpgsqlBlock(
         },
         [],
       );
-      if (d.PLpgSQL_var.default_val) {
+      if (d.PLpgSQL_var.default_val && d.PLpgSQL_var.isconst === true) {
         type = unnullify(type);
       }
       return {

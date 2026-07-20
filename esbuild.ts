@@ -11,7 +11,7 @@ esbuild
     banner: {
       js: `#!/usr/bin/env node`,
     },
-    external: ["pg-native", "libpg-query"],
+    external: ["pg-native", "libpg-query", "@libpg-query/parser"],
   })
   .then(() => fs.copyFile("src/typeparsers.ts", "out/typeparsers.ts"))
   .catch(() => process.exit(1));

@@ -117,6 +117,14 @@ export type PLpgSQLStmt =
         params?: PLpgSQLExpr[];
         options?: PLpgSQLRaiseOption[];
       };
+    }
+  | {
+      // dump_return in pg_query_json_plpgsql.c / PLpgSQL_stmt_return in plpgsql.h.
+      // expr is absent for a bare `RETURN;` (implicitly appended to every function
+      // body, and valid on its own only for a void-returning function).
+      PLpgSQL_stmt_return: {
+        expr?: PLpgSQLExpr;
+      };
     };
 export type PLpgSQLFunction = {
   // The DECLARE section: one entry per declared variable/record/row, in declaration

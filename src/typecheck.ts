@@ -1784,7 +1784,7 @@ function doPlpgsqlBlock(
   console.log("Block");
   const statements = block.body ?? [];
 
-  const newDecls = datums.map((d): { name: Name; type: Type } => {
+  const newDecls: { name: Name; type: Type }[] = datums.flatMap((d) => {
     if ("PLpgSQL_var" in d) {
       console.log(
         `Declare | ${d.PLpgSQL_var.refname}: ${d.PLpgSQL_var.datatype.PLpgSQL_type.typname}`,
@@ -1805,17 +1805,21 @@ function doPlpgsqlBlock(
       if (d.PLpgSQL_var.default_val && d.PLpgSQL_var.isconst === true) {
         type = unnullify(type);
       }
-      return {
-        name: {
-          name: d.PLpgSQL_var.refname,
-          _location: d.PLpgSQL_var.lineno,
+      return [
+        {
+          name: {
+            name: d.PLpgSQL_var.refname,
+            _location: d.PLpgSQL_var.lineno,
+          },
+          type,
         },
-        type,
-      };
+      ];
     } else if ("PLpgSQL_rec" in d) {
       return notImplementedYet(d);
     } else if ("PLpgSQL_row" in d) {
-      return notImplementedYet(d);
+      // Compiler-synthesized multi-column INTO target — its fields reference
+      // already-declared vars by varno, so it doesn't introduce a new binding.
+      return [];
     } else {
       return checkAllCasesHandled(d);
     }
@@ -1832,7 +1836,11 @@ function doPlpgsqlBlock(
     } else if (res.tag === "bind") {
       currContext = {
         ...currContext,
-        decls: currContext.decls.concat([res]),
+        decls: res.binds.reduce(
+          (decls, b) =>
+            decls.filter((d) => !eqQNames(d.name, b.name)).concat([b]),
+          currContext.decls,
+        ),
       };
     } else if (res.tag === "return") {
       // not correct ofc, but good enough for now
@@ -1851,20 +1859,65 @@ function doPLpgSQLStmt(
   stmt: PLpgSQLStmt,
 ):
   | { tag: "nothing" }
-  | { tag: "bind"; name: Name; type: Type }
+  | { tag: "bind"; binds: { name: Name; type: Type }[] }
   | { tag: "return"; type: Type | VoidT } {
   if ("PLpgSQL_stmt_return_query" in stmt) {
     console.log("Stmt: return query");
     const queryStatements = parseStatements(
       stmt.PLpgSQL_stmt_return_query.query.PLpgSQL_expr.query,
     );
-    const lastStatement = queryStatements[queryStatements.length - 1];
-    const returnType = elabStatementNode(g, c, lastStatement.stmt!);
+    const returnType = elabAllStatements(g, c, queryStatements);
 
     return { tag: "return", type: returnType };
   } else if ("PLpgSQL_stmt_block" in stmt) {
     console.log("Stmt: block");
     return doPlpgsqlBlock(g, c, stmt.PLpgSQL_stmt_block, []);
+  } else if ("PLpgSQL_stmt_execsql" in stmt) {
+    console.log("Stmt: execsql");
+    const execsql = stmt.PLpgSQL_stmt_execsql;
+    const queryStatements = parseStatements(execsql.sqlstmt.PLpgSQL_expr.query);
+    const resultType = elabAllStatements(g, c, queryStatements);
+
+    if (!execsql.into || !execsql.target) {
+      return { tag: "nothing" };
+    }
+
+    if (resultType.kind !== "record") {
+      throw new ErrorWithLocation(
+        undefined,
+        `SELECT ... INTO requires a query returning columns, got ${JSON.stringify(
+          resultType,
+        )}`,
+      );
+    }
+
+    const target = execsql.target;
+    if ("PLpgSQL_row" in target) {
+      const binds = target.PLpgSQL_row.fields.map((f, i) => {
+        const col = resultType.fields[i];
+        if (!col) {
+          throw new ErrorWithLocation(
+            undefined,
+            `SELECT ... INTO ${f.name}: query returns fewer columns than INTO targets`,
+          );
+        }
+        return { name: { name: f.name }, type: col.type };
+      });
+      return { tag: "bind", binds };
+    } else {
+      return {
+        tag: "bind",
+        binds: [
+          { name: { name: target.PLpgSQL_rec.refname }, type: resultType },
+        ],
+      };
+    }
+  } else if ("PLpgSQL_stmt_return" in stmt) {
+    console.log("Stmt: return");
+    if (stmt.PLpgSQL_stmt_return.expr) {
+      return notImplementedYet(stmt);
+    }
+    return { tag: "return", type: { kind: "void" } };
   } else {
     return notImplementedYet(stmt);
   }
@@ -1905,12 +1958,7 @@ export function doCreateFunction(
         language,
       };
     }
-    const lastStatement = bodyStatements[bodyStatements.length - 1];
-    const returnType = elabStatementNode(
-      g,
-      contextForBody,
-      lastStatement.stmt!,
-    );
+    const returnType = elabAllStatements(g, contextForBody, bodyStatements);
     return finalizeFunctionReturn(
       g,
       name,
@@ -3783,6 +3831,18 @@ function elabStatementNode(
   } else {
     return notImplementedYet(stmtNode);
   }
+}
+
+// Typechecks every statement in a `;`-separated body, not just the last one,
+// so errors earlier in a multi-statement body/expr aren't silently skipped.
+// The returned type is that of the final statement, matching Postgres's rule
+// that a function's result comes from whichever statement runs last.
+function elabAllStatements(g: Global, c: Context, statements: RawStmt[]): VoidT | Type {
+  statements.slice(0, -1).forEach((s) => {
+    elabStatementNode(g, c, s.stmt!);
+  });
+  const lastStatement = statements[statements.length - 1];
+  return elabStatementNode(g, c, lastStatement.stmt!);
 }
 
 export function parseSetupScripts(

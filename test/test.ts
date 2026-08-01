@@ -2819,7 +2819,7 @@ $$ LANGUAGE plpgsql;
   );
 });
 
-test.only("plpgsql: RETURN QUERY with SELECT INTO", () => {
+test("plpgsql: RETURN QUERY with SELECT INTO", () => {
   expectReturnType(
     "create table testje ( id int not null, name text );",
     `
@@ -2842,5 +2842,46 @@ $$ LANGUAGE plpgsql;
         },
       ],
     },
+  );
+});
+
+test("plpgsql: execsql without INTO", () => {
+  expectReturnType(
+    "create table testje ( id int not null, name text );",
+    `
+CREATE FUNCTION add_row() AS $$
+BEGIN
+    INSERT INTO testje (id, name) VALUES (1, 'hello');
+END;
+$$ LANGUAGE plpgsql;
+`,
+    { kind: "void" },
+  );
+});
+
+test("plpgsql: execsql typechecks the underlying query", () => {
+  expectThrowLike(
+    "create table testje ( id int not null, name text );",
+    `
+CREATE FUNCTION add_row() AS $$
+BEGIN
+    INSERT INTO testje (id, name) VALUES (1, doesnotexist);
+END;
+$$ LANGUAGE plpgsql;
+`,
+    "doesnotexist",
+  );
+});
+
+test("sql function: typechecks every statement, not just the last", () => {
+  expectThrowLike(
+    "create table testje ( id int NOT NULL, name text);",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+INSERT INTO testje (id, name) VALUES (1, doesnotexist);
+SELECT id FROM testje;
+$$ LANGUAGE sql;
+`,
+    "doesnotexist",
   );
 });

@@ -1786,6 +1786,13 @@ function doPlpgsqlBlock(
 
   const newDecls: { name: Name; type: Type }[] = datums.flatMap((d) => {
     if ("PLpgSQL_var" in d) {
+      if (d.PLpgSQL_var.lineno === undefined) {
+        // No lineno means this datum wasn't written as a DECLARE in this
+        // block — it's either the implicit FOUND var or a function
+        // parameter, both already accounted for (parameters are already in
+        // scope via the function's `inputs`).
+        return [];
+      }
       console.log(
         `Declare | ${d.PLpgSQL_var.refname}: ${d.PLpgSQL_var.datatype.PLpgSQL_type.typname}`,
       );

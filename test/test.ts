@@ -2859,6 +2859,20 @@ $$ LANGUAGE plpgsql;
   );
 });
 
+test("plpgsql: execsql without INTO with param", () => {
+  expectReturnType(
+    "create table testje ( id int not null, name text );",
+    `
+CREATE FUNCTION add_row(_name text) AS $$
+BEGIN
+    INSERT INTO testje (id, name) VALUES (1, _name);
+END;
+$$ LANGUAGE plpgsql;
+`,
+    { kind: "void" },
+  );
+});
+
 test("plpgsql: execsql typechecks the underlying query", () => {
   expectThrowLike(
     "create table testje ( id int not null, name text );",

@@ -191,7 +191,12 @@ async function go() {
     for (let st of createFunctionStatements) {
       const cfStmt = st.stmt.CreateFunctionStmt;
       const funcOpts = extractFunctionOptions(cfStmt);
-      if (funcOpts.language?.toLowerCase() !== "sql") {
+      if (
+        funcOpts.language &&
+        (funcOpts.language.toLowerCase() === "sql" ||
+          funcOpts.language.toLowerCase() === "plpgsql")
+      ) {
+      } else {
         continue;
       }
       const funcName = getQNameFromNodes(cfStmt.funcname || []);

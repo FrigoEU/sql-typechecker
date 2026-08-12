@@ -1877,10 +1877,8 @@ function doPLpgSQLStmt(
 
     return { tag: "return", type: returnType };
   } else if ("PLpgSQL_stmt_block" in stmt) {
-    console.log("Stmt: block");
     return doPlpgsqlBlock(g, c, stmt.PLpgSQL_stmt_block, []);
   } else if ("PLpgSQL_stmt_execsql" in stmt) {
-    console.log("Stmt: execsql");
     const execsql = stmt.PLpgSQL_stmt_execsql;
     const queryStatements = parseStatements(execsql.sqlstmt.PLpgSQL_expr.query);
     const resultType = elabAllStatements(g, c, queryStatements);
@@ -1920,7 +1918,6 @@ function doPLpgSQLStmt(
       };
     }
   } else if ("PLpgSQL_stmt_return" in stmt) {
-    console.log("Stmt: return");
     if (stmt.PLpgSQL_stmt_return.expr) {
       return notImplementedYet(stmt);
     }
@@ -3844,7 +3841,11 @@ function elabStatementNode(
 // so errors earlier in a multi-statement body/expr aren't silently skipped.
 // The returned type is that of the final statement, matching Postgres's rule
 // that a function's result comes from whichever statement runs last.
-function elabAllStatements(g: Global, c: Context, statements: RawStmt[]): VoidT | Type {
+function elabAllStatements(
+  g: Global,
+  c: Context,
+  statements: RawStmt[],
+): VoidT | Type {
   statements.slice(0, -1).forEach((s) => {
     elabStatementNode(g, c, s.stmt!);
   });

@@ -1,10 +1,8 @@
 {
   "name": "sql-typechecker",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "bin": "out/cli.js",
-  "files": [
-    "out/**"
-  ],
+  "files": ["out/**"],
   "main": "out/typeparsers.ts",
   "scripts": {
     "check": "tsc -p . --noEmit",

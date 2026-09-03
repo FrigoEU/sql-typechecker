@@ -36,6 +36,7 @@ import {
   type FunctionParameter,
   type Name,
   type QName,
+  type WithClause,
   parseStatements,
   getColumnRef,
   getTypeName,
@@ -1171,6 +1172,33 @@ function deriveNameFromExpr(expr: Node): Name | null {
   }
 }
 
+// Resolves a WITH clause's CTEs into the context, so they're in scope for
+// whatever statement (SELECT/INSERT/UPDATE/DELETE) the WITH clause is attached to.
+function resolveWithClause(
+  g: Global,
+  c: Context,
+  withClause: WithClause,
+): Context {
+  if (withClause.recursive) {
+    return notImplementedYet(withClause);
+  }
+  const ctes = withClause.ctes || [];
+  return ctes.reduce((ctx, cteNode) => {
+    if (!("CommonTableExpr" in cteNode)) return ctx;
+    const cte = cteNode.CommonTableExpr;
+    if (!cte.ctequery) return ctx;
+    const innerStmt = cte.ctequery;
+    const t = elabStatementNode(g, ctx, innerStmt);
+    return {
+      ...ctx,
+      decls: ctx.decls.concat({
+        name: { name: cte.ctename || "" },
+        type: t || { kind: "void" },
+      }),
+    };
+  }, c);
+}
+
 // WITH ... INSERT is also a SelectStatement. So this will return RecordT or VoidT I think...
 export function elabSelect(
   g: Global,
@@ -1180,24 +1208,7 @@ export function elabSelect(
 ): RecordT | VoidT {
   // WITH clause
   if (s.withClause) {
-    if (s.withClause.recursive) {
-      return notImplementedYet(s);
-    }
-    const ctes = s.withClause.ctes || [];
-    const resultingContext = ctes.reduce((ctx, cteNode) => {
-      if (!("CommonTableExpr" in cteNode)) return ctx;
-      const cte = cteNode.CommonTableExpr;
-      if (!cte.ctequery) return ctx;
-      const innerStmt = cte.ctequery;
-      const t = elabStatementNode(g, ctx, innerStmt);
-      return {
-        ...ctx,
-        decls: ctx.decls.concat({
-          name: { name: cte.ctename || "" },
-          type: t || { kind: "void" },
-        }),
-      };
-    }, c);
+    const resultingContext = resolveWithClause(g, c, s.withClause);
     // Elab the main statement (same SelectStmt but without withClause)
     const mainSelect: SelectStmt = { ...s, withClause: undefined };
     const res = elabSelectOrStatement(g, resultingContext, mainSelect);
@@ -1365,6 +1376,9 @@ function elabSelectOrStatement(
 }
 
 function elabInsert(g: Global, c: Context, s: InsertStmt): VoidT | RecordT {
+  if (s.withClause) {
+    c = resolveWithClause(g, c, s.withClause);
+  }
   const intoRV = s.relation!;
   const intoName = rangeVarToQName(intoRV);
   const insertingInto: null | {
@@ -1469,6 +1483,9 @@ function elabInsert(g: Global, c: Context, s: InsertStmt): VoidT | RecordT {
 }
 
 function elabDelete(g: Global, c: Context, s: DeleteStmt): VoidT | RecordT {
+  if (s.withClause) {
+    c = resolveWithClause(g, c, s.withClause);
+  }
   const rv = s.relation!;
   const tableName = rangeVarToQName(rv);
   const tableDef = g.tables.find((t) => eqQNames(t.name, tableName)) || null;
@@ -1493,6 +1510,9 @@ function elabDelete(g: Global, c: Context, s: DeleteStmt): VoidT | RecordT {
 }
 
 function elabUpdate(g: Global, c: Context, s: UpdateStmt): VoidT | RecordT {
+  if (s.withClause) {
+    c = resolveWithClause(g, c, s.withClause);
+  }
   const rv = s.relation!;
   const tableName = rangeVarToQName(rv);
   const tableDef = g.tables.find((t) => eqQNames(t.name, tableName)) || null;

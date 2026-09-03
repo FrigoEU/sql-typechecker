@@ -68,6 +68,7 @@ import { builtincasts } from "./builtincasts.ts";
 import { builtinoperators } from "./builtinoperators.ts";
 import { builtinUnaryOperators } from "./builtinunaryoperators.ts";
 import { normalizeOperatorName, normalizeTypeName } from "./normalize.ts";
+import { deparseSync } from "pgsql-deparser";
 
 export type Type = SimpleT | RecordT;
 export type AnyScalarT = {
@@ -907,6 +908,10 @@ export type Context = {
   readonly decls: ReadonlyArray<{
     readonly name: Name;
     referenceCounter?: number;
+    // Every ColumnRef node in the function body that resolved to this decl —
+    // only populated for SQL-language function parameters, so that doCreateFunction
+    // can rewrite them into $1/$2/... ParamRefs for the inlined-query codegen.
+    readonly paramRefNodes?: Node[];
     readonly type:
       | Type
       | VoidT /* with statement can return bindings of type void */;
@@ -1588,13 +1593,19 @@ export type functionType = {
   multipleRows: boolean;
   code: string;
   language: string;
+  // The function body as a single parameterized SQL statement (named parameters
+  // rewritten to $1, $2, ... in `inputs` order), ready to run directly against the
+  // DB with no stored function involved. Null when the body can't be inlined this
+  // way — currently: LANGUAGE other than sql, or a body that isn't exactly one
+  // statement — in which case codegen emits a stub instead of a caller.
+  inlinedSql: string | null;
 };
 
 function buildFunctionInputs(
   g: Global,
   name: QName,
   s: CreateFunctionStmt,
-): { name: Name; type: SimpleT; referenceCounter: number }[] {
+): { name: Name; type: SimpleT; referenceCounter: number; paramRefNodes: Node[] }[] {
   const params = (s.parameters || [])
     .filter(
       (n): n is { FunctionParameter: FunctionParameter } =>
@@ -1634,6 +1645,7 @@ function buildFunctionInputs(
           name: { name: arg.name },
           type: nullify(paramT),
           referenceCounter: 0,
+          paramRefNodes: [],
         };
       }
       // Check for DEFAULT '{NULL}' (string) for nullable arrays
@@ -1647,6 +1659,7 @@ function buildFunctionInputs(
           name: { name: arg.name },
           type: nullifyArray(paramT),
           referenceCounter: 0,
+          paramRefNodes: [],
         };
       }
       // Check for DEFAULT ARRAY[NULL] for nullable arrays
@@ -1657,6 +1670,7 @@ function buildFunctionInputs(
             name: { name: arg.name },
             type: nullifyArray(paramT),
             referenceCounter: 0,
+            paramRefNodes: [],
           };
         }
       }
@@ -1665,6 +1679,7 @@ function buildFunctionInputs(
       name: { name: arg.name },
       type: paramT,
       referenceCounter: 0,
+      paramRefNodes: [],
     };
   });
 }
@@ -1679,6 +1694,7 @@ function finalizeFunctionReturn(
   language: string,
   inputs: { name: Name; type: SimpleT; referenceCounter: number }[],
   returnType: Type | VoidT,
+  inlinedSql: string | null,
 ): functionType {
   const returnTypeName = s.returnType;
   const isSetof = s.returnType
@@ -1772,6 +1788,7 @@ function finalizeFunctionReturn(
     multipleRows: isSetof,
     code,
     language,
+    inlinedSql,
   };
 }
 
@@ -1927,6 +1944,34 @@ function doPLpgSQLStmt(
   }
 }
 
+// Rewrite every ColumnRef in the (single-statement) function body that resolved
+// to a function parameter into a positional $1/$2/... ParamRef (in `inputs`
+// order), then deparse back to SQL text — ready to run directly as a
+// parameterized query, no stored function required. Bodies with anything other
+// than exactly one statement aren't inlined this way: the `pg` driver's
+// parameterized query only runs one statement per round trip, and each
+// statement in a multi-statement body would need its own independent $1.. scope.
+function inlineSqlFunctionBody(
+  bodyStatements: RawStmt[],
+  inputs: { paramRefNodes: Node[] }[],
+): string | null {
+  if (bodyStatements.length !== 1) {
+    return null;
+  }
+  const stmtNode = bodyStatements[0].stmt;
+  if (!stmtNode) {
+    return null;
+  }
+  inputs.forEach((inp, i) => {
+    for (const node of inp.paramRefNodes) {
+      const mutableNode = node as unknown as Record<string, unknown>;
+      delete mutableNode.ColumnRef;
+      mutableNode.ParamRef = { number: i + 1 };
+    }
+  });
+  return deparseSync(stmtNode as unknown as Node);
+}
+
 export function doCreateFunction(
   g: Global,
   c: Context,
@@ -1955,14 +2000,16 @@ export function doCreateFunction(
     if (bodyStatements.length === 0) {
       return {
         name,
-        inputs,
+        inputs: inputs.map((inp) => ({ name: inp.name, type: inp.type })),
         returns: { kind: "void" },
         multipleRows: false,
         code,
         language,
+        inlinedSql: null,
       };
     }
     const returnType = elabAllStatements(g, contextForBody, bodyStatements);
+    const inlinedSql = inlineSqlFunctionBody(bodyStatements, inputs);
     return finalizeFunctionReturn(
       g,
       name,
@@ -1971,6 +2018,7 @@ export function doCreateFunction(
       language,
       inputs,
       returnType,
+      inlinedSql,
     );
   } else if (language.toLowerCase() === "plpgsql") {
     const plFunc = parsePlPgSqlFunction(s);
@@ -1982,7 +2030,16 @@ export function doCreateFunction(
       },
       plFunc.datums ?? [],
     );
-    return finalizeFunctionReturn(g, name, s, code, language, inputs, res.type);
+    return finalizeFunctionReturn(
+      g,
+      name,
+      s,
+      code,
+      language,
+      inputs,
+      res.type,
+      null,
+    );
   } else {
     return notImplementedYet(s);
   }
@@ -2537,6 +2594,9 @@ function lookupRef(
       } else if (foundIdentifiers.length === 1) {
         if (!isNil(foundIdentifiers[0].decl.referenceCounter)) {
           foundIdentifiers[0].decl.referenceCounter += 1;
+        }
+        if (foundIdentifiers[0].decl.paramRefNodes) {
+          foundIdentifiers[0].decl.paramRefNodes.push(e);
         }
         return { type: foundIdentifiers[0].type, from: null };
       } else {

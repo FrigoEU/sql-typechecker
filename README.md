@@ -4,6 +4,10 @@ SQL-Typechecker is a CLI tool written in TypeScript, typechecking PostgreSQL fil
 
 It reads your SQL DDL statements (CREATE TABLE, etc) on one hand and your SQL functions (CREATE FUNCTION ...) on the other. It then typechecks your SQL functions and generates TypeScript files for them.
 
+`CREATE FUNCTION ... LANGUAGE sql` is used purely as an annotation format: it gives you an explicit, unification-free place to declare parameter and return types. The function itself is never deployed to Postgres as a stored function — for a single-statement body, SQL-Typechecker generates a caller that runs the body directly as a parameterized query (its named parameters rewritten to `$1`, `$2`, ...). This avoids the deployment hazards of stored functions: `CREATE OR REPLACE FUNCTION` changes behavior instantly for every caller, including whichever old app version is still live during a rolling deploy.
+
+`LANGUAGE plpgsql` functions are still typechecked, since they're occasionally worth the real procedural control flow Postgres gives you, but SQL-Typechecker doesn't generate a caller for them (nor for a `LANGUAGE sql` body that isn't exactly one statement) — the emitted TypeScript is a stub with a type error at that spot in the file, message included, so you don't forget to write the caller by hand. Those functions do need to be deployed to the database as real stored functions, so the usual stored-function deploy caveats apply to them.
+
 Design goals:
 
 - Don't rely on PostgreSQL for types. Postgres itself doesn't perform rigorous enough type-checking for our purposes.
@@ -139,6 +143,6 @@ Is this project finished? No, quite a few functions, syntax elements, etc., are 
 
 That said, I've been using this library for years in multiple commercial projects, and it works very well within its current limitations.
 
-In the future, I would love to add support for `plpgsql`. The biggest blocking factor is the lack of support in the parsing library SQL-Typechecker is built upon.
+`plpgsql` support is still partial (a growing subset of statements is handled — see `spec/phase2-plpgsql.md`).
 
 PRs, questions, remarks, and advice are all very welcome!

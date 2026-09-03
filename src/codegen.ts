@@ -1,8 +1,8 @@
+import { createHash } from "node:crypto";
 import { type Name, type QName } from "./pg-ast.ts";
 import {
   checkAllCasesHandled,
   showQName,
-  showSqlType,
   type JsonKnownT,
   type RecordT,
   type SimpleT,
@@ -179,6 +179,78 @@ function genFunctionResDeserialization(
   }
 }
 
+function showTypeDroppingNullable(t: SimpleT | JsonKnownT): string {
+  if (t.kind === "nullable") {
+    return showTypeDroppingNullable(t.typevar);
+  } else if (t.kind === "array") {
+    return showTypeDroppingNullable(t.typevar) + "[]";
+  } else if (t.kind === "anyscalar") {
+    return "anyscalar";
+  } else if (t.kind === "scalar") {
+    return t.name.name;
+  } else if (t.kind === "jsonknown") {
+    return "json";
+  } else {
+    return "";
+  }
+}
+
+// Explicit `::type` casts on every $n placeholder — Postgres can't always infer
+// a parameter's type from context alone
+function addParamCasts(sql: string, inputs: { type: SimpleT }[]): string {
+  const castByIndex = inputs.map((inp) => showTypeDroppingNullable(inp.type));
+  return sql.replace(/\$(\d+)/g, (whole, n) => {
+    const cast = castByIndex[Number(n) - 1];
+    return cast ? `$${n}::${cast}` : whole;
+  });
+}
+
+// Render `s` as a template literal instead of a JSON-escaped string, so a
+// multi-line SQL query keeps its real line breaks in the generated file
+// instead of collapsing onto one line full of "\n" escapes.
+function toTemplateLiteral(s: string): string {
+  const escaped = s
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\$\{/g, "\\${");
+  return "`" + escaped + "`";
+}
+
+// A stable name for `pg`'s named-prepared-statement support: with no `name`,
+// `pool.query` sends every call as an unnamed statement, which Postgres always
+// re-plans from scratch. Naming it lets `pg` prepare it once per physical
+// connection and reuse it after that, so pooled connections benefit the same
+// way a stored function's cached per-session plan used to. The name is derived
+// from the final query text (not just the function name), so if the query ever
+// changes, the name changes with it — a stale connection can't accidentally
+// reuse an old plan for what is now different SQL under the same name.
+function preparedStatementName(functionName: string, finalSql: string): string {
+  const hash = createHash("sha1").update(finalSql).digest("hex").slice(0, 10);
+  return `${functionName}_${hash}`;
+}
+
+// Generated when a function's body isn't inlineable (LANGUAGE other than sql,
+// or a body sql-typechecker can't reduce to a single parameterized statement):
+// a caller that's guaranteed to fail `tsc`. Don't want to remove plpgsql support now,
+// but don't want to accidentally rely on a plpgsql function not being there.
+function genUncallableFunctionStub(
+  f: functionType,
+  returnTypeAsString: string,
+  argsType: string,
+): string {
+  const reason =
+    f.language.toLowerCase() === "sql"
+      ? "its body isn't exactly one statement (empty, or more than one), which sql-typechecker's inlining codegen doesn't support"
+      : `it is LANGUAGE ${f.language}, and sql-typechecker only inlines LANGUAGE sql functions`;
+  const message = `sql-typechecker: no caller generated for "${f.name.name}" because ${reason}. It still exists in the database — write this call by hand.`;
+  return `
+export async function ${f.name.name}(pool: Pool, args: ${argsType})
+  : Promise<${returnTypeAsString}>{
+  return ${JSON.stringify(message)};
+  }
+`;
+}
+
 export function functionToTypescript(f: functionType): string {
   const returnTypeAsString =
     f.returns.kind === "void"
@@ -198,54 +270,12 @@ export function functionToTypescript(f: functionType): string {
       .join(", ") +
     "}";
 
-  const argsAsList = f.inputs.map((i) => "args." + i.name.name).join(", ");
-
-  const argsForCreateFunction = f.inputs
-    .map((k) => k.name.name + " " + showSqlType(k.type))
-    .join(", ");
-
-  function showTypeDroppingNullable(t: SimpleT | JsonKnownT): string {
-    if (t.kind === "nullable") {
-      return showTypeDroppingNullable(t.typevar);
-    } else if (t.kind === "array") {
-      return showTypeDroppingNullable(t.typevar) + "[]";
-    } else if (t.kind === "anyscalar") {
-      return "anyscalar";
-    } else if (t.kind === "scalar") {
-      return t.name.name;
-    } else if (t.kind === "jsonknown") {
-      return "json";
-    } else {
-      return "";
-    }
+  if (f.inlinedSql === null) {
+    return genUncallableFunctionStub(f, returnTypeAsString, argsType);
   }
 
-  const asExpression =
-    f.returns.kind === "record"
-      ? ` AS ${f.name.name}(${f.returns.fields
-          .map(
-            (f, i) =>
-              (f.name?.name || "field" + i) +
-              " " +
-              showTypeDroppingNullable(f.type),
-          )
-          .join(", ")})`
-      : "";
-
-  const recreatedSqlFunctionStatement = `
-CREATE FUNCTION ${f.name.name}(${argsForCreateFunction}) RETURNS ${f.multipleRows ? "SETOF " : ""}${
-    f.returns.kind === "record"
-      ? "RECORD"
-      : f.returns.kind === "void"
-        ? "void"
-        : showTypeDroppingNullable(f.returns)
-  } AS
-$$${f.code}$$ LANGUAGE ${f.language};
-`;
-
-  const funcInvocation = `${f.name.name}(${f.inputs.map(
-    (inp, i) => "$" + (i + 1) + "::" + showTypeDroppingNullable(inp.type),
-  )})${asExpression}`;
+  const argsAsList = f.inputs.map((i) => "args." + i.name.name).join(", ");
+  const finalSql = addParamCasts(f.inlinedSql, f.inputs);
 
   const deserializationAndReturn =
     f.returns.kind === "void"
@@ -264,7 +294,8 @@ export async function ${f.name.name}(pool: Pool, args: ${argsType})
   : Promise<${returnTypeAsString}>{
 
   const res = await pool.query({
-    text: "SELECT * FROM ${funcInvocation}",
+    name: ${JSON.stringify(preparedStatementName(f.name.name, finalSql))},
+    text: ${toTemplateLiteral(finalSql)},
     values: [${argsAsList}],
     rowMode: "array",
   }).catch(err => {

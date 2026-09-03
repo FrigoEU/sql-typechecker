@@ -1,6 +1,6 @@
 {
   "name": "sql-typechecker",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "bin": "out/cli.js",
   "files": [
     "out/**"
@@ -14,9 +14,9 @@
     "start": "npm run build && node --enable-source-maps ./out/cli.js -d ./sample -o ./sample/out",
     "test_school": "node ./out/cli.js --dir ~/projects/school/typescript/sql/classy --out ~/projects/school/typescript/sql/classy",
     "extendedexample": "npm run build && node --enable-source-maps ./out/cli.js -d ./extendedexample -o ./extendedexample/out",
-    "test": "tsx --test-reporter=spec --test 'test/test.ts'",
-    "test_only": "tsx --test-reporter=spec --test --test-only 'test/test.ts'",
-    "test_debug": "tsx --test-reporter=spec --test --test-only --inspect-brk 'test/test.ts'"
+    "test": "tsx --test-reporter=spec --test 'test/**/*.ts'",
+    "test_only": "tsx --test-reporter=spec --test --test-only 'test/**/*.ts'",
+    "test_debug": "tsx --test-reporter=spec --test --test-only --inspect-brk 'test/**/*.ts'"
   },
   "dependencies": {
     "@libpg-query/parser": "17.6.10",

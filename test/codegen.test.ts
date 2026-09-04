@@ -71,6 +71,26 @@ $$ LANGUAGE sql;
   assert.match(generated, /values: \[args\.first_param, args\.second_param\]/);
 });
 
+test("parameters referenced only in ON CONFLICT DO UPDATE SET are substituted with placeholders too", () => {
+  const generated = generateFunction(
+    "create table my_table ( id int8 not null primary key, name text );",
+    `
+CREATE FUNCTION upsert_name(target_id int8, new_name text) RETURNS void AS $$
+  INSERT INTO my_table (id, name) VALUES (target_id, new_name)
+  ON CONFLICT (id) DO UPDATE SET name = new_name
+$$ LANGUAGE sql;
+`,
+  );
+
+  // new_name is used twice: once in VALUES, once in the ON CONFLICT SET
+  // clause. Both occurrences must become the same placeholder, not leave the
+  // second one as a bare (and undefined) column reference.
+  assert.doesNotMatch(generated, /SET name = new_name/);
+  assert.match(generated, /VALUES\s*\(\$1::bigint, \$2::text\)/);
+  assert.match(generated, /SET\s+name = \$2::text/);
+  assert.match(generated, /values: \[args\.target_id, args\.new_name\]/);
+});
+
 test("LANGUAGE plpgsql functions get no caller — a stub that fails to compile instead", () => {
   const generated = generateFunction(
     tableSetup,

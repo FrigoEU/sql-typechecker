@@ -1453,6 +1453,48 @@ function elabInsert(g: Global, c: Context, s: InsertStmt): VoidT | RecordT {
     );
   });
 
+  if (s.onConflictClause) {
+    const oc = s.onConflictClause;
+    const conflictContext: Context = {
+      ...newContext,
+      froms: newContext.froms.concat({
+        name: { name: "excluded" },
+        type: insertingInto.rel,
+      }),
+    };
+
+    if (oc.infer?.whereClause) {
+      elabExpr(g, conflictContext, oc.infer.whereClause);
+    }
+
+    if (oc.action === "ONCONFLICT_UPDATE") {
+      for (const rtNode of oc.targetList || []) {
+        if (!("ResTarget" in rtNode)) continue;
+        const rt = rtNode.ResTarget;
+        const colName: QName = { name: rt.name || "" };
+        const val = rt.val;
+        if (!val) continue;
+        const t = elabExpr(g, conflictContext, val);
+        const field = insertingInto.rel.fields.find(
+          (f) => f.name && eqQNames(f.name, colName),
+        );
+        if (!field) {
+          throw new UnknownField(val, insertingInto.rel, colName);
+        }
+        const simpleT = toSimpleT(t);
+        if (simpleT === null) {
+          throw new KindMismatch(val, t, "");
+        }
+        unifySimplesOrThrow(g, val, field.type, simpleT);
+      }
+
+      if (oc.whereClause) {
+        const whereT = elabExpr(g, conflictContext, oc.whereClause);
+        requireBoolean(oc.whereClause, whereT);
+      }
+    }
+  }
+
   if (s.returningList && s.returningList.length > 0) {
     return {
       kind: "record",

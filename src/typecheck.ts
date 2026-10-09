@@ -2527,7 +2527,54 @@ function doSingleFrom(
         rel: t,
       };
     } else if ("RangeFunction" in f) {
-      return notImplementedYet(f);
+      const rf = f.RangeFunction;
+      const fns = rf.functions || [];
+      if (rf.is_rowsfrom && fns.length > 1) {
+        // ROWS FROM (f(), g()) zips multiple functions into one relation
+        return notImplementedYet(f);
+      }
+      if (rf.ordinality || rf.coldeflist) {
+        return notImplementedYet(f);
+      }
+      if (fns.length !== 1) {
+        return notImplementedYet(f);
+      }
+      // functions is a list of [FuncCall, coldeflist] pairs
+      const fnItem = fns[0];
+      if (!("List" in fnItem)) {
+        return notImplementedYet(f);
+      }
+      const fnCallNode = (fnItem.List.items || [])[0];
+      if (!fnCallNode || !("FuncCall" in fnCallNode)) {
+        return notImplementedYet(f);
+      }
+      // LATERAL is implicit for function calls in FROM, so the args can
+      // reference the froms to the left of this one
+      const t = elabExpr(g, mergeJoined(c, currentJoined), fnCallNode);
+      const colNames = (rf.alias?.colnames || []).map((n: Node): Name =>
+        "String" in n ? { name: n.String.sval || "" } : { name: "" },
+      );
+      // A set-returning function without an alias is referred to by its own
+      // name, both as relation and (for scalar SRFs) as column
+      const fnName = getQNameFromNodes(fnCallNode.FuncCall.funcname || []).name;
+      const relName = rf.alias?.aliasname || fnName;
+      const rel: RecordT =
+        t.kind === "record"
+          ? {
+              kind: "record",
+              fields: t.fields.map((field, i) => ({
+                ...field,
+                name: colNames[i] || field.name,
+              })),
+            }
+          : {
+              kind: "record",
+              fields: [{ name: colNames[0] || { name: relName }, type: t }],
+            };
+      return {
+        name: { name: relName },
+        rel,
+      };
     } else if ("RangeVar" in f) {
       const rv = f.RangeVar;
       const tableName = rangeVarToQName(rv);
@@ -3102,6 +3149,51 @@ function elabCall(g: Global, c: Context, e: Node, fc: FuncCall): Type {
 
   if (eqQNames(funcName, { name: "tsmultirange" })) {
     return BuiltinTypes.TimestampMultiRange;
+  }
+
+  // Set-returning: one text per split part, only useful in FROM
+  if (eqQNames(funcName, { name: "regexp_split_to_table" })) {
+    return unifyOverloadedCall(g, e, funcName, args, argTypes, [
+      {
+        expectedArgs: [BuiltinTypes.Text, BuiltinTypes.Text],
+        returnT: BuiltinTypes.Text,
+      },
+      {
+        expectedArgs: [BuiltinTypes.Text, BuiltinTypes.Text, BuiltinTypes.Text],
+        returnT: BuiltinTypes.Text,
+      },
+    ]);
+  }
+
+  if (eqQNames(funcName, { name: "regexp_split_to_array" })) {
+    return unifyOverloadedCall(g, e, funcName, args, argTypes, [
+      {
+        expectedArgs: [BuiltinTypes.Text, BuiltinTypes.Text],
+        returnT: BuiltinTypeConstructors.Array(BuiltinTypes.Text),
+      },
+      {
+        expectedArgs: [BuiltinTypes.Text, BuiltinTypes.Text, BuiltinTypes.Text],
+        returnT: BuiltinTypeConstructors.Array(BuiltinTypes.Text),
+      },
+    ]);
+  }
+
+  // Set-returning: one row per array element
+  if (eqQNames(funcName, { name: "unnest" })) {
+    if (args.length === 1) {
+      const argT = argTypes[0];
+      const unnullified = argT.kind === "record" ? argT : unnullify(argT);
+      if (unnullified.kind === "array") {
+        return unnullified.typevar;
+      }
+      if (unnullified.kind === "anyscalar") {
+        return AnyScalar;
+      }
+      throw new KindMismatch(args[0], argT, "Expecting an array");
+    } else {
+      // unnest(a, b) in FROM zips arrays into multiple columns
+      throw new InvalidArguments(e, funcName, argTypes);
+    }
   }
 
   if (eqQNames(funcName, { name: "regexp_replace" })) {

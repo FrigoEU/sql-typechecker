@@ -2899,3 +2899,70 @@ $$ LANGUAGE sql;
     "doesnotexist",
   );
 });
+
+test("set-returning function in FROM", () => {
+  expectReturnType(
+    "create table testje ( id int NOT NULL, name text NOT NULL);",
+    `
+CREATE FUNCTION myselect(searchstring text) RETURNS SETOF RECORD AS $$
+  SELECT t.id
+    FROM testje t
+   WHERE NOT EXISTS (
+     SELECT 1
+       FROM regexp_split_to_table(searchstring, '\\s+') AS tok
+      WHERE t.name NOT ILIKE ('%' || tok || '%')
+   )
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [{ name: { name: "id" }, type: BuiltinTypes.Integer }],
+    },
+  );
+});
+
+test("set-returning function in FROM: column named after the function", () => {
+  expectReturnType(
+    "create table testje ( id int NOT NULL);",
+    `
+CREATE FUNCTION myselect(searchstring text) RETURNS SETOF RECORD AS $$
+  SELECT regexp_split_to_table
+    FROM regexp_split_to_table(searchstring, '\\s+')
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [
+        { name: { name: "regexp_split_to_table" }, type: BuiltinTypes.Text },
+      ],
+    },
+  );
+});
+
+test("unnest in FROM is implicitly lateral", () => {
+  expectReturnType(
+    "create table testje ( id int NOT NULL, tags text[] NOT NULL);",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  SELECT tag
+    FROM testje t, unnest(t.tags) AS tag
+$$ LANGUAGE sql;
+`,
+    {
+      kind: "record",
+      fields: [{ name: { name: "tag" }, type: BuiltinTypes.Text }],
+    },
+  );
+});
+
+test("unnest of a non-array errors", () => {
+  expectThrowLike(
+    "create table testje ( id int NOT NULL, name text NOT NULL);",
+    `
+CREATE FUNCTION myselect() RETURNS SETOF RECORD AS $$
+  SELECT name FROM testje t, unnest(t.name) AS name
+$$ LANGUAGE sql;
+`,
+    "array",
+  );
+});
